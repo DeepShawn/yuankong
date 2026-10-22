@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LanCmd</string>
+
+    <string name="status_idle">未连接</string>
+    <string name="sub_idle">正在查找局域网内的电脑…</string>
+    <string name="overlay_connecting">正在连接电脑…</string>
+    <string name="retry_now">立即重连</string>
+
+    <string name="send">发送</string>
+    <string name="more">更多</string>
+    <string name="clear_log">清空日志</string>
+    <string name="history">历史命令</string>
+    <string name="cmd_hint">输入命令，回车执行</string>
+    <string name="shell_cmd">CMD</string>
+    <string name="shell_powershell">PowerShell</string>
+
+    <string name="q_info">信息</string>
+    <string name="q_files">文件</string>
+    <string name="q_ps">进程</string>
+    <string name="q_clip">剪贴板</string>
+    <string name="q_shot">截屏</string>
+    <string name="q_lock">锁屏</string>
+    <string name="q_restart">重启</string>
+    <string name="q_shutdown">关机</string>
+
+    <string name="menu_retry">立即重连</string>
+    <string name="menu_disconnect">断开连接</string>
+    <string name="menu_manual">手动输入 IP</string>
+    <string name="menu_forget">清除配对记录</string>
+    <string name="menu_clear">清空日志</string>
+    <string name="menu_about">关于</string>
+    <string name="send_file">发送文件</string>
+    <string name="menu_send_file">发送文件到电脑</string>
+    <string name="menu_new_folder">新建文件夹</string>
+    <string name="upload_here">上传到此目录</string>
+    <string name="search_process">搜索进程名或 PID</string>
+    <string name="refresh">刷新</string>
+    <string name="sort_memory">按内存</string>
+    <string name="sort_name">按名称</string>
+    <string name="no_process">没有匹配的进程</string>
+    <string name="loading">加载中…</string>
+    <string name="end_process">结束进程</string>
+    <string name="process_title">进程管理</string>
+</resources>
