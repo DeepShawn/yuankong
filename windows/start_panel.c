@@ -23,6 +23,7 @@
 #define ID_AUTORUN  2005
 #define ID_OPEN_DIR 2006
 #define ID_QUIT     2007
+#define ID_FIREWALL 2008
 #define TIMER_REFRESH 1
 
 static HWND g_status = NULL;
@@ -33,6 +34,7 @@ static HWND g_btn_auto = NULL;
 static HFONT g_font = NULL;
 static HFONT g_font_bold = NULL;
 static wchar_t g_dir[MAX_PATH];
+static HWND g_fw = NULL;
 static int g_lastRunning = -1;
 
 static void app_dir(wchar_t *out, size_t cap)
@@ -159,6 +161,65 @@ static void local_ips(wchar_t *out, size_t cap)
     freeaddrinfo(res);
 }
 
+/* 用 netsh 查规则是否存在。只读，不需要管理员。 */
+static int firewall_ok(void)
+{
+    static const wchar_t *names[] = {L"LanCmd-TCP", L"LanCmd-UDP"};
+    int ok = 1;
+    for (int i = 0; i < 2; ++i) {
+        wchar_t cmd[256];
+        _snwprintf(cmd, 255, L"netsh advfirewall firewall show rule name=%s", names[i]);
+        cmd[255] = 0;
+
+        SECURITY_ATTRIBUTES sa;
+        ZeroMemory(&sa, sizeof(sa));
+        sa.nLength = sizeof(sa);
+        sa.bInheritHandle = TRUE;
+
+        HANDLE rd = NULL, wr = NULL;
+        if (!CreatePipe(&rd, &wr, &sa, 0)) { ok = 0; continue; }
+        SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+
+        STARTUPINFOW si;
+        PROCESS_INFORMATION pi;
+        ZeroMemory(&si, sizeof(si));
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+        si.hStdOutput = wr;
+        si.hStdError = wr;
+        si.hStdInput = NULL;
+        si.wShowWindow = SW_HIDE;
+        ZeroMemory(&pi, sizeof(pi));
+
+        wchar_t full[512];
+        _snwprintf(full, 511, L"cmd.exe /c %s", cmd);
+        full[511] = 0;
+
+        if (!CreateProcessW(NULL, full, NULL, NULL, TRUE, CREATE_NO_WINDOW,
+                            NULL, NULL, &si, &pi)) {
+            CloseHandle(rd);
+            CloseHandle(wr);
+            ok = 0;
+            continue;
+        }
+        CloseHandle(wr);
+
+        char buf[4096];
+        DWORD got = 0;
+        if (ReadFile(rd, buf, sizeof(buf) - 1, &got, NULL) && got > 0) {
+            buf[got] = 0;
+            if (!strstr(buf, "4782")) ok = 0;
+        } else {
+            ok = 0;
+        }
+        CloseHandle(rd);
+        WaitForSingleObject(pi.hProcess, 8000);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+    return ok;
+}
+
 static void refresh(void)
 {
     int pid = running_pid();
@@ -267,16 +328,25 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         g_btn_auto = CreateWindowW(L"BUTTON", L"开机自启",
                                    WS_CHILD | WS_VISIBLE | WS_TABSTOP,
                                    246, 124, 102, 36, hwnd, (HMENU)ID_AUTORUN, NULL, NULL);
+        HWND btn_fw = CreateWindowW(L"BUTTON", L"修复防火墙",
+                                    WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                                    18, 172, 130, 32, hwnd, (HMENU)ID_FIREWALL, NULL, NULL);
         HWND btn_open = CreateWindowW(L"BUTTON", L"打开配置目录",
                                       WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                                      18, 172, 130, 32, hwnd, (HMENU)ID_OPEN_DIR, NULL, NULL);
+                                      152, 172, 130, 32, hwnd, (HMENU)ID_OPEN_DIR, NULL, NULL);
         HWND btn_quit = CreateWindowW(L"BUTTON", L"关闭",
                                       WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                                      262, 172, 86, 32, hwnd, (HMENU)ID_QUIT, NULL, NULL);
+                                      286, 172, 82, 32, hwnd, (HMENU)ID_QUIT, NULL, NULL);
+        g_fw = btn_fw;
 
-        HWND all[] = {g_btn_start, g_btn_stop, g_btn_auto, btn_open, btn_quit};
-        for (int i = 0; i < 5; ++i)
+        HWND all[] = {g_btn_start, g_btn_stop, g_btn_auto, btn_open, btn_quit, btn_fw};
+        for (int i = 0; i < 6; ++i)
             SendMessageW(all[i], WM_SETFONT, (WPARAM)g_font, TRUE);
+
+        // 首帧就把防火墙状态反映到按钮上
+        if (!firewall_ok()) {
+            SetWindowTextW(g_fw, L"防火墙未放行 !");
+        }
 
         SetTimer(hwnd, TIMER_REFRESH, 1000, NULL);
         refresh();
@@ -304,6 +374,38 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             auto_start_enabled(cur, MAX_PATH);
             set_autostart(cur[0] ? 0 : 1, detail, 256);
             MessageBoxW(hwnd, detail, L"LanCmd", MB_ICONINFORMATION);
+            return 0;
+        }
+        case ID_FIREWALL: {
+            wchar_t ctl[MAX_PATH];
+            join(ctl, MAX_PATH, g_dir, L"LanCmdCtl.exe");
+            if (GetFileAttributesW(ctl) == INVALID_FILE_ATTRIBUTES) {
+                MessageBoxW(hwnd, L"找不到 LanCmdCtl.exe，无法自动修复。\n"
+                                 L"请以管理员身份手动执行：\n"
+                                 L"netsh advfirewall firewall add rule name=LanCmd-TCP "
+                                 L"dir=in action=allow protocol=TCP localport=47823",
+                            L"LanCmd", MB_ICONWARNING);
+                return 0;
+            }
+            if (MessageBoxW(hwnd,
+                    L"将请求管理员权限，放行 TCP 47823 和 UDP 47824。\n\n"
+                    L"开热点给手机连时必须放行，否则手机连不上。\n继续？",
+                    L"修复防火墙", MB_YESNO | MB_ICONQUESTION) != IDYES) {
+                return 0;
+            }
+            HINSTANCE r = ShellExecuteW(hwnd, L"runas", ctl, L"--fix-firewall",
+                                        g_dir, SW_SHOWNORMAL);
+            if ((INT_PTR)r <= 32) {
+                MessageBoxW(hwnd, L"提权被取消或失败，未能修改防火墙。",
+                            L"LanCmd", MB_ICONWARNING);
+            } else {
+                Sleep(2500);
+                if (firewall_ok()) {
+                    SetWindowTextW(g_fw, L"防火墙已放行");
+                    MessageBoxW(hwnd, L"防火墙已放行 47823/47824，手机现在可以连接了。",
+                                L"LanCmd", MB_ICONINFORMATION);
+                }
+            }
             return 0;
         }
         case ID_OPEN_DIR: {

@@ -80,6 +80,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     private val REQ_NOTIFICATIONS = 100
     private var lastPath = ""
     private var status = Status()
+    private var firewallChecked = false
 
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
@@ -617,6 +618,27 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         }
     }
 
+    /**
+     * 热点场景最常见的失败原因就是电脑防火墙没放行。
+     * 连上之后顺手查一下，没放行就明确告诉用户怎么修。
+     */
+    private fun checkFirewall() {
+        if (!ConnectionManager.onLocalOnlyWifi()) return
+        run("info", JSONObject()) { r ->
+            if (r.optBoolean("firewall_ok", true)) return@run
+            log("⚠ 电脑防火墙未放行 47823/47824", LogKind.ERROR)
+            AlertDialog.Builder(this)
+                .setTitle("电脑防火墙没放行")
+                .setMessage(
+                    "手机连着电脑热点，但电脑防火墙拦住了连接端口。\n\n" +
+                        "在电脑上打开 Start.exe，点「修复防火墙」即可（会请求管理员权限）。\n\n" +
+                        "或者用管理员身份运行：\nLanCmdCtl.exe --fix-firewall"
+                )
+                .setPositiveButton("知道了", null)
+                .show()
+        }
+    }
+
     private fun showProcesses() {
         if (!ConnectionManager.isConnected()) {
             toast("未连接，正在重连…")
@@ -787,6 +809,10 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                     ContextCompat.getColor(this, if (s.latencyMs in 0..80) R.color.accent else R.color.text)
                 )
                 showOverlay(false)
+                if (!firewallChecked) {
+                    firewallChecked = true
+                    checkFirewall()
+                }
             }
             State.CONNECTING -> {
                 dot.setBackgroundResource(R.drawable.dot_wait)

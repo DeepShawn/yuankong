@@ -135,7 +135,13 @@ object Discovery {
         }
     }
 
-    /** 该网络的广播地址：优先用链路地址现算，再补一个全局广播。 */
+    /**
+     * 探测目标 = 广播地址 + 网关单播。
+     *
+     * 关键点：电脑开热点时手机和电脑在同一个虚拟子网里，但 UDP 广播经常被系统丢掉。
+     * 而电脑就是这个子网的网关，所以直接向「网关:47824」单播探测帧，
+     * 接收端在 0.0.0.0 上监听会照常应答 —— 这条路在热点下几乎必然能通。
+     */
     private fun broadcastTargets(cm: ConnectivityManager, network: Network): List<InetAddress> {
         val out = LinkedHashSet<InetAddress>()
         try {
@@ -156,6 +162,16 @@ object Discovery {
                     )))
                 } catch (_: Exception) {
                 }
+            }
+        } catch (_: Exception) {
+        }
+        // 网关单播：热点场景的主力手段
+        try {
+            val lp = cm.getLinkProperties(network)
+            for (route in lp?.routes ?: emptyList()) {
+                if (!route.isDefaultRoute) continue
+                val gw = route.gateway ?: continue
+                if (gw is Inet4Address && !gw.isLoopbackAddress) out.add(gw)
             }
         } catch (_: Exception) {
         }

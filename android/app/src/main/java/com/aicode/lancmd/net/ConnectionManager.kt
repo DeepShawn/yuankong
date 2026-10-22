@@ -326,8 +326,9 @@ object ConnectionManager {
         }
         val cached = last?.let { Resolved(it.host, it.port, it.name, it.agentId) }
         // 电脑开热点时手机连的是它的热点，广播常被系统拦掉，
-        // 但网关就是那台电脑，直接连网关即可
-        if (cached == null || fails >= 2) {
+        // 但网关就是那台电脑，直接连网关即可。
+        // 连着“无互联网 Wi-Fi”基本就是这种场景，第一次就试网关，不用等失败。
+        if (cached == null || fails >= 1 || onLocalOnlyWifi()) {
             gatewayCandidate()?.let { return it }
         }
         return cached
@@ -471,6 +472,28 @@ object ConnectionManager {
             cm.allNetworks.any {
                 cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
             }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 当前是否连着一个「没有互联网」的 Wi-Fi。
+     * 电脑开热点时手机就是这样：连着 Wi-Fi 但上不了网。
+     * 这种情况必须优先走 Wi-Fi，绝不能因为“无网络”退回移动数据。
+     */
+    fun onLocalOnlyWifi(): Boolean {
+        val cm = ctx().getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        return try {
+            for (n in cm.allNetworks) {
+                val caps = cm.getNetworkCapabilities(n) ?: continue
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
+                if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue
+                val hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                if (!hasInternet) return true
+            }
+            false
         } catch (_: Exception) {
             false
         }

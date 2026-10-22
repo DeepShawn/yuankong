@@ -15,3 +15,6 @@ android/keystore.properties
 
 # 产物（改用 GitHub Release 分发，不入库）
 dist/
+
+# 交叉编译中间产物
+windows/build-win/

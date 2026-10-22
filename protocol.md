@@ -41,7 +41,8 @@ UDP 47824 做发现，TCP 47823 做命令。帧 = 一行 UTF-8 JSON，以 `\n` �
 | 场景 | 手机侧 | 电脑侧 |
 |---|---|---|
 | 手机开 VPN | 每个物理 Network 单独 `bindSocket` 后广播，绕开 tun 路由；跳过 `TRANSPORT_VPN` 网络 | — |
-| 电脑开热点 | 广播常被系统拦，改为直连**默认网关**（热点场景网关就是电脑），超时缩短到 2.5s | 热点网卡名（`Wi-Fi Direct`、`本地连接*`）不判为 VPN，正常上报 |
+| 电脑开热点 | 探测帧额外**单播发往默认网关**（热点场景网关即电脑）；连「无互联网 Wi-Fi」时首次即连网关，超时 2.5s | 热点网卡名（`Wi-Fi Direct`、`本地连接*`、`Mobile Hotspot`）不判为 VPN，正常上报 |
+| 电脑开热点 + 防火墙 | — | 必须放行 47823/47824。`--fix-firewall` 或 Start.exe 一键处理（自动提权） |
 | 电脑开 VPN | — | `lan_ips` 排除 tap/tun/wireguard 等网卡，避免手机连到不可达地址 |
 
 识别规则：网卡名含 `tap/tun/vpn/ppp/wireguard/utun/ipsec/zerotier/tailscale/clash` → 判为 VPN 排除；
@@ -107,7 +108,7 @@ token 存 `paired.json`，手机存 SharedPreferences，所以再次连接是静
 
 | cmd | 参数 | 成功返回 |
 |---|---|---|
-| `info` | — | `name host user os arch python agent cpus cwd uptime_s drives[]` |
+| `info` | — | `name host user os arch python agent cpus cwd uptime_s drives[] lan_ips[] hotspot_ips[] interfaces[] firewall_ok admin` |
 | `exec` | `shell`(cmd/powershell/sh) `line` `cwd?` `timeout?` | `code out err ms` |
 | `ls` | `path` | `path parent items[{name,dir,size,mtime}]` |
 | `get` | `path` `max?` | `name path size sha256 data`(base64)，仅限 ≤32MB |
@@ -125,6 +126,9 @@ token 存 `paired.json`，手机存 SharedPreferences，所以再次连接是静
 | `kill` | `pid` `force?` | `pid killed out` |
 | `ping` | — | `ts`(ms) |
 | `agent` | `action`(status/stop) | `name ver uptime_s clients` / `stopping` |
+
+`info` 里 `firewall_ok` 用于让手机判断「连不上是不是防火墙拦的」，
+`interfaces[].vpn/hotspot` 供排查网卡选择问题。
 
 错误码：`1` 一般错误，`2` 超过文件上限，`3` 传输会话不存在/过期，
 `4` 分块序号错乱，`5` 数据超过声明大小，`6` 大小不匹配，`7` sha256 校验失败，

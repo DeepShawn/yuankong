@@ -38,7 +38,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "1.3"
+VERSION = "1.4"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -171,6 +171,93 @@ def machine_id():
         [platform.node(), platform.machine(), str(os.cpu_count() or 0), APP_DIR]
     )
     return hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:10]
+
+
+# ---------------------------------------------------------------- 防火墙
+#
+# 这是「Windows 开热点、手机连不上」的头号原因：
+# 热点网络被系统判为「公用网络」，入站 47823/47824 默认被拦，
+# 而局域网广播又能收到，表现出来就是「能发现但连不上」甚至完全没反应。
+
+FW_RULES = (("LanCmd-TCP", "TCP", "47823"), ("LanCmd-UDP", "UDP", "47824"))
+
+
+def is_admin():
+    if not IS_WIN:
+        return False
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _netsh(args, timeout=15):
+    try:
+        r = subprocess.run(
+            ["netsh"] + args,
+            capture_output=True,
+            timeout=timeout,
+            creationflags=_no_window_flags(),
+        )
+        return r.returncode, decode_bytes(r.stdout + r.stderr)
+    except Exception as e:
+        return 1, str(e)
+
+
+def firewall_status():
+    """返回 {'ok': bool, 'rules': {...}}。只读，不需要管理员。"""
+    if not IS_WIN:
+        return {"ok": True, "rules": {}, "supported": False}
+    rules = {}
+    for name, proto, port in FW_RULES:
+        rc, out = _netsh(["advfirewall", "firewall", "show", "rule", "name=%s" % name])
+        rules[name] = rc == 0 and "4782" in out
+    return {"ok": all(rules.values()), "rules": rules, "supported": True}
+
+
+def firewall_fix(remove=False):
+    """添加/删除入站放行规则。需要管理员权限。"""
+    if not IS_WIN:
+        return {"ok": False, "error": "仅支持 Windows"}
+    if not is_admin():
+        return {"ok": False, "error": "需要管理员权限", "need_admin": True}
+
+    results = []
+    for name, proto, port in FW_RULES:
+        _netsh(["advfirewall", "firewall", "delete", "rule", "name=%s" % name])
+        if remove:
+            results.append("%s 已移除" % name)
+            continue
+        rc, out = _netsh([
+            "advfirewall", "firewall", "add", "rule",
+            "name=%s" % name,
+            "dir=in",
+            "action=allow",
+            "protocol=%s" % proto,
+            "localport=%s" % port,
+            "profile=any",
+            "enable=yes",
+        ])
+        results.append("%s %s" % (name, "OK" if rc == 0 else "失败: %s" % out.strip()))
+        log.info("防火墙规则 %s: %s", name, "OK" if rc == 0 else out.strip())
+
+    status = firewall_status()
+    return {"ok": status["ok"], "detail": results, "status": status}
+
+
+def _elevate_self(args):
+    """以管理员身份重新运行自己处理防火墙。"""
+    try:
+        if getattr(sys, "frozen", False):
+            exe, params = sys.executable, " ".join(args)
+        else:
+            exe = sys.executable
+            params = '"%s" %s' % (os.path.abspath(__file__), " ".join(args))
+        rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
+        return rc > 32
+    except Exception as e:
+        log.warning("提权失败: %s", e)
+        return False
 
 
 # 真 VPN：这类网卡有地址但到不了局域网，广播走它们必然失败，要排除
@@ -394,6 +481,8 @@ def cmd_info():
         "lan_ips": lan_ips(),
         "hotspot_ips": hotspot_ips(),
         "interfaces": list_ipv4_interfaces(),
+        "firewall_ok": firewall_status()["ok"],
+        "admin": is_admin(),
     }
 
 
@@ -1561,6 +1650,9 @@ USAGE = r"""LanCmd Agent v%s
     LanCmdCtl.exe --status               查看运行状态、端口、已配对设备
     LanCmdCtl.exe --stop                 停止接收端
     LanCmdCtl.exe --reset-pairing        清除所有已配对设备
+    LanCmdCtl.exe --firewall-status      检查防火墙是否放行 47823/47824
+    LanCmdCtl.exe --fix-firewall         放行端口（需管理员，会自动提权）
+    LanCmdCtl.exe --remove-firewall      移除放行规则
     LanCmdCtl.exe --install-autostart    加入开机自启（注册表 HKCU\...\Run）
     LanCmdCtl.exe --uninstall-autostart  取消开机自启
     LanCmdCtl.exe --auto-accept          开启免确认模式（写配置后退出）
@@ -1601,6 +1693,34 @@ def main(argv):
         return do_stop()
     if "--reset-pairing" in argv:
         return do_reset_pairing()
+    if "--fix-firewall" in argv:
+        r = firewall_fix()
+        if r.get("need_admin"):
+            print("需要管理员权限，正在尝试提权…")
+            if _elevate_self(["--fix-firewall"]):
+                return 0
+            print("提权被取消。请右键以管理员身份运行，或手动执行：")
+            print("  netsh advfirewall firewall add rule name=LanCmd-TCP dir=in action=allow protocol=TCP localport=47823")
+            print("  netsh advfirewall firewall add rule name=LanCmd-UDP dir=in action=allow protocol=UDP localport=47824")
+            return 1
+        for line in r.get("detail", []):
+            print(" ", line)
+        print("防火墙:", "已放行" if r.get("ok") else "仍未放行")
+        return 0 if r.get("ok") else 1
+    if "--remove-firewall" in argv:
+        r = firewall_fix(remove=True)
+        for line in r.get("detail", []):
+            print(" ", line)
+        return 0
+    if "--firewall-status" in argv:
+        st = firewall_status()
+        print("防火墙放行:", "是" if st["ok"] else "否")
+        for name, ok in st.get("rules", {}).items():
+            print("  %-14s %s" % (name, "已放行" if ok else "未放行"))
+        if not st["ok"]:
+            print("\n修复：LanCmdCtl.exe --fix-firewall （需要管理员）")
+        return 0 if st["ok"] else 1
+
     if "--install-autostart" in argv:
         return do_install_autostart()
     if "--uninstall-autostart" in argv:
@@ -1625,6 +1745,16 @@ def main(argv):
     if console:
         print("LanCmd 接收端已启动：TCP %s  UDP %s  免确认=%s"
               % (cfg["port"], cfg["discovery_port"], cfg["auto_accept"]))
+
+    # 起步先看一眼防火墙：热点/USB 共享场景下这是最常见的“连不上”原因
+    fw = firewall_status()
+    if fw.get("supported") and not fw["ok"]:
+        log.warning("防火墙未放行 47823/47824，手机可能连不上（尤其开热点时）")
+        if console:
+            print("提示：防火墙未放行 47823/47824。")
+            print("      手机连不上时，用管理员身份执行：LanCmdCtl.exe --fix-firewall")
+    elif fw.get("supported"):
+        log.info("防火墙规则已放行")
 
     sup = Supervisor(cfg)
     sup.spawn("tcp", tcp_server)
