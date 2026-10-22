@@ -86,7 +86,14 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        try {
+            setContentView(R.layout.activity_main)
+        } catch (t: Throwable) {
+            // 布局加载失败（主题/资源异常）是最典型的启动即崩原因
+            android.util.Log.e("LanCmd", "布局加载失败", t)
+            finish()
+            return
+        }
 
         tvName = findViewById(R.id.tvName)
         tvSub = findViewById(R.id.tvSub)
@@ -107,8 +114,12 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             if (isChecked) prefsShell = if (checkedId == R.id.btnShellPs) "powershell" else "cmd"
         }
 
-        buildActions()
-        wireInput()
+        try {
+            buildActions()
+            wireInput()
+        } catch (t: Throwable) {
+            android.util.Log.e("LanCmd", "初始化失败", t)
+        }
 
         findViewById<View>(R.id.btnMore).setOnClickListener { showMenu(it) }
         btnRetry.setOnClickListener {
@@ -121,7 +132,11 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         uploadDir = Prefs.uploadDir(this)
 
         ConnectionManager.addListener(this)
-        render(ConnectionManager.snapshot())
+        try {
+            render(ConnectionManager.snapshot())
+        } catch (t: Throwable) {
+            android.util.Log.e("LanCmd", "首帧刷新失败", t)
+        }
         requestNotificationPermission()
     }
 
@@ -636,19 +651,25 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
      * 连上之后顺手查一下，没放行就明确告诉用户怎么修。
      */
     private fun checkFirewall() {
-        if (!ConnectionManager.onLocalOnlyWifi()) return
+        // 这一步在连接成功的回调里跑，任何异常都会变成闪退，全程兜底
+        try {
+            if (!ConnectionManager.onLocalOnlyWifi()) return
+        } catch (t: Throwable) {
+            android.util.Log.w("LanCmd", "网络状态检查失败: " + t.message, t)
+            return
+        }
         run("info", JSONObject()) { r ->
             if (r.optBoolean("firewall_ok", true)) return@run
             log("⚠ 电脑防火墙未放行 47823/47824", LogKind.ERROR)
-            AlertDialog.Builder(this)
-                .setTitle("电脑防火墙没放行")
-                .setMessage(
-                    "手机连着电脑热点，但电脑防火墙拦住了连接端口。\n\n" +
-                        "在电脑上打开 Start.exe，点「修复防火墙」即可（会请求管理员权限）。\n\n" +
-                        "或者用管理员身份运行：\nLanCmdCtl.exe --fix-firewall"
-                )
-                .setPositiveButton("知道了", null)
-                .show()
+            safeDialog {
+                setTitle("电脑防火墙没放行")
+                    .setMessage(
+                        "手机连着电脑热点，但电脑防火墙拦住了连接端口。\n\n" +
+                            "在电脑上打开 Start.exe，点「修复防火墙」即可（会请求管理员权限）。\n\n" +
+                            "或者用管理员身份运行：\nLanCmdCtl.exe --fix-firewall"
+                    )
+                    .setPositiveButton("知道了", null)
+            }
         }
     }
 
@@ -730,7 +751,8 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         popup.menu.add(0, 4, 3, getString(R.string.menu_forget))
         popup.menu.add(0, 5, 4, getString(R.string.menu_clear))
         popup.menu.add(0, 6, 5, getString(R.string.menu_about))
-        popup.menu.add(0, 8, 6, getString(R.string.menu_send_file))
+        popup.menu.add(0, 9, 6, "查看崩溃日志")
+        popup.menu.add(0, 8, 7, getString(R.string.menu_send_file))
         popup.menu.add(0, 7, 7, if (LanCmdService.isRunning) "关闭后台常驻" else "开启后台常驻")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
@@ -748,6 +770,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                 6 -> about()
                 7 -> toggleResident()
                 8 -> startPickFiles()
+                9 -> showCrashLog()
             }
             true
         }
@@ -784,6 +807,33 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         }
     }
 
+    /** 把最近一次崩溃连同设备信息展示出来，便于反馈问题。 */
+    private fun showCrashLog() {
+        val text = CrashLog.latest(this)
+        if (text.isNullOrBlank()) {
+            safeDialog {
+                setTitle("崩溃日志")
+                    .setMessage("没有记录到崩溃。\n\n如果 App 刚才异常退出过，重新打开后这里会出现记录。")
+                    .setPositiveButton("好", null)
+            }
+            return
+        }
+        val tv = TextView(this).apply {
+            this.text = text
+            textSize = 10.5f
+            setTextIsSelectable(true)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            typeface = android.graphics.Typeface.MONOSPACE
+        }
+        val sv = android.widget.ScrollView(this).apply { addView(tv) }
+        safeDialog {
+            setTitle("最近一次崩溃")
+                .setView(sv)
+                .setPositiveButton("好", null)
+                .setNegativeButton("清除记录") { _, _ -> CrashLog.clear(this@MainActivity) }
+        }
+    }
+
     private fun about() {
         AlertDialog.Builder(this)
             .setTitle("LanCmd 1.0")
@@ -810,6 +860,16 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     }
 
     private fun render(s: Status) {
+        // render 是主线程回调，一旦抛异常就是闪退；出问题也要保住界面可用
+        try {
+            renderInner(s)
+        } catch (t: Throwable) {
+            android.util.Log.e("LanCmd", "界面刷新失败: " + t.message, t)
+        }
+    }
+
+    private fun renderInner(s: Status) {
+        if (!alive()) return
         val connected = s.state == State.CONNECTED
         when (s.state) {
             State.CONNECTED -> {
@@ -908,6 +968,22 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
 
     private fun note(text: String) {
         log(text, LogKind.INFO)
+    }
+
+    /** Activity 还活着才能操作 UI / 弹窗，否则会抛 BadTokenException 直接闪退。 */
+    private fun alive(): Boolean = !isFinishing && !isDestroyed
+
+    /**
+     * 安全弹窗：生命周期已结束时静默丢弃，绝不抛异常。
+     * 连接成功/失败的回调是异步的，用户完全可能在这期间退出界面。
+     */
+    private fun safeDialog(build: AlertDialog.Builder.() -> AlertDialog.Builder) {
+        if (!alive()) return
+        try {
+            build(AlertDialog.Builder(this)).show()
+        } catch (t: Throwable) {
+            android.util.Log.e("LanCmd", "弹窗失败: " + t.message, t)
+        }
     }
 
     private fun dialog(title: String, message: String) {

@@ -20,8 +20,8 @@ android {
         applicationId = "com.aicode.lancmd"
         minSdk = 24
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.4.2"
+        versionCode = 7
+        versionName = "1.4.3"
 
         ndk {
             // 目标机型为 arm64-v8a；当前无 JNI 代码，APK 在任意 ABI 上都能装
@@ -75,6 +75,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
     testImplementation("junit:junit:4.13.2")
+
     testImplementation("org.json:json:20240303")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
 }

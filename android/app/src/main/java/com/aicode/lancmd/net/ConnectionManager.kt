@@ -462,11 +462,14 @@ object ConnectionManager {
 
     // ---------------------------------------------------------------- 工具
 
-    private fun ctx(): Context = appCtx ?: throw IllegalStateException("ConnectionManager 未初始化")
+    private fun ctxOrNull(): Context? = appCtx
+
+    private fun ctx(): Context = ctxOrNull()
+        ?: throw IllegalStateException("ConnectionManager 未初始化")
 
     /** 有 VPN 在跑时，默认路由会被它接管，必须显式绑定物理网卡。 */
     fun vpnActive(): Boolean {
-        val cm = ctx().getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val cm = ctxOrNull()?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return false
         return try {
             cm.allNetworks.any {
@@ -483,7 +486,7 @@ object ConnectionManager {
      * 这种情况必须优先走 Wi-Fi，绝不能因为“无网络”退回移动数据。
      */
     fun onLocalOnlyWifi(): Boolean {
-        val cm = ctx().getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val cm = ctxOrNull()?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return false
         return try {
             for (n in cm.allNetworks) {
@@ -525,13 +528,26 @@ object ConnectionManager {
     private fun publish(next: Status) {
         status = next
         main.post {
-            for (l in listeners) l.onStatus(next)
+            // 单个 listener 抛异常不能连累其他 listener，更不能把主线程带崩
+            for (l in listeners) {
+                try {
+                    l.onStatus(next)
+                } catch (t: Throwable) {
+                    android.util.Log.e("LanCmd", "onStatus 失败: " + t.message, t)
+                }
+            }
         }
     }
 
     private fun event(text: String, kind: LogKind) {
         main.post {
-            for (l in listeners) l.onEvent(text, kind)
+            for (l in listeners) {
+                try {
+                    l.onEvent(text, kind)
+                } catch (t: Throwable) {
+                    android.util.Log.e("LanCmd", "onEvent 失败: " + t.message, t)
+                }
+            }
         }
     }
 

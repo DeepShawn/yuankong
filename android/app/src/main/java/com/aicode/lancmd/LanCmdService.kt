@@ -37,7 +37,11 @@ class LanCmdService : Service(), ConnectionManager.Listener {
                 } else {
                     ctx.startService(intent)
                 }
-            } catch (_: Exception) {
+            } catch (t: Throwable) {
+                // Android 12+ 在后台启动前台服务会抛
+                // ForegroundServiceStartNotAllowedException；部分 ROM 直接抛 SecurityException。
+                // 这里吞掉是刻意为之：保活失败可以接受，闪退不行。
+                android.util.Log.w("LanCmd", "前台服务启动被拒绝: " + t.javaClass.simpleName)
             }
         }
 
@@ -58,13 +62,32 @@ class LanCmdService : Service(), ConnectionManager.Listener {
         createChannel()
         ConnectionManager.addListener(this)
         ConnectionManager.start(this)
-        startForeground(NOTIF_ID, buildNotification(lastText))
+        if (!promoteToForeground()) {
+            // 无法成为前台服务就自我了断，避免占用 Service 又被系统判为 ANR
+            stopSelf()
+            return
+        }
         isRunning = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIF_ID, buildNotification(lastText))
+        if (!promoteToForeground()) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_STICKY
+    }
+
+    /**
+     * startForeground 在 Android 12+ 可能抛 ForegroundServiceStartNotAllowedException，
+     * Android 14+ 还要求先满足前台服务类型的前置条件，失败都会让进程直接崩溃。
+     */
+    private fun promoteToForeground(): Boolean = try {
+        startForeground(NOTIF_ID, buildNotification(lastText))
+        true
+    } catch (t: Throwable) {
+        android.util.Log.w("LanCmd", "startForeground 失败: " + t.javaClass.simpleName)
+        false
     }
 
     /**
@@ -78,9 +101,8 @@ class LanCmdService : Service(), ConnectionManager.Listener {
 
     override fun onTimeout(startId: Int, fgsType: Int) {
         lastText = "后台保活已达系统时限，连接可能被挂起"
-        val nm = getSystemService(NOTIFICATION_SERVICE) as? NotificationManager
-        nm?.notify(NOTIF_ID, buildNotification(lastText))
-        stopForeground(STOP_FOREGROUND_DETACH)
+        postNotification()
+        runCatching { stopForeground(STOP_FOREGROUND_DETACH) }
         isRunning = false
         // 连接本身不动：App 在前台时照常可用，用户可手动重开保活
     }
@@ -99,14 +121,19 @@ class LanCmdService : Service(), ConnectionManager.Listener {
             State.STOPPED -> "已断开"
             State.IDLE -> "正在查找电脑…"
         }
-        val nm = getSystemService(NOTIFICATION_SERVICE) as? NotificationManager
-        nm?.notify(NOTIF_ID, buildNotification(lastText))
+        postNotification()
     }
 
     override fun onEvent(text: String, kind: LogKind) {
-        if (kind == LogKind.ERROR) {
-            val nm = getSystemService(NOTIFICATION_SERVICE) as? NotificationManager
-            nm?.notify(NOTIF_ID, buildNotification(lastText))
+        if (kind == LogKind.ERROR) postNotification()
+    }
+
+    private fun postNotification() {
+        try {
+            val nm = getSystemService(NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            nm.notify(NOTIF_ID, buildNotification(lastText))
+        } catch (t: Throwable) {
+            android.util.Log.w("LanCmd", "通知更新失败: " + t.javaClass.simpleName)
         }
     }
 

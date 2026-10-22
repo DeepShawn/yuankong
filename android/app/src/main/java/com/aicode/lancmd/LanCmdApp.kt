@@ -7,6 +7,8 @@ import com.aicode.lancmd.net.ConnectionManager
 class LanCmdApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        // 最先安装，后续任何崩溃都能留下记录
+        CrashLog.install(this)
         ConnectionManager.start(this)
         // 常驻前台服务，避免后台被冻结导致掉线
         LanCmdService.start(this)
