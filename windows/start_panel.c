@@ -25,6 +25,7 @@
 #define ID_QUIT     2007
 #define ID_FIREWALL 2008
 #define TIMER_REFRESH 1
+#define WM_APP_FWCHECK  (WM_APP + 1)
 
 static HWND g_status = NULL;
 static HWND g_ipinfo = NULL;
@@ -220,6 +221,19 @@ static int firewall_ok(void)
     return ok;
 }
 
+/*
+ * 防火墙检测要起 cmd.exe + netsh，单次可能几百毫秒。
+ * 绝不能放在 WM_CREATE 里同步跑，否则窗口要等检测完才显示出来，
+ * 双击后像“没反应”。这里丢到后台线程，查完再 PostMessage 回来。
+ */
+static DWORD WINAPI fw_thread(LPVOID param)
+{
+    HWND hwnd = (HWND)param;
+    int ok = firewall_ok();
+    PostMessageW(hwnd, WM_APP_FWCHECK, (WPARAM)ok, 0);
+    return 0;
+}
+
 static void refresh(void)
 {
     int pid = running_pid();
@@ -343,15 +357,20 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         for (int i = 0; i < 6; ++i)
             SendMessageW(all[i], WM_SETFONT, (WPARAM)g_font, TRUE);
 
-        // 首帧就把防火墙状态反映到按钮上
-        if (!firewall_ok()) {
-            SetWindowTextW(g_fw, L"防火墙未放行 !");
-        }
+        // 防火墙状态异步查，不阻塞窗口显示
+        SetWindowTextW(g_fw, L"检查防火墙…");
+        HANDLE t = CreateThread(NULL, 0, fw_thread, (LPVOID)hwnd, 0, NULL);
+        if (t) CloseHandle(t);
 
         SetTimer(hwnd, TIMER_REFRESH, 1000, NULL);
         refresh();
         return 0;
     }
+    case WM_APP_FWCHECK:
+        if (g_fw) {
+            SetWindowTextW(g_fw, wp ? L"防火墙已放行" : L"修复防火墙 !");
+        }
+        return 0;
     case WM_TIMER:
         if (wp == TIMER_REFRESH) {
             int pid = running_pid();
