@@ -1,6 +1,6 @@
 # LanCmd — 局域网命令控制（安卓 → Windows）
 
-手机在同一个 Wi-Fi 下直接控制电脑：执行命令、看文件、截屏、锁屏、剪贴板、开关机。
+手机在同一个局域网下直接控制电脑：执行命令、看文件、截屏、锁屏、剪贴板、开关机。
 电脑端是后台静默接收程序（无窗口），**一直在线**；手机端开机即自动发现、**不用输连接码**、
 **掉线自动重连**。
 
@@ -21,10 +21,14 @@
 
 需要 Python 3.8+（安装时勾选 *Add Python to PATH*）。把 `windows/` 整个目录拷到电脑上：
 
-- **静默启动（无窗口）**：双击 `start_hidden.vbs`
-- **前台调试（能看日志）**：双击 `start_console.bat`
-- **开机自启**：双击 `install_autostart.bat`（写 HKCU Run，不需要管理员权限）
-- **查看状态 / 停止**：`status.bat` / `stop_agent.bat`
+- **双击 `Start.exe`** ← 推荐。弹出小面板，能看见运行状态，一键启动/停止/开机自启。
+
+也可以：
+
+- **双击 `start.bat`**：命令行方式，显示启动结果后自动结束
+- **双击 `LanCmdAgent.exe`**：直接静默运行，无任何提示
+- **前台调试（看日志）**：`start_console.bat`
+- **开机自启**：`install_autostart.bat`，或在 `Start.exe` 里点「开机自启」
 
 启动后电脑不弹任何窗口，只在任务管理器里有一个 `pythonw.exe` 进程。
 配置与日志在 `%APPDATA%\LanCmd\`（`agent.json`、`agent.log`、`paired.json`）。
@@ -40,10 +44,10 @@ python lan_command_agent.py --auto-accept
 
 ### 2. 手机端（Android 7.0+，arm64-v8a）
 
-安装 `dist/LanCmd-1.2.apk`：
+安装 `dist/LanCmd-1.3.apk`：
 
 ```bash
-adb install -r dist/LanCmd-1.2.apk
+adb install -r dist/LanCmd-1.3.apk
 ```
 
 打开 App 自动扫描并连上唯一的那台电脑；有多台时弹列表让你选。
@@ -108,6 +112,50 @@ App 启动即拉起一个前台服务（最低优先级通知、无声音无振�
 避免 Android 把后台长连接冻结。常驻通知只显示一行当前状态（如 `DESKTOP-8K2 · 192.168.1.10`）。
 
 不想常驻可在 `⋮` →「关闭后台常驻」；关闭后 App 退到后台可能被系统挂起。
+
+---
+
+## 三·四、网络环境：VPN 和热点
+
+### 手机开 VPN 也能用
+
+VPN 开着时，系统默认路由指向 tun 网卡，普通 socket 的 UDP 广播会从 VPN 发出去，
+结果就是「电脑明明在线却扫不到」。这个版本改了发现逻辑：
+
+- 枚举所有 `Network`，**跳过 VPN 类型的网络**
+- 每个 Wi-Fi / 以太网网络单独建 socket 并 `bindSocket`，保证广播从物理网卡出去
+- 广播目标用该网络的链路地址现算（`IP | ~mask`），不只依赖 `255.255.255.255`
+- 多个网卡并行探测，不互相拖慢
+
+TCP 连接同样会绑定到物理网络，避免握手包被送进 VPN 隧道。
+
+万一还是不通，界面上会提示「检测到 VPN」。此时把 VPN 客户端里的
+**局域网直连白名单**打开（绕过 VPN 走本地），或者临时关掉 VPN。
+
+### 电脑开热点也能用
+
+Windows 开移动热点后，手机连上热点，此时**手机看到的网关就是那台电脑**（通常 `192.168.137.1`）。
+
+热点场景下 UDP 广播经常被系统拦掉，所以加了一条兜底路径：
+
+> 广播没结果、或连续失败 2 次 → 直接拿当前网络的**默认网关**当电脑去连
+
+网关探测用 2.5s 短超时（普通连接 6s），不会拖慢正常流程。
+连上之后记住这个地址，后续自动重连照常用。
+
+电脑端也会识别热点网卡（`Wi-Fi Direct`、`本地连接*`、`Mobile Hotspot`），
+不会把它误判成 VPN 排除掉。
+
+### 多网卡时自动挑对地址
+
+一台电脑可能同时有 Wi-Fi、热点、VPN 好几块网卡。接收端在发现应答里会带上全部地址，
+手机按这个顺序挑：
+
+1. 与手机当前网络**同网段**的地址
+2. 与应答源地址相同的
+3. 列表第一个
+
+选不到的地址会自动换下一个重试。这一步避免了「能发现但连不上」。
 
 ---
 
@@ -194,7 +242,9 @@ App 启动即拉起一个前台服务（最低优先级通知、无声音无振�
 
 ```
 LanCmd-Windows/
-├── LanCmdAgent.exe        主程序（29KB，无控制台窗口）
+├── Start.exe              启动面板（72KB，双击就用这个）
+├── start.bat              命令行启动
+├── LanCmdAgent.exe        接收端本体（29KB，无控制台窗口）
 ├── LanCmdCtl.exe          管理工具（53KB，有输出）
 ├── lan_command_agent.py   主逻辑，不要删
 ├── python/                自带的 Python 3.11 运行时
@@ -202,7 +252,10 @@ LanCmd-Windows/
 ```
 
 ```bat
+Start.exe                                 :: 面板启动（推荐）
+start.bat                                 :: 命令行启动
 LanCmdAgent.exe                           :: 静默启动（无窗口）
+
 LanCmdCtl.exe --install-autostart         :: 开机自启
 LanCmdCtl.exe --status                    :: 查状态
 LanCmdCtl.exe --stop                      :: 停止
@@ -278,7 +331,10 @@ lan-cmd/
 │   ├── install_autostart.bat      开机自启（HKCU）
 │   ├── uninstall_autostart.bat    取消自启
 │   ├── status.bat / stop_agent.bat
-│   ├── launcher.c                 Windows exe 启动器（窗口/控制台两版共用）
+│   ├── launcher.c                 接收端/管理工具启动器（两版共用）
+│   ├── start_panel.c              Start.exe 面板源码
+│   ├── start.bat                  命令行启动
+│   ├── start_hidden.vbs           无窗口启动（源码方式）
 │   ├── lancmd.rc                  exe 资源：图标 + 中文版本信息
 │   ├── build_windows_exe.sh       Linux/容器内交叉编译，产出 dist/*.zip
 │   ├── build_exe.bat              在 Windows 上用 PyInstaller 打包（备选）
@@ -315,6 +371,9 @@ lan-cmd/
   连续心跳、1.2MB 分块上传下载回环、进程列表与自身保护
 - 布局/资源 33 个 ID 与代码引用 100% 对应，drawable 与 string 无缺失
 - APK `apksigner verify` 通过（v2 签名，minSdk 24 原生支持）
+- v1.3 网络改动：发现应答含 `lan_ips`/`ips`/`hotspot_ips`；`info` 的网卡带 `vpn`/`hotspot` 标记；
+  网卡分类实测（`WireGuard Tunnel`/`TAP-Windows` → VPN 排除，`本地连接*`/`Wi-Fi Direct` → 热点保留，
+  `WLAN`/`VMware` → 普通保留）；三套协议测试仍全过
 
 **未验证**：真机/模拟器上的视觉渲染与前台服务行为（容器内无 Android 运行时）。
 
@@ -324,7 +383,11 @@ lan-cmd/
 
 - **只有电脑端能“隐藏”**：`start_hidden.vbs` / exe 不显示窗口，但进程仍在任务管理器可见；
   安卓端是正常可见的 App（外加一条低优先级常驻通知）。没有做进程名伪装、没有反卸载/守护。
-- **同一局域网**：依赖 UDP 广播，跨网段/开了 AP 隔离的 Wi-Fi 发现不到，此时用“手动输入 IP”。
+- **同一局域网**：优先靠 UDP 广播。跨网段、开了 AP 隔离的 Wi-Fi 发现不到，此时用“手动输入 IP”。
+  VPN 与电脑热点场景已单独处理（见三·四节），但**手机连 VPN 且 VPN 客户端强制全局代理时**，
+  局域网流量仍可能被劫持，需要在 VPN 里配置绕过规则。
+- **热点模式下手机走移动数据会失效**：连电脑热点时手机通常没有互联网，属正常现象；
+  如果系统自动切回移动数据，会连不上，需要在 Wi-Fi 设置里关掉“自动切换”。
 - **传输未加密**：JSON 明文 + token 明文的 TCP，仅适用于你信任的家庭/办公局域网。
 - **默认要一次人工确认**：防止同网段其他设备随手连上来。确认一次后永久免确认，
   想零确认用 `--auto-accept`（等于对同网段完全敞开）。

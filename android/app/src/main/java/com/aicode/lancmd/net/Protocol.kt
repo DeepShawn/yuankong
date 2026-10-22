@@ -11,8 +11,12 @@ data class AgentInfo(
     val port: Int,
     val os: String,
     val autoAccept: Boolean,
-    val id: String = ""
-)
+    val id: String = "",
+    /** 同一台电脑的其他网卡地址，首选地址连不上时可以逐个重试。 */
+    val altIps: List<String> = emptyList()
+) {
+    fun allIps(): List<String> = (listOf(ip) + altIps).distinct()
+}
 
 /** 依据基准路径判断分隔符，兼容 Windows 与类 Unix 接收端。 */
 fun joinPath(base: String, name: String): String {

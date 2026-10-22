@@ -26,6 +26,7 @@ import logging
 import logging.handlers
 import os
 import platform
+import re
 import secrets
 import shutil
 import signal
@@ -37,7 +38,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "1.2"
+VERSION = "1.3"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -172,6 +173,117 @@ def machine_id():
     return hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:10]
 
 
+# 真 VPN：这类网卡有地址但到不了局域网，广播走它们必然失败，要排除
+VPN_HINTS = ("tap", "tun", "vpn", "ppp", "wireguard", "utun", "ipsec",
+             "zerotier", "tailscale", "clash", "sing-box", "singbox", "openvpn",
+             "wireguard", "softether", "hamachi", "radmin")
+
+# 开热点后 Windows 会多出这类网卡，它就是手机看到的“网关”，必须保留
+HOTSPOT_HINTS = ("wi-fi direct", "wifi direct", "本地连接*", "local area connection*",
+                 "mobile hotspot", "移动热点")
+
+
+def _is_vpn_name(name):
+    low = (name or "").lower()
+    return any(h in low for h in VPN_HINTS)
+
+
+def _is_hotspot_name(name):
+    low = (name or "").lower()
+    return any(h in low for h in HOTSPOT_HINTS)
+
+
+def list_ipv4_interfaces():
+    """返回 [{ip, adapter, virtual}]。
+
+    VPN/虚拟网卡单独标记：它们通常有地址但到不了局域网，
+    广播若走它们就会“发现了却连不上”。
+    """
+    items = []
+    if IS_WIN:
+        try:
+            r = subprocess.run(
+                ["ipconfig"],
+                capture_output=True,
+                timeout=8,
+                creationflags=_no_window_flags(),
+            )
+            text = decode_bytes(r.stdout)
+        except Exception:
+            text = ""
+        adapter = ""
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            low = line.lower()
+            if low.startswith("adapter") or "适配器" in line:
+                adapter = line.rstrip(":").split(":")[-1].strip()
+            m = re.search(r"ipv4[^:]*:\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})", low)
+            if m:
+                ip = m.group(1)
+                if ip.startswith("127.") or ip.startswith("169.254."):
+                    continue
+                items.append({
+                    "ip": ip,
+                    "adapter": adapter or "unknown",
+                    "vpn": _is_vpn_name(adapter),
+                    "hotspot": _is_hotspot_name(adapter),
+                })
+    else:
+        try:
+            r = subprocess.run(
+                ["ip", "-4", "-o", "addr", "show"], capture_output=True, timeout=8
+            )
+            for line in decode_bytes(r.stdout).splitlines():
+                m = re.search(r"\d+:\s+(\S+).*?inet\s+([0-9.]+)/", line)
+                if not m:
+                    continue
+                name, ip = m.group(1), m.group(2)
+                if ip.startswith("127.") or ip.startswith("169.254."):
+                    continue
+                items.append({
+                    "ip": ip,
+                    "adapter": name,
+                    "vpn": _is_vpn_name(name),
+                    "hotspot": _is_hotspot_name(name),
+                })
+        except Exception:
+            pass
+
+    if not items:
+        # 兜底：靠默认路由探测出口地址
+        try:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                probe.connect(("8.8.8.8", 53))
+                ip = probe.getsockname()[0]
+            finally:
+                probe.close()
+            if ip and not ip.startswith("127."):
+                items.append({"ip": ip, "adapter": "default", "vpn": False, "hotspot": False})
+        except Exception:
+            pass
+
+    # 去重（同一 IP 可能被多个适配器报告）
+    seen, out = set(), []
+    for it in items:
+        if it["ip"] in seen:
+            continue
+        seen.add(it["ip"])
+        out.append(it)
+    return out
+
+
+def lan_ips(include_virtual=False):
+    return [i["ip"] for i in list_ipv4_interfaces() if include_virtual or not i["vpn"]]
+
+
+def hotspot_ips():
+    """Windows 开热点时手机侧的“网关”地址，通常是 192.168.137.1。"""
+    return [i["ip"] for i in list_ipv4_interfaces() if i.get("hotspot")]
+
+
 def human_size(n):
     units = ["B", "KB", "MB", "GB", "TB"]
     f = float(n)
@@ -279,6 +391,9 @@ def cmd_info():
         "cwd": os.getcwd(),
         "uptime_s": int(uptime) if uptime else None,
         "drives": _drives(),
+        "lan_ips": lan_ips(),
+        "hotspot_ips": hotspot_ips(),
+        "interfaces": list_ipv4_interfaces(),
     }
 
 
@@ -1225,6 +1340,9 @@ def udp_responder(cfg):
             "ver": VERSION,
             "id": machine_id(),
             "auto_accept": bool(cfg.get("auto_accept")),
+            "ips": lan_ips(include_virtual=True),
+            "lan_ips": lan_ips(),
+            "hotspot_ips": hotspot_ips(),
         }
         try:
             s.sendto(json.dumps(reply, ensure_ascii=False).encode("utf-8"), addr)

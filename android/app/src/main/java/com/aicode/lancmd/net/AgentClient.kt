@@ -1,5 +1,6 @@
 package com.aicode.lancmd.net
 
+import android.net.Network
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
@@ -31,8 +32,18 @@ class AgentClient(val host: String, val port: Int) {
     @Volatile
     var onClosed: ((String) -> Unit)? = null
 
-    fun connect(timeoutMs: Int = 6000) {
+    /**
+     * @param via 绑定到指定网络（通常是 Wi-Fi）。VPN 开启时系统默认路由指向 tun，
+     *            不绑定就会把 TCP 也送进 VPN，导致连不上电脑。
+     */
+    fun connect(timeoutMs: Int = 6000, via: Network? = null) {
         val s = Socket()
+        if (via != null) {
+            try {
+                via.bindSocket(s)
+            } catch (_: Exception) {
+            }
+        }
         s.connect(InetSocketAddress(host, port), timeoutMs)
         s.tcpNoDelay = true
         s.soTimeout = 0

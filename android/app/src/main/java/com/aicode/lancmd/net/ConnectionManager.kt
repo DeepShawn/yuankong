@@ -2,7 +2,9 @@ package com.aicode.lancmd.net
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.LinkAddress
 import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -44,7 +46,9 @@ object ConnectionManager {
         val nextRetrySec: Int = 0,
         val message: String = "",
         val paired: Boolean = false,
-        val reconnects: Int = 0
+        val reconnects: Int = 0,
+        /** 检测到 VPN 在跑时为 true，UI 据此给出排查提示。 */
+        val vpnHint: Boolean = false
     ) {
         val connected: Boolean get() = state == State.CONNECTED
     }
@@ -144,8 +148,10 @@ object ConnectionManager {
                 publish(
                     status.copy(
                         state = State.WAITING,
-                        message = "没有发现电脑，确认接收端在运行",
-                        nextRetrySec = 0
+                        message = if (vpnActive())
+                            "没有发现电脑：VPN 可能拦截了广播" else "没有发现电脑，确认接收端在运行",
+                        nextRetrySec = 0,
+                        vpnHint = vpnActive()
                     )
                 )
                 waitOrWake(2000)
@@ -164,21 +170,50 @@ object ConnectionManager {
                 )
             )
 
-            val c = AgentClient(target.host, target.port)
-            try {
-                c.connect()
-                val token = Prefs.token(ctx(), target.host, target.port)
-                val hs = c.handshake(Prefs.clientId(ctx()), deviceLabel(), token)
-                if (!hs.optBoolean("ok")) {
-                    val msg = hs.optString("message").ifEmpty { hs.optString("error", "连接被拒绝") }
-                    throw IOException(msg)
-                }
+            // 依次尝试该电脑的各网卡地址，任一成功即用
+            val via = physicalNetwork()
+            val attempts = target.ips.ifEmpty { listOf(target.host) }
+            var c: AgentClient? = null
+            var lastError: Exception? = null
+            var usedIp = target.host
+            var hs: JSONObject? = null
 
-                Prefs.saveToken(ctx(), target.host, target.port, hs.optString("token"))
+            for (candidate in attempts) {
+                val candidateClient = AgentClient(candidate, target.port)
+                try {
+                    candidateClient.connect(
+                        timeoutMs = if (target.isGateway) 2500 else 6000,
+                        via = via
+                    )
+                    val stored = Prefs.token(ctx(), candidate, target.port)
+                        .ifEmpty { Prefs.token(ctx(), target.host, target.port) }
+                    val resp = candidateClient.handshake(Prefs.clientId(ctx()), deviceLabel(), stored)
+                    if (!resp.optBoolean("ok")) {
+                        val msg = resp.optString("message")
+                            .ifEmpty { resp.optString("error", "连接被拒绝") }
+                        throw IOException(msg)
+                    }
+                    c = candidateClient
+                    usedIp = candidate
+                    hs = resp
+                    break
+                } catch (e: Exception) {
+                    candidateClient.close()
+                    lastError = e
+                }
+            }
+
+            if (c == null || hs == null) {
+                throw lastError ?: IOException("无法连接 ${target.host}:${target.port}")
+            }
+
+            try {
+                val token = Prefs.token(ctx(), usedIp, target.port)
+                Prefs.saveToken(ctx(), usedIp, target.port, hs.optString("token"))
                 Prefs.saveTarget(
                     ctx(),
                     Target(
-                        host = target.host,
+                        host = usedIp,
                         port = target.port,
                         name = hs.optString("agent").ifEmpty { target.name },
                         agentId = hs.optString("agent_id").ifEmpty { target.agentId }
@@ -192,7 +227,7 @@ object ConnectionManager {
                     Status(
                         state = State.CONNECTED,
                         name = hs.optString("agent").ifEmpty { target.name },
-                        host = target.host,
+                        host = usedIp,
                         port = target.port,
                         paired = paired,
                         reconnects = reconnects
@@ -201,7 +236,7 @@ object ConnectionManager {
                 if (reconnects > 0) {
                     event("已恢复连接（第 $reconnects 次重连成功）", LogKind.OK)
                 } else {
-                    event("已连接 ${target.host}:${target.port}", LogKind.OK)
+                    event("已连接 $usedIp:${target.port}", LogKind.OK)
                 }
 
                 startPing(c)
@@ -224,11 +259,11 @@ object ConnectionManager {
                 event("连接断开，开始自动重连", LogKind.ERROR)
                 waitOrWake(600)
             } catch (e: CancellationException) {
-                c.close()
+                c?.close()
                 client = null
                 throw e
             } catch (e: Exception) {
-                c.close()
+                c?.close()
                 client = null
                 fails++
                 val waitMs = backoffMs(fails)
@@ -237,13 +272,20 @@ object ConnectionManager {
                         state = State.WAITING,
                         latencyMs = -1,
                         attempt = fails,
-                        message = e.message ?: "连接失败",
-                        reconnects = reconnects
+                        message = buildFailureMessage(e, target),
+                        reconnects = reconnects,
+                        vpnHint = vpnActive()
                     )
                 )
                 countdown(waitMs, fails)
             }
         }
+    }
+
+    private fun buildFailureMessage(e: Exception, target: Resolved): String {
+        val base = e.message ?: "连接失败"
+        if (!vpnActive()) return base
+        return "$base（检测到 VPN，已尝试绕过）"
     }
 
     private fun backoffMs(fails: Int): Long = when {
@@ -256,7 +298,15 @@ object ConnectionManager {
         else -> 12_000L
     }
 
-    private data class Resolved(val host: String, val port: Int, val name: String, val agentId: String)
+    private data class Resolved(
+        val host: String,
+        val port: Int,
+        val name: String,
+        val agentId: String,
+        val ips: List<String> = emptyList(),
+        /** 由"电脑开热点"推断出的网关地址，探测时用更短的超时。 */
+        val isGateway: Boolean = false
+    )
 
     private suspend fun resolveTarget(fails: Int): Resolved? {
         val ctx = ctx()
@@ -264,16 +314,45 @@ object ConnectionManager {
         // 连续失败或从未连过时，重新扫描一次，处理电脑 IP 变化
         val shouldScan = last == null || fails == 0 || fails % 3 == 0
         if (shouldScan) {
-            val found = withContext(Dispatchers.IO) { Discovery.discover(1800) }
+            val result = withContext(Dispatchers.IO) { Discovery.discover(ctx, 1800) }
+            val found = result.agents
             if (found.isNotEmpty()) {
                 val known = last?.agentId ?: ""
                 val pick = found.firstOrNull { it.id.isNotEmpty() && it.id == known } ?: found.first()
                 val target = Target(pick.ip, pick.port, pick.name, pick.id)
                 Prefs.saveTarget(ctx, target)
-                return Resolved(target.host, target.port, target.name, target.agentId)
+                return Resolved(target.host, target.port, target.name, target.agentId, pick.allIps())
             }
         }
-        return last?.let { Resolved(it.host, it.port, it.name, it.agentId) }
+        val cached = last?.let { Resolved(it.host, it.port, it.name, it.agentId) }
+        // 电脑开热点时手机连的是它的热点，广播常被系统拦掉，
+        // 但网关就是那台电脑，直接连网关即可
+        if (cached == null || fails >= 2) {
+            gatewayCandidate()?.let { return it }
+        }
+        return cached
+    }
+
+    /** 当前网络的默认网关。电脑开热点时，这个地址就是电脑自己。 */
+    private fun gatewayCandidate(): Resolved? {
+        val cm = ctx().getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return null
+        val network = physicalNetwork() ?: return null
+        return try {
+            val lp = cm.getLinkProperties(network) ?: return null
+            for (route in lp.routes) {
+                if (!route.isDefaultRoute) continue
+                val gw = route.gateway
+                if (gw is java.net.Inet4Address && !gw.isLoopbackAddress) {
+                    val ip = gw.hostAddress ?: continue
+                    if (ip.startsWith("0.")) continue
+                    return Resolved(ip, TCP_PORT, "热点网关 $ip", "", emptyList(), true)
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private suspend fun awaitDisconnect(c: AgentClient) {
@@ -383,6 +462,42 @@ object ConnectionManager {
     // ---------------------------------------------------------------- 工具
 
     private fun ctx(): Context = appCtx ?: throw IllegalStateException("ConnectionManager 未初始化")
+
+    /** 有 VPN 在跑时，默认路由会被它接管，必须显式绑定物理网卡。 */
+    fun vpnActive(): Boolean {
+        val cm = ctx().getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        return try {
+            cm.allNetworks.any {
+                cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** 选一个能到局域网物理网络（Wi-Fi / 网线优先，移动网络兜底）。 */
+    private fun physicalNetwork(): Network? {
+        val cm = ctx().getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return null
+        var fallback: Network? = null
+        try {
+            for (n in cm.allNetworks) {
+                val caps = cm.getNetworkCapabilities(n) ?: continue
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                ) {
+                    return n
+                }
+                if (fallback == null && caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
+                    fallback = n
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return fallback
+    }
 
     private fun publish(next: Status) {
         status = next

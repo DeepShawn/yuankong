@@ -34,18 +34,21 @@ fi
 echo "[2/5] 编译资源"
 $RC --codepage=65001 -I . lancmd.rc -O coff -o "$WORK/res.o"
 
-# 3) 两个 exe
+# 3) 三个 exe：无窗口接收端 / 控制台管理 / 可见启动面板
 echo "[3/5] 交叉编译 exe"
 $CC -O2 -s -Wall -DUNICODE -D_UNICODE -o "$WORK/LanCmdAgent.exe" \
     launcher.c "$WORK/res.o" -mwindows -lshell32 -static
 $CC -O2 -s -Wall -DUNICODE -D_UNICODE -DLANCMD_CONSOLE -o "$WORK/LanCmdCtl.exe" \
     launcher.c "$WORK/res.o" -lshell32 -static
+$CC -O2 -s -Wall -municode -mwindows -o "$WORK/Start.exe" \
+    start_panel.c "$WORK/res.o" -ladvapi32 -lws2_32 -lshell32 -lcomctl32 -static
 
 # 4) 组装
 echo "[4/5] 组装目录"
 rm -rf "$PKG"
 mkdir -p "$PKG/python"
-cp "$WORK/LanCmdAgent.exe" "$WORK/LanCmdCtl.exe" lan_command_agent.py "$PKG/"
+cp "$WORK/LanCmdAgent.exe" "$WORK/LanCmdCtl.exe" "$WORK/Start.exe" "$PKG/"
+cp lan_command_agent.py start.bat "$PKG/"
 (cd "$PKG/python" && unzip -qo "$WORK/$EMBED_ZIP")
 # 精简：接收端用不到这些
 rm -f "$PKG/python"/_msi.pyd "$PKG/python"/_sqlite3.pyd "$PKG/python"/sqlite3.dll \
@@ -79,4 +82,4 @@ PY
 
 echo
 echo "完成：$OUT"
-echo "exe 大小: $(stat -c%s "$WORK/LanCmdAgent.exe") / $(stat -c%s "$WORK/LanCmdCtl.exe") 字节"
+echo "exe 大小: Agent=$(stat -c%s "$WORK/LanCmdAgent.exe") Ctl=$(stat -c%s "$WORK/LanCmdCtl.exe") Start=$(stat -c%s "$WORK/Start.exe") 字节"

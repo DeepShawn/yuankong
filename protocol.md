@@ -15,11 +15,39 @@ UDP 47824 做发现，TCP 47823 做命令。帧 = 一行 UTF-8 JSON，以 `\n` �
 
 ```json
 {"app":"LANCMD","v":1,"type":"agent","name":"DESKTOP-8K2",
- "host":"DESKTOP-8K2","port":47823,"os":"Windows","ver":"1.0",
- "id":"9f3c1a7b2e","auto_accept":false}
+ "host":"DESKTOP-8K2","port":47823,"os":"Windows","ver":"1.3",
+ "id":"9f3c1a7b2e","auto_accept":false,
+ "ips":["192.168.1.5","192.168.137.1","10.8.0.2"],
+ "lan_ips":["192.168.1.5","192.168.137.1"],
+ "hotspot_ips":["192.168.137.1"]}
 ```
 
 `id` 是本机派生标识（主机名+架构+CPU 数），用于多机区分；不含任何凭据。
+
+网卡字段说明：
+
+| 字段 | 含义 |
+|---|---|
+| `ips` | 本机全部 IPv4（含 VPN 网卡），诊断用 |
+| `lan_ips` | 排除 VPN 后的局域网地址，**手机优先从这里挑** |
+| `hotspot_ips` | 识别为 Windows 移动热点的网卡地址（通常是 `192.168.137.1`） |
+
+电脑可能同时有 Wi-Fi、热点、VPN 多块网卡。手机收到应答后按以下顺序选地址：
+与当前手机网络同网段 → 与应答源地址相同 → 列表第一个。
+选错的表现是「发现了却连不上」，所以这一步不能省。
+
+### VPN 与热点的处理
+
+| 场景 | 手机侧 | 电脑侧 |
+|---|---|---|
+| 手机开 VPN | 每个物理 Network 单独 `bindSocket` 后广播，绕开 tun 路由；跳过 `TRANSPORT_VPN` 网络 | — |
+| 电脑开热点 | 广播常被系统拦，改为直连**默认网关**（热点场景网关就是电脑），超时缩短到 2.5s | 热点网卡名（`Wi-Fi Direct`、`本地连接*`）不判为 VPN，正常上报 |
+| 电脑开 VPN | — | `lan_ips` 排除 tap/tun/wireguard 等网卡，避免手机连到不可达地址 |
+
+识别规则：网卡名含 `tap/tun/vpn/ppp/wireguard/utun/ipsec/zerotier/tailscale/clash` → 判为 VPN 排除；
+含 `wi-fi direct` / `本地连接*` / `mobile hotspot` → 判为热点保留。
+VMware / VirtualBox / Hyper-V 网卡**不排除**，它们有时确实能到局域网。
+
 没有应答就换手动 IP，协议一致。
 
 ## 2. 握手（TCP）
