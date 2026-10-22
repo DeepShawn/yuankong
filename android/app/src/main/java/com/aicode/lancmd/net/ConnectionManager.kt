@@ -143,6 +143,7 @@ object ConnectionManager {
     private suspend fun connectLoop() {
         var fails = 0
         while (running) {
+            try {
             val target = resolveTarget(fails)
             if (target == null) {
                 publish(
@@ -204,7 +205,26 @@ object ConnectionManager {
             }
 
             if (c == null || hs == null) {
-                throw lastError ?: IOException("无法连接 ${target.host}:${target.port}")
+                // 关键：这里以前是 throw，而它位于所有 try 之外。
+                // 异常会一路逃出 connectLoop → launch → 线程默认处理器，
+                // 在真机上就是「显示正在连接时闪退」。现在改为走正常的退避重连。
+                fails++
+                val waitMs = backoffMs(fails)
+                publish(
+                    status.copy(
+                        state = State.WAITING,
+                        latencyMs = -1,
+                        attempt = fails,
+                        message = buildFailureMessage(
+                            lastError ?: IOException("无法连接 ${target.host}:${target.port}"),
+                            target
+                        ),
+                        reconnects = reconnects,
+                        vpnHint = vpnActive()
+                    )
+                )
+                countdown(waitMs, fails)
+                continue
             }
 
             try {
@@ -278,6 +298,16 @@ object ConnectionManager {
                     )
                 )
                 countdown(waitMs, fails)
+            }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                // 最后一道防线：任何未预期异常都不能让协程把进程带崩（真机上即闪退）
+                android.util.Log.e("LanCmd", "连接循环异常: " + t.message, t)
+                event("连接异常：" + (t.message ?: t.javaClass.simpleName), LogKind.ERROR)
+                client = null
+                fails++
+                countdown(backoffMs(fails), fails)
             }
         }
     }
