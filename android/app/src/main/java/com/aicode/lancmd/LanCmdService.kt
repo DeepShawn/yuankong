@@ -67,6 +67,24 @@ class LanCmdService : Service(), ConnectionManager.Listener {
         return START_STICKY
     }
 
+    /**
+     * Android 15+ 对 dataSync 类型前台服务有每日时长上限，超时会回调这里。
+     * 不实现会被系统按崩溃处理，所以这里主动降级：
+     * 停掉前台状态但保留连接，通知栏提示原因。
+     */
+    override fun onTimeout(startId: Int) {
+        onTimeout(startId, 0)
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        lastText = "后台保活已达系统时限，连接可能被挂起"
+        val nm = getSystemService(NOTIFICATION_SERVICE) as? NotificationManager
+        nm?.notify(NOTIF_ID, buildNotification(lastText))
+        stopForeground(STOP_FOREGROUND_DETACH)
+        isRunning = false
+        // 连接本身不动：App 在前台时照常可用，用户可手动重开保活
+    }
+
     override fun onDestroy() {
         isRunning = false
         ConnectionManager.removeListener(this)

@@ -38,7 +38,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "1.4.1"
+VERSION = "1.4.2"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -568,13 +568,22 @@ def cmd_put(path, data, overwrite=True):
         raise RpcError("payload 不是合法 base64")
     if len(raw) > cfg["max_file_bytes"]:
         raise RpcError("写入内容超过单帧上限 %s" % human_size(cfg["max_file_bytes"]), 2)
+    if os.path.isdir(path):
+        raise RpcError("目标是目录: %s" % path)
     if os.path.exists(path) and not overwrite:
         raise RpcError("目标已存在: %s" % path)
     parent = os.path.dirname(os.path.abspath(path))
     if parent and not os.path.isdir(parent):
         os.makedirs(parent, exist_ok=True)
-    with open(path, "wb") as f:
-        f.write(raw)
+    try:
+        with open(path, "wb") as f:
+            f.write(raw)
+    except IsADirectoryError:
+        raise RpcError("目标是目录: %s" % path)
+    except PermissionError:
+        raise RpcError("没有写入权限: %s" % path)
+    except OSError as e:
+        raise RpcError("写入失败: %s" % e)
     return {"path": os.path.abspath(path), "size": len(raw)}
 
 
@@ -997,7 +1006,8 @@ def cmd_kill(pid, force=True):
         pid = int(pid)
     except Exception:
         raise RpcError("pid 非法")
-    if pid in (0, 1) or pid == os.getpid():
+    # 负数在 POSIX 下表示进程组，会把接收端所在的整组一起杀掉，必须拦住
+    if pid <= 1 or pid == os.getpid():
         raise RpcError("拒绝结束该进程（系统进程或接收端自身）", 8)
     if IS_WIN:
         argv = ["taskkill", "/PID", str(pid)] + (["/F"] if force else [])
@@ -1127,25 +1137,19 @@ class ClientState(object):
 
 # ---------------------------------------------------------------- 网络层
 
-_rpc_lock = threading.Lock()
-_rpc_serial = 0
-
-
-def _next_id():
-    global _rpc_serial
-    with _rpc_lock:
-        _rpc_serial += 1
-        return _rpc_serial
-
-
 def read_frame(f):
     line = f.readline(MAX_LINE)
     if not line:
         return None
+    if not line.endswith(b"\n") and len(line) >= MAX_LINE:
+        raise ProtocolError("单帧超过 %d 字节" % MAX_LINE)
     try:
-        return json.loads(line.decode("utf-8"))
+        obj = json.loads(line.decode("utf-8"))
     except Exception as e:
         raise ProtocolError("非法 JSON: %s" % e)
+    if not isinstance(obj, dict):
+        raise ProtocolError("帧必须是 JSON 对象")
+    return obj
 
 
 def write_frame(f, obj):
@@ -1220,7 +1224,16 @@ def serve_client(sock, addr, cfg):
         rf = sock.makefile("rb")
         wf = sock.makefile("wb")
         while True:
-            req = read_frame(rf)
+            try:
+                req = read_frame(rf)
+            except ProtocolError as e:
+                # 坏帧只回一条错误，不断开连接：客户端还能继续用
+                log.warning("坏帧 %s: %s", state.peer, e)
+                try:
+                    write_frame(wf, {"id": None, "ok": False, "error": str(e)})
+                except Exception:
+                    break
+                continue
             if req is None:
                 break
             rid = req.get("id")
@@ -1276,10 +1289,26 @@ def serve_client(sock, addr, cfg):
             except RpcError as e:
                 write_frame(wf, {"id": rid, "ok": False, "error": e.message, "ecode": e.code})
             except ProtocolError as e:
-                write_frame(wf, {"id": rid, "ok": False, "error": str(e)})
+                try:
+                    write_frame(wf, {"id": rid, "ok": False, "error": str(e)})
+                except OSError:
+                    break
+            except OSError as e:
+                # 文件系统类错误属于可预期失败，不打完整堆栈
+                log.warning("命令 IO 错误 cmd=%s: %s", cmd, e)
+                try:
+                    write_frame(wf, {"id": rid, "ok": False,
+                                     "error": "IO 错误: %s" % e})
+                except OSError:
+                    break
             except Exception as e:
                 log.exception("命令执行异常 cmd=%s", cmd)
-                write_frame(wf, {"id": rid, "ok": False, "error": "%s: %s" % (type(e).__name__, e)})
+                try:
+                    write_frame(wf, {"id": rid, "ok": False, "error": "%s: %s" % (type(e).__name__, e)})
+                except OSError:
+                    # 对端已断开，回包发不出去很正常，直接结束这条连接
+                    log.info("回包失败，连接可能已断开: %s", cmd)
+                    break
     except (socket.timeout, ConnectionResetError, BrokenPipeError, OSError):
         pass
     except Exception:
@@ -1297,7 +1326,6 @@ def serve_client(sock, addr, cfg):
             CLIENT_COUNT = max(0, CLIENT_COUNT - 1)
 
 
-CLIENT_SET = set()
 CLIENT_COUNT = 0
 _conn_lock = threading.Lock()
 START_TS = time.time()

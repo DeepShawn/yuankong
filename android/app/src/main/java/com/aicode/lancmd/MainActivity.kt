@@ -148,6 +148,14 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         super.onStop()
     }
 
+    override fun onDestroy() {
+        // 传输中的对话框持有 Activity，不清理会泄漏；job 交给 lifecycleScope 自动取消，
+        // FileTransfer 在取消时会发 abort 让电脑删掉半截文件。
+        transferBox?.dismiss()
+        transferBox = null
+        super.onDestroy()
+    }
+
     private var prefsShell = "cmd"
 
     // ------------------------------------------------------------ 快捷操作
@@ -285,7 +293,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                     box.setTitle("[${i + 1}/${uris.size}] $name")
                     try {
                         val r = FileTransfer.upload(this@MainActivity, uri, remote) { p ->
-                            runOnUiThread { box.update(p) }
+                            if (!isFinishing && !isDestroyed) runOnUiThread { box.update(p) }
                         }
                         succeeded++
                         log("✓ 已发送 $name → ${r.optString("path", remote)}", LogKind.OK)
@@ -311,7 +319,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
 
     /** 传输进度对话框：标题 + 进度条 + 详情 + 取消。 */
     private inner class TransferBox(
-        ctx: Context,
+        private val ctx: Context,
         initialTitle: String,
         private val onCancel: () -> Unit
     ) {
@@ -366,12 +374,16 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             dialog.show()
         }
 
+        /** inner class，直接看外层 Activity 的存活状态。 */
+        private fun alive(): Boolean =
+            !isFinishing && !isDestroyed && dialog.isShowing
+
         fun setTitle(t: String) {
-            if (dialog.isShowing) tvTitle.text = t
+            if (alive()) tvTitle.text = t
         }
 
         fun update(p: FileTransfer.Progress) {
-            if (!dialog.isShowing) return
+            if (!alive()) return
             bar.progress = p.percent
             val total = if (p.total > 0) FileTransfer.humanSize(p.total) else "未知大小"
             tvDetail.text = "${FileTransfer.humanSize(p.done)} / $total" +
@@ -383,6 +395,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             try {
                 if (dialog.isShowing) dialog.dismiss()
             } catch (_: Exception) {
+                // Activity 已销毁时 dismiss 可能抛 IllegalArgumentException
             }
         }
     }
@@ -603,7 +616,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                 dir.mkdirs()
                 val dest = java.io.File(dir, name)
                 FileTransfer.download(path, dest) { p ->
-                    runOnUiThread { box.update(p) }
+                    if (!isFinishing && !isDestroyed) runOnUiThread { box.update(p) }
                 }
                 log("✓ 已保存 ${FileTransfer.humanSize(dest.length())} → ${dest.absolutePath}", LogKind.OK)
                 toast("已保存到 ${dest.name}")

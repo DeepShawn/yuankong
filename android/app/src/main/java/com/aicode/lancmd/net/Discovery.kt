@@ -277,7 +277,9 @@ object Discovery {
             id = json.optString("id", ""),
             altIps = candidates.filter { it != best }
         )
-        out["${info.id}:${info.port}"] = info
+        // 老版本接收端可能没有 id，这时用 ip 做 key，避免多台机器互相覆盖
+        val key = if (info.id.isNotEmpty()) "${info.id}:${info.port}" else "${info.ip}:${info.port}"
+        out[key] = info
     }
 
     /** 与手机同网段优先；同网段里再选和应答源地址一致的那个。 */
@@ -305,7 +307,9 @@ object Discovery {
             for (la in cm.getLinkProperties(network)?.linkAddresses ?: emptyList<LinkAddress>()) {
                 val a = la.address
                 if (a is Inet4Address && !a.isLoopbackAddress) {
-                    out.add(a.hostAddress to la.prefixLength)
+                    // hostAddress 可能为 null，不能直接塞进非空 Pair
+                    val host = a.hostAddress ?: continue
+                    out.add(host to la.prefixLength)
                 }
             }
         } catch (_: Exception) {

@@ -20,8 +20,8 @@ android {
         applicationId = "com.aicode.lancmd"
         minSdk = 24
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.4.2"
 
         ndk {
             // 目标机型为 arm64-v8a；当前无 JNI 代码，APK 在任意 ABI 上都能装

@@ -55,6 +55,13 @@ class Client(object):
         return json.loads(line.decode("utf-8"))
 
     def close(self):
+        """必须先把 makefile 的对象关掉，否则 sock.close() 不会真正关闭 fd
+        （socket.makefile 内部持有引用，导致对端收不到 EOF）。"""
+        for f in (self.rf, self.wf):
+            try:
+                f.close()
+            except Exception:
+                pass
         try:
             self.sock.close()
         except Exception:

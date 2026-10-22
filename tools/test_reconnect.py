@@ -12,9 +12,21 @@ from test_client import Client, TCP_PORT
 
 
 def rst_close(client):
-    """模拟手机断网/被系统杀掉：发 RST 而不是优雅关闭。"""
+    """模拟手机断网/被系统杀掉：发 RST 而不是优雅关闭。
+
+    注意先关 makefile 的对象，否则 socket.close() 只是减引用，
+    fd 仍在，对端不会收到 RST/EOF。
+    """
     try:
         client.sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    except Exception:
+        pass
+    for f in (getattr(client, "rf", None), getattr(client, "wf", None)):
+        try:
+            f.close()
+        except Exception:
+            pass
+    try:
         client.sock.close()
     except Exception:
         pass
