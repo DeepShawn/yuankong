@@ -5,6 +5,8 @@ import sys
 import threading
 import time
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "windows"))
 from remote_features import ConsentSession, WindowsBackend, show_session_window
@@ -77,6 +79,35 @@ class WindowsFeaturesTest(unittest.TestCase):
         self.assertTrue(raw.startswith(b"\xff\xd8") and raw.endswith(b"\xff\xd9"))
         self.assertGreater(len(raw), 1000)
         self.assertIsInstance(backend.cameras(), list)
+
+    def test_sendinput_layout_unicode_and_key_release(self):
+        events = []
+        def send(count, pointer, size):
+            item = pointer._obj
+            key = item.payload.keyboard
+            events.append((item.type, key.vk, key.scan, key.flags, size))
+            return count
+        with patch("remote_features.ctypes.WinDLL", return_value=SimpleNamespace(SendInput=send)):
+            backend = WindowsBackend("unused.exe")
+            backend.keys(["CTRL", "C"], "")
+            self.assertEqual([(0x11, 0), (0x43, 0), (0x43, 2), (0x11, 2)], [(e[1], e[3]) for e in events])
+            self.assertTrue(all(e[0] == 1 and e[4] == 40 for e in events))
+            events.clear()
+            backend.keys([], "你😀")
+            self.assertEqual([0x4F60, 0x4F60, 0xD83D, 0xD83D, 0xDE00, 0xDE00], [e[2] for e in events])
+            self.assertEqual([4, 6, 4, 6, 4, 6], [e[3] for e in events])
+
+    def test_revocation_releases_already_pressed_modifier(self):
+        events = []
+        def send(count, pointer, size):
+            key = pointer._obj.payload.keyboard
+            events.append((key.vk, key.flags))
+            return count
+        allowed = iter([True, False])
+        with patch("remote_features.ctypes.WinDLL", return_value=SimpleNamespace(SendInput=send)):
+            with self.assertRaises(RuntimeError):
+                WindowsBackend("unused.exe").keys(["CTRL", "V"], "", allowed=lambda: next(allowed))
+        self.assertEqual([(0x11, 0), (0x11, 2)], events)
 
 
 if __name__ == "__main__":
