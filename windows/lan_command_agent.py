@@ -38,7 +38,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "1.4.4"
+VERSION = "1.4.5"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -204,15 +204,34 @@ def _netsh(args, timeout=15):
         return 1, str(e)
 
 
+def _block_inbound_always():
+    """Windows 有个隐藏坑：即便加了放行规则，
+    若当前配置文件是 BlockInboundAlways，入站仍然全被拒。
+    热点/公用网络下这个设置很常见，必须单独查。"""
+    rc, out = _netsh(["advfirewall", "show", "allprofiles"])
+    if rc != 0:
+        return False
+    low = out.lower()
+    return "blockinboundalways" in low.replace(" ", "")
+
+
 def firewall_status():
-    """返回 {'ok': bool, 'rules': {...}}。只读，不需要管理员。"""
+    """返回 {'ok', 'rules', 'block_inbound', 'supported'}。只读，不需要管理员。"""
     if not IS_WIN:
-        return {"ok": True, "rules": {}, "supported": False}
+        return {"ok": True, "rules": {}, "block_inbound": False, "supported": False}
     rules = {}
     for name, proto, port in FW_RULES:
         rc, out = _netsh(["advfirewall", "firewall", "show", "rule", "name=%s" % name])
         rules[name] = rc == 0 and "4782" in out
-    return {"ok": all(rules.values()), "rules": rules, "supported": True}
+    blocked = _block_inbound_always()
+    # 规则齐了但策略是“阻止所有入站”，实际照样连不上
+    ok = all(rules.values()) and not blocked
+    return {
+        "ok": ok,
+        "rules": rules,
+        "block_inbound": blocked,
+        "supported": True,
+    }
 
 
 def firewall_fix(remove=False):
@@ -482,6 +501,7 @@ def cmd_info():
         "hotspot_ips": hotspot_ips(),
         "interfaces": list_ipv4_interfaces(),
         "firewall_ok": firewall_status()["ok"],
+        "firewall_block_inbound": firewall_status()["block_inbound"],
         "admin": is_admin(),
     }
 
@@ -1745,6 +1765,9 @@ def main(argv):
         print("防火墙放行:", "是" if st["ok"] else "否")
         for name, ok in st.get("rules", {}).items():
             print("  %-14s %s" % (name, "已放行" if ok else "未放行"))
+        if st.get("block_inbound"):
+            print("  !! 当前策略为「阻止所有入站连接」，放行规则会被覆盖")
+            print("     请到 Windows 安全中心 → 防火墙和网络保护 → 当前网络，取消该选项")
         if not st["ok"]:
             print("\n修复：LanCmdCtl.exe --fix-firewall （需要管理员）")
         return 0 if st["ok"] else 1
@@ -1777,7 +1800,13 @@ def main(argv):
     # 起步先看一眼防火墙：热点/USB 共享场景下这是最常见的“连不上”原因
     fw = firewall_status()
     if fw.get("supported") and not fw["ok"]:
-        log.warning("防火墙未放行 47823/47824，手机可能连不上（尤其开热点时）")
+        if fw.get("block_inbound"):
+            log.warning("防火墙策略为「阻止所有入站」，放行规则会被覆盖")
+            if console:
+                print("提示：防火墙策略是「阻止所有入站连接」，即使加了放行规则也会被覆盖。")
+                print("      请到 Windows 安全中心 → 防火墙 → 当前网络，取消该选项。")
+        else:
+            log.warning("防火墙未放行 47823/47824，手机可能连不上（尤其开热点时）")
         if console:
             print("提示：防火墙未放行 47823/47824。")
             print("      手机连不上时，用管理员身份执行：LanCmdCtl.exe --fix-firewall")

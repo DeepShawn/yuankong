@@ -11,6 +11,7 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -44,7 +45,14 @@ class AgentClient(val host: String, val port: Int) {
             } catch (_: Exception) {
             }
         }
-        s.connect(InetSocketAddress(host, port), timeoutMs)
+        try {
+            s.connect(InetSocketAddress(host, port), timeoutMs)
+        } catch (e: SocketTimeoutException) {
+            // 超时 = SYN 没有回应，几乎都是防火墙静默丢包；
+            // 真没程序监听会立刻 "Connection refused"，两者要区分开才能给出对的提示
+            s.close()
+            throw IOException("TIMEOUT:$host:$port", e)
+        }
         s.tcpNoDelay = true
         s.soTimeout = 0
         socket = s

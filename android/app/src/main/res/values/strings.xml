@@ -6,6 +6,7 @@
     <string name="sub_idle">正在查找局域网内的电脑…</string>
     <string name="overlay_connecting">正在连接电脑…</string>
     <string name="retry_now">立即重连</string>
+    <string name="fw_help">防火墙怎么修？</string>
 
     <string name="send">发送</string>
     <string name="more">更多</string>

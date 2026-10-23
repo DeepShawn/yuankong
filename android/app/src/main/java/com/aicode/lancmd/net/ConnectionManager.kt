@@ -48,7 +48,9 @@ object ConnectionManager {
         val paired: Boolean = false,
         val reconnects: Int = 0,
         /** 检测到 VPN 在跑时为 true，UI 据此给出排查提示。 */
-        val vpnHint: Boolean = false
+        val vpnHint: Boolean = false,
+        /** 连接超时（无响应），大概率是电脑防火墙拦了端口，UI 给出修复步骤。 */
+        val needFirewallCheck: Boolean = false
     ) {
         val connected: Boolean get() = state == State.CONNECTED
     }
@@ -210,17 +212,20 @@ object ConnectionManager {
                 // 在真机上就是「显示正在连接时闪退」。现在改为走正常的退避重连。
                 fails++
                 val waitMs = backoffMs(fails)
+                val err = lastError
+                val timedOut = err != null && isTimeout(err)
                 publish(
                     status.copy(
                         state = State.WAITING,
                         latencyMs = -1,
                         attempt = fails,
-                        message = buildFailureMessage(
-                            lastError ?: IOException("无法连接 ${target.host}:${target.port}"),
+                        message = if (timedOut) timeoutMessage(target) else buildFailureMessage(
+                            err ?: IOException("无法连接 ${target.host}:${target.port}"),
                             target
                         ),
                         reconnects = reconnects,
-                        vpnHint = vpnActive()
+                        vpnHint = vpnActive(),
+                        needFirewallCheck = timedOut
                     )
                 )
                 countdown(waitMs, fails)
@@ -287,14 +292,16 @@ object ConnectionManager {
                 client = null
                 fails++
                 val waitMs = backoffMs(fails)
+                val timedOut = isTimeout(e)
                 publish(
                     status.copy(
                         state = State.WAITING,
                         latencyMs = -1,
                         attempt = fails,
-                        message = buildFailureMessage(e, target),
+                        message = if (timedOut) timeoutMessage(target) else buildFailureMessage(e, target),
                         reconnects = reconnects,
-                        vpnHint = vpnActive()
+                        vpnHint = vpnActive(),
+                        needFirewallCheck = timedOut
                     )
                 )
                 countdown(waitMs, fails)
@@ -310,6 +317,24 @@ object ConnectionManager {
                 countdown(backoffMs(fails), fails)
             }
         }
+    }
+
+    /** 「超时」说明包被丢了；「拒绝」说明端口没人监听。两者原因完全不同。 */
+    private fun isTimeout(e: Throwable?): Boolean {
+        var cur: Throwable? = e
+        var depth = 0
+        while (cur != null && depth < 5) {
+            if (cur is java.net.SocketTimeoutException) return true
+            if (cur.message?.startsWith("TIMEOUT:") == true) return true
+            cur = cur.cause
+            depth++
+        }
+        return false
+    }
+
+    private fun timeoutMessage(target: Resolved): String {
+        return "连接 ${target.host}:${target.port} 超时（无响应）\n" +
+            "数据包发出去没有任何回应，通常是被电脑防火墙拦了"
     }
 
     private fun buildFailureMessage(e: Exception, target: Resolved): String {

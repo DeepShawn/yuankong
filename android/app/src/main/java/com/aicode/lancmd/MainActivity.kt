@@ -59,6 +59,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     private lateinit var overlay: View
     private lateinit var pbOverlay: ProgressBar
     private lateinit var btnRetry: MaterialButton
+    private lateinit var btnFwHelp: MaterialButton
     private lateinit var btnSend: ImageButton
     private lateinit var toggleShell: MaterialButtonToggleGroup
 
@@ -106,6 +107,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         overlay = findViewById(R.id.overlay)
         pbOverlay = findViewById(R.id.pbOverlay)
         btnRetry = findViewById(R.id.btnRetry)
+        btnFwHelp = findViewById(R.id.btnFwHelp)
         btnSend = findViewById(R.id.btnSend)
         toggleShell = findViewById(R.id.toggleShell)
 
@@ -126,6 +128,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             note("正在重连…")
             ConnectionManager.retryNow()
         }
+        btnFwHelp.setOnClickListener { showFirewallHelp() }
         tvLatency.setOnClickListener { pingOnce() }
         findViewById<View>(R.id.btnUpload).setOnClickListener { startPickFiles() }
 
@@ -807,6 +810,34 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         }
     }
 
+    /**
+     * TCP 超时（不是拒绝连接）意味着包被静默丢弃，最常见就是电脑防火墙。
+     * 这里把修复步骤直接写清楚，免得用户去翻文档。
+     */
+    private fun showFirewallHelp() {
+        safeDialog {
+            setTitle("连不上？多半是防火墙")
+            setMessage(
+                "连接超时说明数据包发出去了但没有任何回应，" +
+                    "这基本就是电脑防火墙把 47823 / 47824 端口拦掉了。" +
+                    "\n\n电脑开热点时尤其容易这样：手机连的那个网络会被 Windows " +
+                    "判为「公用网络」，而入站连接在这一类网络下默认是拦截的。" +
+                    "\n\n修复步骤（在电脑上操作）：\n\n" +
+                    "① 打开接收端所在文件夹，双击 Start.exe\n" +
+                    "② 点「修复防火墙」按钮\n" +
+                    "③ 弹出用户账户控制时点「是」\n" +
+                    "④ 看到「防火墙已放行」后，回到手机点「立即重连」\n\n" +
+                    "如果没有 Start.exe，就用管理员身份打开命令提示符执行：\n" +
+                    "LanCmdCtl.exe --fix-firewall\n\n" +
+                    "⚠ 还有一种情况：Windows 安全中心里当前网络的" +
+                    "「阻止所有入站连接」被勾选了，那样即使加了放行规则也无效，" +
+                    "需要把那个勾去掉。\n\n" +
+                    "另外确认接收端确实在跑：Start.exe 上应显示「接收端运行中」。"
+            )
+                .setPositiveButton("知道了", null)
+        }
+    }
+
     /** 把最近一次崩溃连同设备信息展示出来，便于反馈问题。 */
     private fun showCrashLog() {
         val text = CrashLog.latest(this)
@@ -908,6 +939,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                     if (s.reconnects > 0) append("\n已成功重连 ${s.reconnects} 次")
                 }
                 showOverlay(true, msg, busy = s.nextRetrySec == 0)
+                btnFwHelp.visibility = if (s.needFirewallCheck) View.VISIBLE else View.GONE
             }
             State.STOPPED -> {
                 dot.setBackgroundResource(R.drawable.dot_off)
@@ -934,6 +966,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             tvOverlay.text = message
             pbOverlay.visibility = if (busy) View.VISIBLE else View.GONE
             btnRetry.visibility = if (busy) View.GONE else View.VISIBLE
+            if (status.state != State.WAITING) btnFwHelp.visibility = View.GONE
             btnRetry.text = if (status.state == State.STOPPED) "重新连接" else getString(R.string.retry_now)
         }
     }

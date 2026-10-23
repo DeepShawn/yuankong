@@ -36,6 +36,7 @@ static HFONT g_font = NULL;
 static HFONT g_font_bold = NULL;
 static wchar_t g_dir[MAX_PATH];
 static HWND g_fw = NULL;
+static int g_fw_prompted = 0;
 static int g_lastRunning = -1;
 
 static void app_dir(wchar_t *out, size_t cap)
@@ -369,6 +370,21 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_APP_FWCHECK:
         if (g_fw) {
             SetWindowTextW(g_fw, wp ? L"防火墙已放行" : L"修复防火墙 !");
+        }
+        /* 没放行就主动问一次：开热点给手机连时，这是连不上的头号原因，
+           用户往往不知道要点这个按钮。 */
+        if (!wp && !g_fw_prompted) {
+            g_fw_prompted = 1;
+            if (MessageBoxW(hwnd,
+                    L"检测到防火墙还没有放行 47823 / 47824 端口。\n\n"
+                    L"手机连不上电脑，最常见的原因就是这个——\n"
+                    L"尤其是「电脑开热点、手机连热点」的时候，\n"
+                    L"这个网络会被 Windows 当成「公用网络」，入站连接默认被拦。\n\n"
+                    L"现在就去放行吗？（会请求管理员权限）",
+                    L"LanCmd 提示", MB_YESNO | MB_ICONWARNING) == IDYES) {
+                SendMessageW(hwnd, WM_COMMAND, MAKEWPARAM(ID_FIREWALL, BN_CLICKED),
+                             (LPARAM)g_fw);
+            }
         }
         return 0;
     case WM_TIMER:

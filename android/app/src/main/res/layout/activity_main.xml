@@ -181,6 +181,16 @@
                 android:text="@string/retry_now"
                 android:textColor="@color/accent"
                 app:strokeColor="@color/accent" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnFwHelp"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/fw_help"
+                android:textColor="@color/warn"
+                android:visibility="gone" />
         </LinearLayout>
     </FrameLayout>
 
