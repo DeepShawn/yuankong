@@ -50,6 +50,35 @@ jobs:
             'platforms;android-36' 'build-tools;35.0.0' 'platform-tools'
           echo "$SDK/build-tools/35.0.0" >> "$GITHUB_PATH"
       - uses: gradle/actions/setup-gradle@v4
+      - name: Test Android with a live receiver
+        shell: bash
+        run: |
+          set -euo pipefail
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/lancmd-test-config"
+          python3 windows/lan_command_agent.py --console > "$RUNNER_TEMP/lancmd-test-agent.log" 2>&1 &
+          agent_pid=$!
+          trap 'kill "$agent_pid" 2>/dev/null || true' EXIT
+          python3 - <<'PY'
+          import socket
+          import time
+          for attempt in range(50):
+              try:
+                  with socket.create_connection(('127.0.0.1', 47823), timeout=1):
+                      break
+              except OSError:
+                  time.sleep(0.1)
+          else:
+              raise SystemExit('Test receiver did not start')
+          PY
+          cd android
+          bash gradlew :app:testDebugUnitTest --console=plain --max-workers=2
+      - name: Upload Android test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-test-reports-${{ github.run_number }}
+          path: android/app/build/test-results/testDebugUnitTest/
+          if-no-files-found: ignore
       - name: Restore signing configuration
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

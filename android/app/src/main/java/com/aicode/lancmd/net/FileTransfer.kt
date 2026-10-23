@@ -45,40 +45,50 @@ object FileTransfer {
         val resolver = ctx.contentResolver
         val knownSize = querySize(ctx, uri)
         var temp: File? = null
-        val source: () -> InputStream
-        val size: Long
-
-        if (knownSize > 0) {
-            size = knownSize
-            source = { resolver.openInputStream(uri) ?: throw IOException("无法读取文件") }
-        } else {
-            // 拿不到大小就先落一份临时文件，保证能校验完整性
-            val cached = File.createTempFile("upload-", ".bin", ctx.cacheDir)
-            temp = cached
-            resolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(cached).use { out -> input.copyTo(out, DEFAULT_BUFFER_SIZE) }
-            } ?: throw IOException("无法读取文件")
-            size = cached.length()
-            source = { cached.inputStream() }
-        }
-
-        val begin = ConnectionManager.send(
-            "upload",
-            JSONObject()
-                .put("action", "begin")
-                .put("path", remotePath)
-                .put("size", size),
-            20_000
-        )
-        if (!begin.optBoolean("ok")) throw IOException(begin.optString("error", "无法开始上传"))
-        val sid = begin.optString("sid")
-        val chunkSize = begin.optInt("chunk", 512 * 1024).coerceIn(16 * 1024, 4 * 1024 * 1024)
-
-        var sent = 0L
-        val started = SystemClock.elapsedRealtime()
-        var lastEmit = 0L
-
+        var activeSid: String? = null
         try {
+            val source: () -> InputStream
+            val size: Long
+            if (knownSize > 0) {
+                size = knownSize
+                source = { resolver.openInputStream(uri) ?: throw IOException("无法读取文件") }
+            } else {
+                // 临时文件从创建起就受 finally 保护，包括读取、连接和 begin 失败。
+                val cached = File.createTempFile("upload-", ".bin", ctx.cacheDir)
+                temp = cached
+                resolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(cached).use { out ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        while (true) {
+                            coroutineContext.ensureActive()
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            out.write(buffer, 0, count)
+                        }
+                    }
+                } ?: throw IOException("无法读取文件")
+                size = cached.length()
+                source = { cached.inputStream() }
+            }
+            coroutineContext.ensureActive()
+
+            val begin = ConnectionManager.send(
+                "upload",
+                JSONObject()
+                    .put("action", "begin")
+                    .put("path", remotePath)
+                    .put("size", size),
+                20_000
+            )
+            if (!begin.optBoolean("ok")) throw IOException(begin.optString("error", "无法开始上传"))
+            val sid = begin.optString("sid")
+            activeSid = sid
+            val chunkSize = begin.optInt("chunk", 512 * 1024).coerceIn(16 * 1024, 4 * 1024 * 1024)
+
+            var sent = 0L
+            val started = SystemClock.elapsedRealtime()
+            var lastEmit = 0L
+
             source().use { input ->
                 val buf = ByteArray(chunkSize)
                 var seq = 0
@@ -117,13 +127,15 @@ object FileTransfer {
             end
         } catch (e: Throwable) {
             // 协程被取消也要通知电脑端删掉半截文件
-            withContext(NonCancellable) {
-                runCatching {
-                    ConnectionManager.send(
-                        "upload",
-                        JSONObject().put("action", "abort").put("sid", sid),
-                        10_000
-                    )
+            if (activeSid != null) {
+                withContext(NonCancellable) {
+                    runCatching {
+                        ConnectionManager.send(
+                            "upload",
+                            JSONObject().put("action", "abort").put("sid", activeSid),
+                            10_000
+                        )
+                    }
                 }
             }
             throw if (e is CancellationException) e else IOException(e.message ?: "上传失败", e)
