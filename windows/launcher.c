@@ -49,24 +49,47 @@ static void dir_of(const wchar_t *path, wchar_t *out, size_t cap)
     if (slash) *slash = L'\0';
 }
 
-/* 命令行拼接：含空格或引号的参数用双引号包起来并把内部引号翻倍 */
-static void append_arg(wchar_t *out, size_t cap, const wchar_t *arg)
+/* 按 Windows CRT 的 argv 规则引用每个参数。引号前的反斜线需翻倍，
+ * 末尾反斜线也需翻倍，以免吃掉闭合引号。首参数前不能有空格：
+ * 否则 CRT 会把 argv[0] 解析为空串，Python 将解释器自身当成脚本。
+ * 先计算长度，空间不足时不改变输出，由调用方明确报错。
+ */
+static int append_arg(wchar_t *out, size_t cap, const wchar_t *arg)
 {
     size_t used = wcslen(out);
-    if (used + 4 >= cap) return;
-    int need_quote = (wcschr(arg, L' ') || wcschr(arg, L'\t') || !*arg);
+    size_t needed = (used ? 1 : 0) + 2;
+    size_t slashes = 0;
+    const wchar_t *p;
 
-    if (used + 1 < cap) { out[used++] = L' '; out[used] = L'\0'; }
-    if (need_quote && used + 1 < cap) { out[used++] = L'"'; out[used] = L'\0'; }
-
-    for (const wchar_t *p = arg; *p && used + 2 < cap; ++p) {
-        if (*p == L'"') {
-            if (used + 3 < cap) { out[used++] = L'\\'; }
+    for (p = arg; *p; ++p) {
+        if (*p == L'\\') {
+            ++slashes;
+        } else {
+            needed += (*p == L'"') ? slashes * 2 + 2 : slashes + 1;
+            slashes = 0;
         }
-        out[used++] = *p;
-        out[used] = L'\0';
     }
-    if (need_quote && used + 1 < cap) { out[used++] = L'"'; out[used] = L'\0'; }
+    needed += slashes * 2;
+    if (used >= cap || needed >= cap - used) return 0;
+
+    if (used) out[used++] = L' ';
+    out[used++] = L'"';
+    slashes = 0;
+    for (p = arg; *p; ++p) {
+        if (*p == L'\\') {
+            ++slashes;
+            continue;
+        }
+        size_t count = (*p == L'"') ? slashes * 2 + 1 : slashes;
+        while (count--) out[used++] = L'\\';
+        out[used++] = *p;
+        slashes = 0;
+    }
+    slashes *= 2;
+    while (slashes--) out[used++] = L'\\';
+    out[used++] = L'"';
+    out[used] = L'\0';
+    return 1;
 }
 
 /* ---------------- 启动日志 ----------------
@@ -229,13 +252,21 @@ static int run(void)
     cmd[0] = L'\0';
     /* 注意：按 Windows 命令行规则，argv0 必须是解释器自身，
        argv1 才是脚本。这里显式加引号，避免路径含空格时被拆开。 */
-    append_arg(cmd, 32768, exe);
-    append_arg(cmd, 32768, script);
+    if (!append_arg(cmd, 32768, exe) || !append_arg(cmd, 32768, script)) {
+        report(L"命令行过长，无法完整传递参数。请缩短路径或参数后重试。");
+        return 2;
+    }
 
     int argc = 0;
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv) {
-        for (int i = 1; i < argc; ++i) append_arg(cmd, 32768, argv[i]);
+        for (int i = 1; i < argc; ++i) {
+            if (!append_arg(cmd, 32768, argv[i])) {
+                LocalFree(argv);
+                report(L"命令行过长，无法完整传递参数。请缩短路径或参数后重试。");
+                return 2;
+            }
+        }
         LocalFree(argv);
     }
 

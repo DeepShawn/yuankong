@@ -3,14 +3,12 @@ on:
   push:
     paths:
       - windows/**
-      - tools/test_remote_features.py
-      - tools/test_windows_features.py
+      - tools/test_*.py
       - .github/workflows/windows-features.yml
   pull_request:
     paths:
       - windows/**
-      - tools/test_remote_features.py
-      - tools/test_windows_features.py
+      - tools/test_*.py
       - .github/workflows/windows-features.yml
   workflow_dispatch:
 permissions:
@@ -28,7 +26,32 @@ jobs:
       - name: Build capture helper
         shell: cmd
         run: cl /nologo /O2 /EHsc /std:c++17 /Fe:windows\LanCmdCapture.exe windows\capture.cpp /link windowscodecs.lib mf.lib mfreadwrite.lib mfplat.lib mfuuid.lib ole32.lib gdi32.lib user32.lib uuid.lib
+      - name: Build console launcher
+        shell: cmd
+        run: cl /nologo /O2 /W3 /DUNICODE /D_UNICODE /DLANCMD_CONSOLE /Fe:windows\LanCmdCtl.exe windows\launcher.c /link shell32.lib user32.lib
+      - name: Launcher argument regression
+        run: python -m unittest discover -s tools -p test_launcher.py -v
+      - name: File transfer regression
+        run: python -m unittest discover -s tools -p test_file_operations.py -v
       - name: Session isolation and revocation
         run: python -m unittest discover -s tools -p test_remote_features.py -v
-      - name: Native consent window and capture
+      - name: Native Windows features
         run: python -m unittest discover -s tools -p test_windows_features.py -v
+  package-windows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross compiler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+      - name: Build Windows distribution
+        run: bash windows/build_windows_exe.sh
+      - name: Upload Windows distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanCmd-Windows-${{ github.run_number }}
+          path: dist/LanCmd-Windows-*.zip
+          if-no-files-found: error
+          retention-days: 14

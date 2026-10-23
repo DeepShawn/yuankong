@@ -38,7 +38,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -661,7 +661,7 @@ def cmd_put(path, data, overwrite=True):
         raise RpcError("目标路径为空")
     path = os.path.expanduser(path)
     try:
-        raw = base64.b64decode(data or "")
+        raw = base64.b64decode(data or "", validate=True)
     except Exception:
         raise RpcError("payload 不是合法 base64")
     if len(raw) > cfg["max_file_bytes"]:
@@ -674,8 +674,12 @@ def cmd_put(path, data, overwrite=True):
     if parent and not os.path.isdir(parent):
         os.makedirs(parent, exist_ok=True)
     try:
-        with open(path, "wb") as f:
+        # The existence check above can become stale while another upload writes
+        # the same path. Exclusive creation enforces overwrite=False atomically.
+        with open(path, "wb" if overwrite else "xb") as f:
             f.write(raw)
+    except FileExistsError:
+        raise RpcError("目标已存在: %s" % path)
     except IsADirectoryError:
         raise RpcError("目标是目录: %s" % path)
     except PermissionError:
@@ -746,6 +750,7 @@ def cmd_upload(q, st):
             "path": path,
             "part": part,
             "size": size,
+            "overwrite": overwrite,
             "received": 0,
             "seq": 0,
             "sha": hashlib.sha256(),
@@ -765,43 +770,56 @@ def cmd_upload(q, st):
         if seq != sess["seq"]:
             raise RpcError("分块序号错乱，期望 %d 收到 %d" % (sess["seq"], seq), 4)
         try:
-            raw = base64.b64decode(q.get("data") or "")
+            raw = base64.b64decode(q.get("data") or "", validate=True)
         except Exception:
             raise RpcError("分块不是合法 base64")
         if not raw and sess["size"] > 0:
             raise RpcError("分块内容为空")
+        if len(raw) > sess["size"] - sess["received"]:
+            raise RpcError("收到数据超过声明大小", 5)
         sess["fh"].write(raw)
         sess["sha"].update(raw)
         sess["received"] += len(raw)
         sess["seq"] += 1
         sess["ts"] = time.time()
-        if sess["received"] > sess["size"]:
-            raise RpcError("收到数据超过声明大小", 5)
         return {"received": sess["received"], "total": sess["size"]}
 
     if action == "end":
-        sess["fh"].close()
-        if sess["received"] != sess["size"]:
-            try:
-                os.remove(sess["part"])
-            except OSError:
-                pass
+        try:
+            sess["fh"].close()
+            if sess["received"] != sess["size"]:
+                raise RpcError(
+                    "大小不匹配：收到 %d / 声明 %d" % (sess["received"], sess["size"]), 6
+                )
+            expect = str(q.get("sha256") or "")
+            actual = sess["sha"].hexdigest()
+            if expect and not hmac.compare_digest(expect.lower(), actual):
+                raise RpcError("sha256 校验失败", 7)
+            if sess["overwrite"]:
+                os.replace(sess["part"], sess["path"])
+            else:
+                try:
+                    if IS_WIN:
+                        # Windows rename refuses to replace an existing target.
+                        os.rename(sess["part"], sess["path"])
+                    else:
+                        # POSIX rename replaces targets, so publish with an
+                        # atomic no-replace hard link on this same filesystem.
+                        os.link(sess["part"], sess["path"])
+                except FileExistsError:
+                    raise RpcError("目标已存在: %s" % sess["path"])
+            sess["done"] = True
+        finally:
             st.uploads.pop(sid, None)
-            raise RpcError(
-                "大小不匹配：收到 %d / 声明 %d" % (sess["received"], sess["size"]), 6
-            )
-        expect = str(q.get("sha256") or "")
-        actual = sess["sha"].hexdigest()
-        if expect and not hmac.compare_digest(expect.lower(), actual):
+            # Includes close/flush errors and failed commits. Never retain an
+            # unusable session with a closed handle or a partial temporary file.
             try:
-                os.remove(sess["part"])
-            except OSError:
-                pass
-            st.uploads.pop(sid, None)
-            raise RpcError("sha256 校验失败", 7)
-        os.replace(sess["part"], sess["path"])
-        sess["done"] = True
-        st.uploads.pop(sid, None)
+                sess["fh"].close()
+            finally:
+                try:
+                    os.remove(sess["part"])
+                except OSError:
+                    pass
         log.info("上传完成 %s (%s)", sess["path"], human_size(sess["received"]))
         return {
             "path": os.path.abspath(sess["path"]),
