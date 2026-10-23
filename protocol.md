@@ -54,7 +54,7 @@ VMware / VirtualBox / Hyper-V 网卡**不排除**，它们有时确实能到局�
 ## 2. 握手（TCP）
 
 ```json
-{"id":1,"cmd":"hello","v":1,"client":"Pixel 7","client_id":"and-<uuid>","token":""}
+{"id":1,"cmd":"hello","v":1,"client":"LanCmd 手机","client_id":"and-<uuid>","token":""}
 ```
 
 - `client_id` 首次由手机生成并存本地，之后不变。
@@ -118,7 +118,7 @@ token 存 `paired.json`，手机存 SharedPreferences，所以再次连接是静
 | `rm` | `path` | `removed` |
 | `mkdir` | `path` | `path` |
 | `rename` | `path` `to` | `from to` |
-| `screenshot` | — | `w h format:"bmp" data`(base64) |
+| `screenshot` | `sid` | 1.5.0 起等同 `screen`，要求屏幕会话，返回 JPEG |
 | `lock` | — | `locked` |
 | `power` | `action`(shutdown/restart/logoff/sleep) | `action` |
 | `clip` | `action`(get/set) `text?` | `text` |
@@ -132,7 +132,7 @@ token 存 `paired.json`，手机存 SharedPreferences，所以再次连接是静
 
 错误码：`1` 一般错误，`2` 超过文件上限，`3` 传输会话不存在/过期，
 `4` 分块序号错乱，`5` 数据超过声明大小，`6` 大小不匹配，`7` sha256 校验失败，
-`8` 拒绝结束受保护进程，`9` 结束进程失败，`401` 未握手。
+`8` 拒绝结束受保护进程，`9` 结束进程失败，`401` 未握手，`403` 共享未批准/停止/过期。
 
 ## 3.1 分块传输
 
@@ -157,7 +157,7 @@ token 存 `paired.json`，手机存 SharedPreferences，所以再次连接是静
 ```
 
 - `seq` 必须从 0 连续递增，错序直接报错（防止丢块悄悄写坏文件）
-- 数据先写 `目标.lancmd-part`，`end` 时大小与 sha256 都对上才 `os.replace` 原子落盘
+- 数据先写 `目标.<sid>.lancmd-part`，`end` 时大小与 sha256 都对上才 `os.replace` 原子落盘
 - `{"action":"abort"}` 或连接断开时删除临时文件，不留半截
 - 默认上限 `max_upload_bytes` = 4GB
 
@@ -192,8 +192,7 @@ token 存 `paired.json`，手机存 SharedPreferences，所以再次连接是静
 - `exec` 在 Windows 下用 `cmd /c "chcp 65001>nul & <line>"`（或 powershell 前置
   `[Console]::OutputEncoding=[Text.Encoding]::UTF8`）统一成 UTF-8，再按
   utf-8 → gbk → mbcs 多级解码兜底；`CREATE_NO_WINDOW` 防止闪黑框。
-- `screenshot` 走 user32/gdi32 的 BitBlt + GetDIBits，直接输出 32 位 BMP，
-  安卓 `BitmapFactory` 可解，不依赖 Pillow。
+- `screen` / `screenshot` 使用 GDI 捕获全部显示器，`camera` 使用 Media Foundation；WIC 编码 JPEG，不依赖 Pillow，最大单帧 4MB。
 - 每个 TCP 连接一个线程，长连接保持；`sock.settimeout(300)` 空闲 5 分钟断开
   （手机会每 20s 心跳，正常不会触发）。
 - 监听套接字启用 TCP keepalive（idle 30s / interval 10s / count 3），
@@ -206,3 +205,30 @@ token 存 `paired.json`，手机存 SharedPreferences，所以再次连接是静
 - 看护线程：TCP 监听与 UDP 应答各由一个 Supervisor 托管，循环异常退出后按
   2s→30s 退避自动重启，保证接收端长期在线。
 - `SIGTERM/SIGINT/SIGBREAK/SIGHUP` 均触发优雅退出并清理 pid 文件。
+
+
+## 5. 1.5.0 工作台命令
+
+所有命令先完成 `hello`；普通配对不授权屏幕、摄像头或键盘。
+
+| cmd | 参数 | 成功返回 |
+|---|---|---|
+| `capabilities` | — | `version features[] session_seconds` |
+| `storage` | — | `home drives[{path,total,free,used,percent}]` |
+| `session` | `action:"begin" scope:"screen"/"camera"/"input"` | `sid scope expires_in:300` |
+| `session` | `action:"keepalive" sid` | `active:true` |
+| `session` | `action:"end" sid` | `stopped:true`，重复调用也成功 |
+| `screen` | `sid` | `format:"jpeg" data`(base64) |
+| `camera` | `sid action:"list"` | `devices[{id,name}]` |
+| `camera` | `sid device:0..31 action:"frame"` | `format:"jpeg" data`(base64) |
+| `input` | `sid keys:["CTRL","V"]` 或 `sid text:"你好"` | `sent:true` |
+| `message` | `title? text` | `sent:true`（桌面消息已排入显示） |
+
+- 本机授权窗口等待最多 45 秒，客户端 `begin` 超时建议 55 秒。每个作用域单独授权；`auto_accept` 和记住配对都不能跳过本次授权。
+- 授权绑定当前 TCP 连接、配对 ID 和作用域，最长 300 秒。重连必须重新授权；每次数据操作或 `keepalive` 刷新活动时间，但不能延长总时限。空闲 20 秒停止。
+- 本机窗口持续可见，关闭、隐藏、最小化或点「立即停止」会撤销。采集中途撤销的结果被丢弃；手机页面进入后台时发送 `end`。
+- 手机通过原连接释放会话，不将旧会话 ID 发到自动重连后的新电脑连接。键盘页每 8 秒保活；屏幕约 800ms、摄像头约 1200ms 请求一帧（还需加上采集耗时）。这是 JPEG 预览，没有录音与视频编码。
+- 按键与文字二选一；组合键最多 5 个不同按键，文字最多 1000 字。只控制当前用户桌面的前台应用；无法控制 UAC 安全桌面或权限更高的应用。
+- 消息 1–2000 字、标题最多 60 字；每连接间隔 5 秒，最多 3 个未关闭消息框。
+- 手机 `hello.client` 统一为「LanCmd 手机」，不再发送制造商或机型；`client_id` 保持不变用于配对和授权窗口中的短 ID。
+- 旧版 `screenshot` 无授权调用在 1.5.0 会拒绝。旧手机的其他命令仍兼容；新工作台页面需要 Windows 1.5.0 与完整辅助程序。

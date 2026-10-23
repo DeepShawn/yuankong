@@ -135,6 +135,8 @@ object ConnectionManager {
 
     fun isConnected(): Boolean = client?.closed == false
 
+    fun sessionClient(): AgentClient = client?.takeUnless { it.closed } ?: throw IOException("未连接")
+
     fun forget(ctx: Context) {
         Prefs.forget(ctx)
         reconnects = 0
@@ -621,9 +623,8 @@ object ConnectionManager {
     }
 
     private fun deviceLabel(): String {
-        val man = Build.MANUFACTURER ?: "Android"
-        val model = Build.MODEL ?: "device"
-        val name = if (model.lowercase().startsWith(man.lowercase())) model else "$man $model"
-        return name.take(48)
+        // Do not send the phone's manufacturer, model or user-assigned device name.
+        // The persistent client_id still identifies pairing and audit records.
+        return "LanCmd 手机"
     }
 }

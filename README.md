@@ -1,20 +1,23 @@
 # LanCmd — 局域网命令控制（安卓 → Windows）
 
-手机在同一个局域网下直接控制电脑：执行命令、看文件、截屏、锁屏、剪贴板、开关机。
-电脑端是后台静默接收程序（无窗口），**一直在线**；手机端开机即自动发现、**不用输连接码**、
+手机在同一个局域网下直接控制电脑：执行命令、查看屏幕和摄像头、发送消息和按键、管理磁盘文件、锁屏与剪贴板。
+电脑端可后台接收，屏幕、摄像头和键盘会话需要本机授权，始终显示停止入口；手机端开机即自动发现、**不用输连接码**、
 **掉线自动重连**。
 
-**最新修复：Android 1.4.10 修复已连接却无法发送命令的问题。**
+**1.5.0：远程工作台与可视化存储。手机和 Windows 接收端需要一起更新。**
 
-- [下载 Android 1.4.10 APK](https://github.com/DeepShawn/yuankong/releases/download/v1.4.10/LanCmd-1.4.10.apk)
-- [下载 Windows 1.4.9 接收端](https://github.com/DeepShawn/yuankong/releases/download/v1.4.9/LanCmd-Windows-1.4.9.zip)（本次无需更新）
-- Android 1.4.10 使用新签名，**从旧版升级须先卸载再安装**，应用内连接配置和历史记录会丢失。
+- [Android / Windows 下载与更新说明](https://github.com/DeepShawn/yuankong/releases)
+- 新增屏幕及摄像头 JPEG 预览、桌面消息、组合按键和 Unicode 文字输入。
+- 新增磁盘容量、目录导航、搜索、上传下载、重命名、新建目录与删除。
+- 手机对外统一显示「LanCmd 手机」，保留原有配对 ID，不再发送手机型号或机名。
+- 屏幕、摄像头、按键分别在电脑端允许，每次最长 5 分钟；本机停止、退出页面、断开连接或空闲 20 秒会结束会话。普通连接的免确认设置不替代这些授权。
+- 原 1.4.9 私钥未恢复时无法用其签名覆盖升级；安装前以发布页标注的签名兼容范围为准。
 
 ```
 ┌──────────────┐   UDP 47824 广播探测/应答   ┌──────────────────────┐
 │ 安卓 App      │ ──────────────────────────▶ │ Windows 接收端        │
 │ com.aicode.  │                             │ pythonw 静默运行      │
-│   lancmd     │   TCP 47823 行分隔 JSON     │ 无窗口 / 开机自启      │
+│   lancmd     │   TCP 47823 行分隔 JSON     │ 本机授权 / 随时停止    │
 │ 前台常驻保活  │ ◀─────────────────────────▶ │ 看护线程 / 端口自愈    │
 └──────────────┘                             └──────────────────────┘
 ```
@@ -32,14 +35,14 @@
 也可以：
 
 - **双击 `start.bat`**：命令行方式，显示启动结果后自动结束
-- **双击 `LanCmdAgent.exe`**：直接静默运行，无任何提示
+- **双击 `LanCmdAgent.exe`**：后台运行；使用画面与按键功能时显示本机授权和停止窗口
 - **前台调试（看日志）**：`start_console.bat`
 - **开机自启**：`install_autostart.bat`，或在 `Start.exe` 里点「开机自启」
 
-启动后电脑不弹任何窗口，只在任务管理器里有一个 `pythonw.exe` 进程。
+启动接收服务不弹主窗口；画面共享和按键控制期间会显示持续可见的授权及停止窗口。
 配置与日志在 `%APPDATA%\LanCmd\`（`agent.json`、`agent.log`、`paired.json`）。
 
-Windows 1.4.9 默认免确认，手机连接后直接授权。需要恢复首次连接人工确认时执行：
+Windows 接收端普通连接默认免确认，手机连接后直接授权。需要恢复首次连接人工确认时执行：
 
 ```bat
 LanCmdCtl.exe --no-auto-accept
@@ -47,10 +50,10 @@ LanCmdCtl.exe --no-auto-accept
 
 ### 2. 手机端（Android 7.0+，arm64-v8a）
 
-从上方链接下载 `LanCmd-1.4.10.apk` 后安装：
+从上方链接下载 `LanCmd-1.5.0.apk` 后安装：
 
 ```bash
-adb install LanCmd-1.4.10.apk
+adb install LanCmd-1.5.0.apk
 ```
 
 打开 App 自动扫描并连上唯一的那台电脑；有多台时弹列表让你选。
@@ -59,7 +62,7 @@ adb install LanCmd-1.4.10.apk
 
 ## 二、界面说明
 
-界面分四层，从上到下都是常用动作，不需要进二级菜单：
+首页保留连接状态、快捷操作、控制台与命令输入，新功能进入独立页面：
 
 **① 状态卡**
 - 左侧圆点：绿=已连接，黄=重连中，灰=断开
@@ -68,7 +71,9 @@ adb install LanCmd-1.4.10.apk
 - 右上 `⋮` 菜单：立即重连 / 手动输入 IP / 断开 / 清除配对 / 清空日志 / 关闭后台常驻 / 关于
 
 **② 快捷操作**（两行 8 个，Material 3 卡片网格）
-信息 · 文件 · 进程 · 剪贴板 · 截屏 · 锁屏 · 重启 · 关机
+屏幕 · 摄像头 · 按键 · 消息 · 存储 · 进程 · 剪贴板 · 信息
+
+锁屏、重启和关机移到右上角菜单，电源操作保留二次确认。
 
 未连接时点任意图标会提示并顺便触发重连，不会静默失败。
 
@@ -213,9 +218,9 @@ LanCmd-UDP   UDP  47824
 
 1. 状态卡右侧的 **↑ 上传按钮**
 2. `⋮` →「发送文件到电脑」
-3. 文件浏览器里点底部「上传到此目录」
+3. 「存储」页点「上传」
 
-选完文件（支持**多选**）会弹出确认框，显示文件名和目标目录，目录可直接改。
+选完文件（支持**多选**）会弹出确认框，显示文件名和目标目录，并提示覆盖同名文件。存储页以当前目录为目标；首页上传入口可修改目录。
 确认后逐个上传，屏幕中间显示一个不阻塞操作的进度框：
 
 - 标题：`[2/5] photo.jpg`
@@ -226,24 +231,23 @@ LanCmd-UDP   UDP  47824
 
 ### 从电脑下文件
 
-文件浏览器里点任意文件 → 「下载到手机」，同样有进度框，取消会删掉不完整文件。
-保存到 `Android/data/com.aicode.lancmd/files/downloads/`。
+「存储」里点文件 →「下载到手机」，通过 Android 文件选择器指定保存位置；传输显示进度并支持取消，失败会清理未完成文件。
 
 ### 为什么会话式分块
 
 原来一次性把整个文件塞进一个 JSON 帧，base64 后膨胀 4/3，超过 32MB 就失败，
-大文件还会撑爆内存。现在改成 512KB 一块逐块发，接收端先写 `.lancmd-part`
+大文件还会撑爆内存。现在改成 512KB 一块逐块发，接收端先写 `目标.<会话ID>.lancmd-part`
 临时文件，全部到齐且 sha256 对上才原子改名成正式文件；中途取消或断线自动清理临时文件。
 
 默认单文件上限 4GB（`agent.json` 里的 `max_upload_bytes` 可改）。
 
 ### 文件管理器
 
-点「文件」进入，除了浏览还有：
+点「存储」进入，显示磁盘空间、可点击的目录导航与文件搜索，此外还有：
 
 - 点文件 → 下载 / 重命名 / 删除
-- 底部「上传到此目录」→ 直接传到当前目录
-- 底部「新建文件夹」
+- 工具栏「上传」→ 直接传到当前目录
+- 工具栏「新建」
 
 ---
 
@@ -266,8 +270,10 @@ LanCmd-UDP   UDP  47824
 | 手机操作 | 电脑侧行为 |
 |---|---|
 | 输入任意命令 | `cmd /c` 或 `powershell -Command` 执行，回传 stdout/stderr/退出码 |
-| 文件 | 浏览任意目录、点文件下载到手机（`Android/data/com.aicode.lancmd/files/downloads/`） |
-| 截屏 | GDI 抓取全屏，回到手机里显示（不落盘） |
+| 存储 | 磁盘容量、目录浏览、搜索、上传下载与文件管理 |
+| 屏幕 / 摄像头 | 本机允许后按帧预览，可选择保存当前 JPEG；无录音 |
+| 消息 | 在 Windows 桌面显示可关闭的消息框 |
+| 按键 | 本机允许后向当前前台应用发送组合键或文字 |
 | 剪贴板 | 读电脑剪贴板，也能把手机上编辑的文本写回电脑 |
 | 进程 | 列出进程 PID/内存 |
 | 锁屏 | `LockWorkStation` |
@@ -282,7 +288,7 @@ LanCmd-UDP   UDP  47824
 
 ## 五、Windows 端 exe
 
-**已编译的 Windows 版请从上方链接下载 `LanCmd-Windows-1.4.9.zip`。**
+**Windows 1.5.0 完整包见发布页。升级前运行 `LanCmdCtl.exe --stop`，替换整个目录后重新启动。**
 
 解压到任意目录，双击 `LanCmdAgent.exe` 就能跑。**目标电脑不用装 Python，也不用装编译器。**
 
@@ -292,6 +298,8 @@ LanCmd-Windows/
 ├── start.bat              命令行启动
 ├── LanCmdAgent.exe        接收端本体（29KB，无控制台窗口）
 ├── LanCmdCtl.exe          管理工具（53KB，有输出）
+├── LanCmdCapture.exe      画面采集辅助程序
+├── remote_features.py     授权、停止与输入逻辑
 ├── lan_command_agent.py   主逻辑，不要删
 ├── python/                自带的 Python 3.11 运行时
 └── 使用说明.txt
@@ -307,8 +315,7 @@ LanCmdCtl.exe --status                    :: 查状态
 LanCmdCtl.exe --stop                      :: 停止
 ```
 
-**为什么是两个 exe**：主程序编译成 GUI 子系统，"不显眼"靠的就是这个；代价是它自己带
-`--status` 看不到输出。所以另编一个控制台版专门做管理。两者共用同一份配置和 pid 文件。
+接收端启动器使用 GUI 子系统，普通后台运行没有控制台；`LanCmdCtl.exe` 提供状态和停止命令。共享期间另有持续可见的本机停止窗口。
 
 **怎么编出来的**：`mingw-w64` 交叉编译 `launcher.c`（aarch64 容器里也能产出 x86-64 PE），
 配官方 Windows embeddable Python 运行时。不依赖 PyInstaller，不需要 Windows 环境。
@@ -316,7 +323,7 @@ LanCmdCtl.exe --stop                      :: 停止
 改了 `lan_command_agent.py` 后重新出包：
 
 ```bash
-apt-get install -y gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64   # 一次性
+apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64   # 一次性
 cd windows && ./build_windows_exe.sh
 ```
 
@@ -332,7 +339,7 @@ cd windows && ./build_windows_exe.sh
 cd android
 export ANDROID_HOME=<你的 SDK>
 ./gradlew :app:assembleRelease    # app/build/outputs/apk/release/app-release.apk
-./gradlew :app:testDebugUnitTest  # 3 单测 + 3 跨语言集成测试
+./gradlew :app:testDebugUnitTest  # 路径、页面、客户端及跨语言集成测试
 ```
 
 签名用 `android/lancmd-release.jks`，口令放在 `keystore.properties`（不入库，见 `.gitignore`）。
@@ -341,13 +348,14 @@ export ANDROID_HOME=<你的 SDK>
 **ABI**：App 纯 Kotlin + AndroidX/Material，无 JNI/native 库，任何 ABI 都能装，
 arm64-v8a 设备直接使用。`ndk.abiFilters` 里保留 `arm64-v8a` 只是给将来加 native 库时定调。
 
-电脑端无需构建，纯标准库单文件。验证协议：
+电脑端 Python 逻辑只依赖标准库；屏幕与摄像头需要编译 `capture.cpp` 或使用完整 Windows 包。验证协议：
 
 ```bash
 python3 windows/lan_command_agent.py --auto-accept --console   # 终端 A
 python3 tools/test_client.py 127.0.0.1          # 基础功能（10 项）
 python3 tools/test_transfer.py 127.0.0.1        # 分块传输 + 进程管理（25 项）
 python3 tools/test_reconnect.py 127.0.0.1 8     # 断线重连（8 轮 RST 风暴）
+python3 -m unittest discover -s tools -p test_remote_features.py -v
 ```
 
 ---
@@ -371,7 +379,9 @@ lan-cmd/
 │   │       └── Protocol.kt           常量与路径工具
 │   └── app/src/test/              路径单测 + 跨语言协议/重连集成测试
 ├── windows/
-│   ├── lan_command_agent.py       接收端（标准库单文件，含看护线程）
+│   ├── lan_command_agent.py       接收端与看护线程
+│   ├── remote_features.py         本机授权和可撤销会话
+│   ├── capture.cpp                GDI / Media Foundation / WIC 画面采集
 │   ├── start_hidden.vbs           无窗口启动
 │   ├── start_console.bat          前台调试
 │   ├── install_autostart.bat      开机自启（HKCU）
@@ -421,13 +431,15 @@ lan-cmd/
   网卡分类实测（`WireGuard Tunnel`/`TAP-Windows` → VPN 排除，`本地连接*`/`Wi-Fi Direct` → 热点保留，
   `WLAN`/`VMware` → 普通保留）；三套协议测试仍全过
 
-**未验证**：真机/模拟器上的视觉渲染与前台服务行为（容器内无 Android 运行时）。
+1.5.0 额外验证：19 项共享授权/撤销/会话隔离测试；Robolectric 页面渲染与页面退出停止测试；原生画面辅助程序交叉编译；GitHub Windows 运行器通过原生授权/拒绝/停止、隐藏提示撤销、JPEG 屏幕采集与摄像头枚举检查。
+
+**待真机验证**：Windows 实际摄像头画面、多屏与缩放、真实前台按键，以及 Android 真机视觉、网络切换与前台服务保活。Robolectric 渲染不能替代设备测试。
 
 ---
 
 ## 九、边界与已知限制
 
-- **只有电脑端能“隐藏”**：`start_hidden.vbs` / exe 不显示窗口，但进程仍在任务管理器可见；
+- **只有电脑端能“隐藏”**：`start_hidden.vbs` / exe 可后台运行，画面/按键会话显示授权及停止窗口；进程在任务管理器可见；
   安卓端是正常可见的 App（外加一条低优先级常驻通知）。没有做进程名伪装、没有反卸载/守护。
 - **同一局域网**：优先靠 UDP 广播。跨网段、开了 AP 隔离的 Wi-Fi 发现不到，此时用“手动输入 IP”。
   VPN 与电脑热点场景已单独处理（见三·四节），但**手机连 VPN 且 VPN 客户端强制全局代理时**，
@@ -435,7 +447,7 @@ lan-cmd/
 - **热点模式下手机走移动数据会失效**：连电脑热点时手机通常没有互联网，属正常现象；
   如果系统自动切回移动数据，会连不上，需要在 Wi-Fi 设置里关掉“自动切换”。
 - **传输未加密**：JSON 明文 + token 明文的 TCP，仅适用于你信任的家庭/办公局域网。
-- **Windows 1.4.9 默认免确认**：仅在信任的局域网使用；需要首次连接人工确认时运行
+- **Windows 接收端普通连接默认免确认**：仅在信任的局域网使用；需要首次连接人工确认时运行
   `LanCmdCtl.exe --no-auto-accept`，确认一次后该设备可凭 token 重连。
 - 截屏、锁屏、剪贴板、开关机走 Windows API，只在 Windows 接收端生效；
   `sh` 模式是给 Linux/macOS 上跑同一份接收端调试用。

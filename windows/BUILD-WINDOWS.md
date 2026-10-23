@@ -1,153 +1,50 @@
-# Windows 端 exe 说明
+# Windows 1.5.0 构建
 
-## 结论先说
+发布 ZIP 为 Windows x64 解压包，适用于 Windows 10/11。目标电脑不需要安装 Python。升级时先执行 `LanCmdCtl.exe --stop`，替换完整目录，再启动；配置继续保存在 `%APPDATA%\LanCmd`。
 
-**已经有编译好的成品了，直接用 `dist/LanCmd-Windows-1.2.zip`。**
+## 目录
 
-解压到任意目录，双击 `LanCmdAgent.exe` 就能跑。**目标电脑不需要装 Python，也不需要装任何编译工具。**
-
-```
+```text
 LanCmd-Windows/
-├── LanCmdAgent.exe        主程序（29KB，无控制台窗口）
-├── LanCmdCtl.exe          管理工具（53KB，有控制台输出）
-├── lan_command_agent.py   主逻辑，不要删
-├── python/                自带的 Python 3.11 运行时（约 19MB）
+├── Start.exe              可见的启动和管理面板
+├── LanCmdAgent.exe        后台接收服务启动器
+├── LanCmdCtl.exe          控制台管理工具
+├── LanCmdCapture.exe      GDI / Media Foundation / WIC JPEG 采集
+├── lan_command_agent.py   协议、命令和连接管理
+├── remote_features.py     本机授权、停止、消息和按键
+├── python/               官方 embeddable Python 3.11.9 x64
 └── 使用说明.txt
 ```
 
-把整个文件夹留着，别只拷 exe。
+整个目录需一起保留。接收服务启动后没有主窗口，屏幕、摄像头和键盘会话有持续可见的本机授权与停止窗口，关闭窗口立即结束会话。
 
----
-
-## 这些 exe 是怎么来的
-
-之前我说"容器里打不出来"，那是针对 PyInstaller —— 它确实不能跨平台。
-但**交叉编译**可以：用 `mingw-w64` 的 GCC 直接产出 Windows x86-64 PE 文件，
-再配一份官方 Windows embeddable Python 运行时。
-
-```
-launcher.c  ──x86_64-w64-mingw32-gcc──▶  LanCmdAgent.exe   (PE32+ / GUI 子系统)
-lancmd.rc   ──x86_64-w64-mingw32-windres──▶  res.o  (图标 + 中文版本信息)
-python-3.11.9-embed-amd64.zip  ──▶  python/  (官方运行时，免安装)
-```
-
-`launcher.c` 只做四件事：
-
-1. 定位同目录的 `lan_command_agent.py` 和 `python/pythonw.exe`
-2. 设置 `LANCMD_EXE` 环境变量指向自己（脚本据此把自启注册到 exe 而不是 pythonw）
-3. 用 `CreateProcessW` + `CREATE_NO_WINDOW` 启动（这就是"没有黑窗口"的由来）
-4. 把命令行参数原样透传
-
-两个 exe 是同一个 `launcher.c`，靠编译宏区分：
-
-| | 编译方式 | PE 子系统 | 行为 |
-|---|---|---|---|
-| `LanCmdAgent.exe` | 默认 | `WINDOWS_GUI` | 启动后立即返回，**全程无窗口** |
-| `LanCmdCtl.exe` | `-DLANCMD_CONSOLE` | `WINDOWS_CUI` | 继承控制台，等子进程结束并返回其退出码 |
-
----
-
-## 想自己重新编译
-
-### 方式一：在 Linux / 容器里交叉编译（不需要 Windows）
+## Linux 交叉编译
 
 ```bash
-# 一次性装工具链（aarch64 宿主也能装，输出仍是 x86-64 PE）
-apt-get install -y gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64
-
-cd windows
-./build_windows_exe.sh
-# 产物：../dist/LanCmd-Windows-<版本>.zip
+apt-get install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64 curl unzip
+bash windows/build_windows_exe.sh
 ```
 
-脚本会做：下载官方 embed Python（缓存复用）→ windres 编资源 → 编两个 exe →
-组装目录 → 打 zip。改了 `lan_command_agent.py` 重跑一次即可。
+脚本下载并缓存官方 Python 运行时，编译资源、三个启动和管理 EXE、画面辅助 EXE，随后打包 `dist/LanCmd-Windows-<版本>.zip`。支持设置 `CC`、`CXX`、`RC` 使用兼容工具链，例如 llvm-mingw。
 
-### 方式二：在 Windows 上用 PyInstaller
+辅助程序采用 C++17 和 Windows 系统库，静态链接 C++ 运行时。屏幕通过 GDI 获取全部显示器，摄像头通过 Media Foundation 获取一帧，WIC 输出 JPEG；不录音、不在电脑端保存画面。屏幕最大 1280×960，摄像头最大 960×960，保持比例。运行时权限和会话撤销由 Python 接收端控制。
 
-双击 `build_exe.bat`（会自己装 PyInstaller）。产物是自解压形式的单文件 exe，
-每个约 8–12MB。这种方式不需要额外运行时目录，但：
+## Windows 上构建
 
-- 每次启动要解压到临时目录，冷启动慢 1–3 秒
-- 单文件结构容易被杀软误报
+在安装了 MSVC C++ 工具和 Windows SDK 的 **x64 Native Tools Command Prompt** 运行 `build_exe.bat`。脚本编译 `LanCmdCapture.exe` 并使用 PyInstaller 构建接收端和管理工具。也可从官方同版本 ZIP 提取 `LanCmdCapture.exe` 放在脚本目录，再构建 Python 部分。
 
-### 方式三：干脆不编译
+PyInstaller 产物需连同 `LanCmdCapture.exe` 分发。它与主发布 ZIP 使用不同的启动方式，每次启动可能解压运行时。主发布 ZIP 采用 MinGW 启动器和官方 Python 运行时。
 
-电脑上装了 Python 的话，直接双击 `start_hidden.vbs` 就行，效果一样。
+源码方式需要 Python，并需要同目录 `remote_features.py`；屏幕和摄像头还需要已编译的 `LanCmdCapture.exe`。embeddable Python 的隔离模块路径由接收端显式补入脚本目录。
 
----
+## 验证
 
-## 运行时为什么不带 tkinter
-
-官方 embeddable 包不含 `tkinter`（需要额外拖 tcl/tk 的 dll 和脚本目录，约多 10MB）。
-首次配对那个"是否允许连接"的确认框会因此走**回退分支**：
-
-```python
-try:
-    import tkinter as tk          # 打包版没有，抛异常
-except Exception:
-    # 回退：系统原生 MessageBox，同样是 是/否 两个按钮
-    ctypes.windll.user32.MessageBoxW(None, msg + "\n\n是否允许？", title, 0x04 | 0x40 | 0x10000)
+```bash
+python3 -m unittest discover -s tools -p test_remote_features.py -v
 ```
 
-已验证该分支：弹框标题、设备名+IP、按钮组合都对，点「否」会正确拒绝。
-缺点是样子朴素（系统对话框），优点是更可靠、不依赖 tcl/tk。
+测试涵盖配对检查、作用域与连接隔离、授权到期、本机撤销、采集中途停止、按键验证和消息限制。基础协议、文件传输与重连沿用 `tools/test_*.py`。
 
----
+GitHub Windows 运行器已通过 MSVC 构建、原生授权/拒绝/停止窗口、隐藏提示后撤销、屏幕 JPEG 采集和摄像头枚举检查。Windows 实机仍需验证实际摄像头画面、设备隐私权限、显示器缩放，以及 Unicode 按键在真实前台应用中的行为。
 
-## 使用
-
-```bat
-:: 启动（无窗口）
-LanCmdAgent.exe
-
-:: 管理（有回显）
-LanCmdCtl.exe --status
-LanCmdCtl.exe --install-autostart
-LanCmdCtl.exe --stop
-LanCmdCtl.exe --auto-accept
-LanCmdCtl.exe --reset-pairing
-LanCmdCtl.exe --uninstall-autostart
-```
-
-`LanCmdCtl.exe` 不带参数会打印帮助。
-
-`LanCmdAgent.exe` 也能接受这些参数并执行，但没有控制台，你看不到输出——
-所以管理一律用 Ctl，主程序只管启动。
-
----
-
-## 已验证 / 未验证
-
-**已验证（容器内）**
-
-- 交叉编译零警告；PE 头解析确认：`x86-64` / 64 位 / Agent 是 `WINDOWS_GUI`、Ctl 是 `WINDOWS_CUI`
-- 图标（7 个尺寸）与中文版本信息已嵌入资源段（10656 字节，`--codepage=65001` 才能正确写入中文）
-- 宽字符串全部就位：`lan_command_agent.py`、`pythonw.exe`、`LANCMD_EXE` 等
-- 分发包 26 个文件、9.5MB，解压后 19MB，关键依赖齐全（`python311.dll`、`_ctypes.pyd`、`libffi-8.dll`、`_socket.pyd`、`_hashlib.pyd`、`libcrypto-3.dll`、`vcruntime140.dll`）
-- `LANCMD_EXE` 注入后自启命令正确指向 exe；无该变量时回退到 pythonw
-- 无 tkinter 时原生弹框工作正常，点「否」正确拒绝
-- 协议层：基础功能 10/10、传输+进程 25/25、断线重连 5/5 全过
-
-**未验证**
-
-容器是 aarch64 Linux，跑不了 x86-64 Windows 程序，所以 exe 的**实际运行时行为**没实测。
-逻辑上各环节都对齐了，但如果真机上有问题，最可能是这两处：
-
-1. `CreateProcessW` 的相对路径解析 —— 启动器传的 `dir` 作为工作目录，理论上没问题
-2. embed Python 的 `sys.path` —— 依赖 `python311._pth`（内容为 `python311.zip` + `.`），脚本从完整路径启动，Python 会自动把脚本目录加入 `sys.path[0]`
-
-真出问题的话，先用 `LanCmdCtl.exe` 跑（有控制台），能直接看到 Python 的报错。
-
----
-
-## 常见问题
-
-| 现象 | 处理 |
-|---|---|
-| 双击没反应 | 正常，它是无窗口程序。`LanCmdCtl.exe --status` 确认进程在不在 |
-| 弹"启动失败"框 | 缺文件。确认 `lan_command_agent.py` 和 `python\pythonw.exe` 跟 exe 同目录 |
-| 杀软报毒 | 自行编译的启动器 + 官方 Python 运行时，属误报，加信任 |
-| 32 位 Windows | 这套是 x86-64，跑不了。用方式二在 32 位 Python 下重编 |
-| 自启失效 | 文件夹移动过。重新执行 `LanCmdCtl.exe --install-autostart` |
-| 手机连不上 | 防火墙放行 → 同一 Wi-Fi → 关掉路由器 AP 隔离 → 手动输 IP |
+常见问题：缺少辅助程序时完整解压新版本；摄像头不可用时检查 Windows「隐私和安全性 → 摄像头 → 允许桌面应用访问」及其他应用是否占用设备；Windows N 版本可能需要 Media Feature Pack。输入控制要求桌面已解锁，不能操作 UAC 安全桌面或权限高于接收端的应用。

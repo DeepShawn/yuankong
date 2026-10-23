@@ -19,3 +19,5 @@ dist/
 
 # 交叉编译中间产物
 windows/build-win/
+windows/LanCmdCapture.exe
+*.obj

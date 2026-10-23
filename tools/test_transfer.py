@@ -106,6 +106,18 @@ def main():
     ab = c.call("upload", action="abort", sid=sid4)
     check("取消上传", ab.get("ok") and not os.path.exists(os.path.join(work, "abort.bin")))
 
+    # 两个上传写同一目标时，取消其中一个不能删除另一个的临时文件。
+    shared = os.path.join(work, "concurrent.bin")
+    first = c.call("upload", action="begin", path=shared, size=3)["sid"]
+    second = c.call("upload", action="begin", path=shared, size=3)["sid"]
+    c.call("upload", action="chunk", sid=first, seq=0, data=base64.b64encode(b"one").decode())
+    c.call("upload", action="chunk", sid=second, seq=0, data=base64.b64encode(b"two").decode())
+    c.call("upload", action="abort", sid=first)
+    second_end = c.call("upload", action="end", sid=second, sha256=hashlib.sha256(b"two").hexdigest())
+    check("同名并发上传互不破坏", second_end.get("ok") and open(shared, "rb").read() == b"two")
+    check("取消后临时文件清理", not any(name.endswith(".lancmd-part") for name in os.listdir(work)))
+    c.call("rm", path=shared)
+
     # ---------------- 改名 / 建目录 / 删除 ----------------
     r = c.call("rename", path=remote, to=os.path.join(work, "renamed.bin"))
     check("重命名", r.get("ok"), r.get("error", ""))

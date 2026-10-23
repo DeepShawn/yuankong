@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """LanCmd Agent - 局域网命令接收端（Windows 后台静默运行，兼容 Linux/macOS 调试）。
 
-只依赖标准库。默认不弹任何窗口；日志写入用户配置目录。
+Python 部分只依赖标准库；画面采集使用同目录 LanCmdCapture.exe。
+后台接收无需主窗口；屏幕、摄像头和按键会话始终保留本机授权与停止窗口。
 
 常用:
     pythonw lan_command_agent.py                 # 静默启动（无控制台）
@@ -31,14 +32,13 @@ import secrets
 import shutil
 import signal
 import socket
-import struct
 import subprocess
 import sys
 import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "1.4.9"
+VERSION = "1.5.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -580,6 +580,7 @@ def cmd_info():
         "firewall_ok": firewall_status()["ok"],
         "firewall_block_inbound": firewall_status()["block_inbound"],
         "admin": is_admin(),
+        "features": remote_capabilities()["features"],
     }
 
 
@@ -600,6 +601,14 @@ def _drives():
         return [{"path": "/", "total": u.total, "free": u.free}]
     except Exception:
         return []
+
+
+def cmd_storage():
+    drives = _drives()
+    for drive in drives:
+        drive["used"] = max(0, drive["total"] - drive["free"])
+        drive["percent"] = round(drive["used"] * 100 / drive["total"], 1) if drive["total"] else 0
+    return {"drives": drives, "home": os.path.expanduser("~")}
 
 
 def cmd_ls(path):
@@ -738,8 +747,8 @@ def cmd_upload(q, st):
             os.makedirs(parent, exist_ok=True)
 
         sid = _new_sid()
-        part = path + ".lancmd-part"
-        fh = open(part, "wb")
+        part = path + "." + sid + ".lancmd-part"
+        fh = open(part, "xb")
         st.uploads[sid] = {
             "fh": fh,
             "path": path,
@@ -922,74 +931,6 @@ def cmd_mkdir(path):
     return {"path": os.path.abspath(os.path.expanduser(path))}
 
 
-# --- 截屏（Windows GDI，直接输出 BMP，安卓可解码）
-
-class _BITMAPINFOHEADER(ctypes.Structure):
-    _fields_ = [
-        ("biSize", ctypes.c_uint32),
-        ("biWidth", ctypes.c_int32),
-        ("biHeight", ctypes.c_int32),
-        ("biPlanes", ctypes.c_uint16),
-        ("biBitCount", ctypes.c_uint16),
-        ("biCompression", ctypes.c_uint32),
-        ("biSizeImage", ctypes.c_uint32),
-        ("biXPelsPerMeter", ctypes.c_int32),
-        ("biYPelsPerMeter", ctypes.c_int32),
-        ("biClrUsed", ctypes.c_uint32),
-        ("biClrImportant", ctypes.c_uint32),
-    ]
-
-
-class _BITMAPINFO(ctypes.Structure):
-    _fields_ = [("bmiHeader", _BITMAPINFOHEADER), ("bmiColors", ctypes.c_uint32 * 3)]
-
-
-def cmd_screenshot(scale=1.0):
-    if not IS_WIN:
-        raise RpcError("截屏仅在 Windows 接收端可用")
-    user32 = ctypes.windll.user32
-    gdi32 = ctypes.windll.gdi32
-    try:
-        user32.SetProcessDPIAware()
-    except Exception:
-        pass
-    w = user32.GetSystemMetrics(0)
-    h = user32.GetSystemMetrics(1)
-    if w <= 0 or h <= 0:
-        raise RpcError("无法获取屏幕尺寸")
-    hdc = user32.GetDC(0)
-    memdc = gdi32.CreateCompatibleDC(hdc)
-    bmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
-    old = gdi32.SelectObject(memdc, bmp)
-    try:
-        gdi32.BitBlt(memdc, 0, 0, w, h, hdc, 0, 0, 0x00CC0020)  # SRCCOPY
-        bi = _BITMAPINFO()
-        bi.bmiHeader.biSize = ctypes.sizeof(_BITMAPINFOHEADER)
-        bi.bmiHeader.biWidth = w
-        bi.bmiHeader.biHeight = -h  # 负数 = 自上而下
-        bi.bmiHeader.biPlanes = 1
-        bi.bmiHeader.biBitCount = 32
-        bi.bmiHeader.biCompression = 0  # BI_RGB
-        stride = w * 4
-        buf = ctypes.create_string_buffer(stride * h)
-        got = gdi32.GetDIBits(memdc, bmp, 0, h, buf, ctypes.byref(bi), 0)
-        if got == 0:
-            raise RpcError("GetDIBits 失败")
-        pixels = buf.raw
-    finally:
-        gdi32.SelectObject(memdc, old)
-        gdi32.DeleteObject(bmp)
-        gdi32.DeleteDC(memdc)
-        user32.ReleaseDC(0, hdc)
-
-    header = struct.pack("<2sIHHI", b"BM", 14 + 40 + len(pixels), 0, 0, 54)
-    info = struct.pack(
-        "<IiiHHIIiiII", 40, w, -h, 1, 32, 0, len(pixels), 2835, 2835, 0, 0
-    )
-    raw = header + info + pixels
-    return {"w": w, "h": h, "format": "bmp", "data": base64.b64encode(raw).decode("ascii")}
-
-
 def cmd_lock():
     if IS_WIN:
         subprocess.run(
@@ -1125,7 +1066,31 @@ def cmd_kill(pid, force=True):
     return {"pid": pid, "killed": True}
 
 
+# The embeddable Python runtime uses an isolated module path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from remote_features import RemoteFeatures
+
+_capture_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+_remote = RemoteFeatures(RpcError, log, os.path.join(_capture_dir, "LanCmdCapture.exe"))
+
+
+def remote_capabilities():
+    features = ["storage"]
+    if IS_WIN:
+        features.extend(["message", "input"])
+        if os.path.isfile(_remote.backend.capture_exe):
+            features.extend(["screen", "camera"])
+    return {"version": VERSION, "features": features, "session_seconds": 300}
+
+
 HANDLERS = {
+    "capabilities": lambda q, st: remote_capabilities(),
+    "storage": lambda q, st: cmd_storage(),
+    "session": _remote.session,
+    "screen": lambda q, st: _remote.frame(q, st, "screen"),
+    "camera": lambda q, st: _remote.frame(q, st, "camera"),
+    "input": _remote.keyboard,
+    "message": _remote.message,
     "info": lambda q, st: cmd_info(),
     "exec": lambda q, st: run_exec(
         q.get("line", ""), q.get("shell", "cmd"), q.get("cwd"), q.get("timeout")
@@ -1138,7 +1103,7 @@ HANDLERS = {
     "rm": lambda q, st: cmd_rm(q.get("path", "")),
     "mkdir": lambda q, st: cmd_mkdir(q.get("path", "")),
     "rename": lambda q, st: cmd_rename(q.get("path", ""), q.get("to", "")),
-    "screenshot": lambda q, st: cmd_screenshot(),
+    "screenshot": lambda q, st: _remote.frame(q, st, "screen"),
     "lock": lambda q, st: cmd_lock(),
     "power": lambda q, st: cmd_power(q.get("action", "")),
     "clip": lambda q, st: cmd_clip(q.get("action", "get"), q.get("text", "")),
@@ -1218,6 +1183,7 @@ class ClientState(object):
         self.last_active = time.time()
 
     def close_transfers(self):
+        _remote.close(self)
         for table in (self.uploads, self.downloads):
             for s in list(table.values()):
                 try:

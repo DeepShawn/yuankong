@@ -1,0 +1,34 @@
+name: Windows feature checks
+on:
+  push:
+    paths:
+      - windows/**
+      - tools/test_remote_features.py
+      - tools/test_windows_features.py
+      - .github/workflows/windows-features.yml
+  pull_request:
+    paths:
+      - windows/**
+      - tools/test_remote_features.py
+      - tools/test_windows_features.py
+      - .github/workflows/windows-features.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Build capture helper
+        shell: cmd
+        run: cl /nologo /O2 /EHsc /std:c++17 /Fe:windows\LanCmdCapture.exe windows\capture.cpp /link windowscodecs.lib mf.lib mfreadwrite.lib mfplat.lib mfuuid.lib ole32.lib gdi32.lib user32.lib uuid.lib
+      - name: Session isolation and revocation
+        run: python -m unittest discover -s tools -p test_remote_features.py -v
+      - name: Native consent window and capture
+        run: python -m unittest discover -s tools -p test_windows_features.py -v

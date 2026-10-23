@@ -27,5 +27,9 @@ class ProtocolTest {
         assertEquals("C:\\", parentOf("C:\\Users"))
         assertEquals("/home", parentOf("/home/u"))
         assertEquals("/", parentOf("/a"))
+        assertEquals("/", parentOf("/"))
+        assertEquals("C:\\", parentOf("C:\\"))
+        assertEquals("C:\\", parentOf("C:"))
+        assertEquals("\\\\server\\share\\", parentOf("\\\\server\\share\\"))
     }
 }

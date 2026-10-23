@@ -13,11 +13,12 @@ WORK="$(pwd)/build-win"
 PKG="$WORK/pkg/LanCmd-Windows"
 OUT="$(pwd)/../dist/LanCmd-Windows-${VER}.zip"
 
-CC=x86_64-w64-mingw32-gcc
-RC=x86_64-w64-mingw32-windres
+CC=${CC:-x86_64-w64-mingw32-gcc}
+RC=${RC:-x86_64-w64-mingw32-windres}
+CXX=${CXX:-x86_64-w64-mingw32-g++}
 
 need() { command -v "$1" >/dev/null || { echo "[X] 缺少 $1"; exit 1; }; }
-need $CC; need $RC; need unzip; need python3
+need "$CC"; need "$RC"; need "$CXX"; need unzip; need python3
 
 echo "== 版本 $VER =="
 
@@ -42,13 +43,15 @@ $CC -O2 -s -Wall -DUNICODE -D_UNICODE -DLANCMD_CONSOLE -o "$WORK/LanCmdCtl.exe" 
     launcher.c "$WORK/res.o" -lshell32 -static
 $CC -O2 -s -Wall -municode -mwindows -o "$WORK/Start.exe" \
     start_panel.c "$WORK/res.o" -ladvapi32 -lws2_32 -lshell32 -lcomctl32 -static
+$CXX -O2 -s -Wall -Wextra -static -std=c++17 -o "$WORK/LanCmdCapture.exe" \
+    capture.cpp -lwindowscodecs -lmf -lmfreadwrite -lmfplat -lmfuuid -lole32 -lgdi32 -luuid
 
 # 4) 组装
 echo "[4/5] 组装目录"
 rm -rf "$PKG"
 mkdir -p "$PKG/python"
-cp "$WORK/LanCmdAgent.exe" "$WORK/LanCmdCtl.exe" "$WORK/Start.exe" "$PKG/"
-cp lan_command_agent.py start.bat 诊断.bat 启动.vbs "$PKG/"
+cp "$WORK/LanCmdAgent.exe" "$WORK/LanCmdCtl.exe" "$WORK/Start.exe" "$WORK/LanCmdCapture.exe" "$PKG/"
+cp lan_command_agent.py remote_features.py start.bat 诊断.bat 启动.vbs "$PKG/"
 (cd "$PKG/python" && unzip -qo "$WORK/$EMBED_ZIP")
 # 精简：接收端用不到这些
 rm -f "$PKG/python"/_msi.pyd "$PKG/python"/_sqlite3.pyd "$PKG/python"/sqlite3.dll \

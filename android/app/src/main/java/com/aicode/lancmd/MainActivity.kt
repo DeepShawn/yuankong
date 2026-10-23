@@ -1,14 +1,13 @@
 package com.aicode.lancmd
 
 import android.content.Context
-import android.graphics.BitmapFactory
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
-import android.util.Base64
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
@@ -24,6 +23,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.aicode.lancmd.net.ConnectionManager
 import com.aicode.lancmd.net.ConnectionManager.LogKind
@@ -141,6 +143,16 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             android.util.Log.e("LanCmd", "首帧刷新失败", t)
         }
         requestNotificationPermission()
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val root = findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0)
+        val padding = intArrayOf(root.paddingLeft, root.paddingTop, root.paddingRight, root.paddingBottom)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            view.setPadding(padding[0] + bars.left, padding[1] + bars.top, padding[2] + bars.right,
+                padding[3] + maxOf(bars.bottom, ime.bottom))
+            insets
+        }
     }
 
     private fun requestNotificationPermission() {
@@ -188,20 +200,21 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         val row1 = findViewById<LinearLayout>(R.id.rowActions1)
         val row2 = findViewById<LinearLayout>(R.id.rowActions2)
         val actions = listOf(
-            Action(R.drawable.ic_info, getString(R.string.q_info)) { showInfo() },
-            Action(R.drawable.ic_folder, getString(R.string.q_files)) { showDirDialog() },
+            Action(R.drawable.ic_screenshot, "屏幕") { openFeature(MediaActivity::class.java, "screen") },
+            Action(R.drawable.ic_camera, "摄像头") { openFeature(MediaActivity::class.java, "camera") },
+            Action(R.drawable.ic_keyboard, "按键") { openFeature(ControlActivity::class.java, "input") },
+            Action(R.drawable.ic_message, "消息") { openFeature(ControlActivity::class.java, "message") },
+            Action(R.drawable.ic_folder, "存储") { openFeature(StorageActivity::class.java) },
             Action(R.drawable.ic_process, getString(R.string.q_ps)) { showProcesses() },
             Action(R.drawable.ic_clipboard, getString(R.string.q_clip)) { showClipboard() },
-            Action(R.drawable.ic_screenshot, getString(R.string.q_shot)) { takeScreenshot() },
-            Action(R.drawable.ic_lock, getString(R.string.q_lock)) { doLock() },
-            Action(R.drawable.ic_restart, getString(R.string.q_restart)) { confirmPower("restart", "重启") },
-            Action(R.drawable.ic_power, getString(R.string.q_shutdown)) { confirmPower("shutdown", "关机") }
+            Action(R.drawable.ic_info, getString(R.string.q_info)) { showInfo() }
         )
         actions.forEachIndexed { i, a ->
             val parent = if (i < 4) row1 else row2
             val item = layoutInflater.inflate(R.layout.view_action, parent, false)
             item.findViewById<ImageView>(R.id.ivIcon).setImageResource(a.icon)
             item.findViewById<TextView>(R.id.tvLabel).text = a.label
+            item.contentDescription = a.label
             item.setOnClickListener {
                 if (!ConnectionManager.isConnected()) {
                     toast("未连接，正在重连…")
@@ -215,6 +228,10 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     }
 
     private class Action(val icon: Int, val label: String, val body: () -> Unit)
+
+    private fun openFeature(type: Class<*>, kind: String = "") {
+        startActivity(Intent(this, type).putExtra("kind", kind))
+    }
 
     // ------------------------------------------------------------ 输入区
 
@@ -721,28 +738,6 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         }
     }
 
-    private fun takeScreenshot() {
-        note("正在截取电脑屏幕…")
-        run("screenshot", JSONObject(), timeoutMs = 60_000) { r ->
-            val bytes = Base64.decode(r.optString("data"), Base64.DEFAULT)
-            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            if (bmp == null) {
-                log("截图解码失败", LogKind.ERROR)
-                return@run
-            }
-            val iv = ImageView(this)
-            iv.setImageBitmap(bmp)
-            iv.adjustViewBounds = true
-            iv.scaleType = ImageView.ScaleType.FIT_CENTER
-            AlertDialog.Builder(this)
-                .setTitle("${r.optInt("w")} × ${r.optInt("h")}")
-                .setView(iv)
-                .setPositiveButton("好", null)
-                .show()
-            log("✓ 已获取截图 ${r.optInt("w")}×${r.optInt("h")}", LogKind.OK)
-        }
-    }
-
     private fun doLock() {
         run("lock", JSONObject()) { log("✓ 电脑已锁屏", LogKind.OK) }
     }
@@ -821,6 +816,9 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         popup.menu.add(0, 9, 6, "查看崩溃日志")
         popup.menu.add(0, 8, 7, getString(R.string.menu_send_file))
         popup.menu.add(0, 7, 7, if (LanCmdService.isRunning) "关闭后台常驻" else "开启后台常驻")
+        popup.menu.add(0, 20, 8, "锁定电脑")
+        popup.menu.add(0, 21, 9, "重启电脑")
+        popup.menu.add(0, 22, 10, "关闭电脑")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> ConnectionManager.retryNow()
@@ -838,6 +836,9 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                 7 -> toggleResident()
                 8 -> startPickFiles()
                 9 -> showCrashLog()
+                20 -> doLock()
+                21 -> confirmPower("restart", "重启")
+                22 -> confirmPower("shutdown", "关机")
             }
             true
         }
@@ -931,12 +932,13 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
 
     private fun about() {
         AlertDialog.Builder(this)
-            .setTitle("LanCmd 1.0")
+            .setTitle("LanCmd ${BuildConfig.VERSION_NAME}")
             .setMessage(
                 "手机控制同一局域网内的电脑。\n\n" +
                     "· 电脑端常驻后台，手机断线不影响它\n" +
                     "· 掉线后自动重连，网络恢复立即重试\n" +
-                    "· 配对一次后无需再确认\n\n" +
+                    "· 配对后可自动重连\n" +
+                    "· 屏幕、摄像头和按键需在电脑端授权，可随时停止\n\n" +
                     "电脑端：pythonw lan_command_agent.py"
             )
             .setPositiveButton("好", null)
