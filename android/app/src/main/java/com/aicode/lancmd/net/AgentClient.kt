@@ -1,9 +1,10 @@
 package com.aicode.lancmd.net
 
 import android.net.Network
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -17,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * 一条 TCP 长连接，行分隔 JSON 帧。所有 call 都必须在 IO 线程上挂起等待。
+ * 一条 TCP 长连接，行分隔 JSON 帧。call 自动在 IO 线程发送，可从界面协程调用。
  */
 class AgentClient(val host: String, val port: Int) {
 
@@ -28,9 +29,9 @@ class AgentClient(val host: String, val port: Int) {
     private val serial = AtomicInteger(0)
     private val inFlight = AtomicInteger(0)
 
-    /** 除自己以外还有几个请求在路上。服务端在同一个连接线程里串行执行命令，
-     *  长命令（pip install、dir /s…）会顺带把 ping 一起拖住，不能当掉线处理。 */
-    fun otherPending(): Int = (inFlight.get() - 1).coerceAtLeast(0)
+    /** 所有在途请求的数量。心跳在发起前或结束后调用，不能再减去不存在的自己。
+     *  服务端串行执行命令，长命令拖住 ping 时应视为繁忙。 */
+    fun pendingRequests(): Int = inFlight.get()
 
     @Volatile
     var closed = true
@@ -118,7 +119,7 @@ class AgentClient(val host: String, val port: Int) {
         cmd: String,
         params: JSONObject = JSONObject(),
         timeoutMs: Long = 30_000
-    ): JSONObject {
+    ): JSONObject = withContext(Dispatchers.IO) {
         if (closed) throw IOException("未连接")
         val id = serial.incrementAndGet()
         val req = JSONObject().put("id", id).put("cmd", cmd)
@@ -131,26 +132,22 @@ class AgentClient(val host: String, val port: Int) {
         pending[id] = deferred
         inFlight.incrementAndGet()
         try {
-            val w = writer ?: throw IOException("未连接")
-            synchronized(w) {
-                w.write(req.toString())
-                w.write("\n")
-                w.flush()
+            try {
+                val w = writer ?: throw IOException("未连接")
+                synchronized(w) {
+                    if (closed) throw IOException("连接已断开")
+                    w.write(req.toString())
+                    w.write("\n")
+                    w.flush()
+                }
+            } catch (e: Exception) {
+                throw IOException("发送失败（" + describe(e) + "）", e)
             }
-        } catch (e: Exception) {
-            pending.remove(id)
-            inFlight.decrementAndGet()
-            throw IOException("发送失败（" + describe(e) + "）")
-        }
-        return try {
-            withTimeout(timeoutMs) { deferred.await() }
-        } catch (e: CancellationException) {
-            pending.remove(id)
-            throw e
-        } catch (e: Exception) {
-            pending.remove(id)
-            throw IOException("请求超时: " + cmd)
+            // 只把本请求的等待超时转换为提示；外层取消与真实断线原因原样传播。
+            withTimeoutOrNull(timeoutMs) { deferred.await() }
+                ?: throw IOException("请求超时: " + cmd)
         } finally {
+            pending.remove(id)
             inFlight.decrementAndGet()
         }
     }

@@ -4,6 +4,12 @@
 电脑端是后台静默接收程序（无窗口），**一直在线**；手机端开机即自动发现、**不用输连接码**、
 **掉线自动重连**。
 
+**最新修复：Android 1.4.10 修复已连接却无法发送命令的问题。**
+
+- [下载 Android 1.4.10 APK](https://github.com/DeepShawn/yuankong/releases/download/v1.4.10/LanCmd-1.4.10.apk)
+- [下载 Windows 1.4.9 接收端](https://github.com/DeepShawn/yuankong/releases/download/v1.4.9/LanCmd-Windows-1.4.9.zip)（本次无需更新）
+- Android 1.4.10 使用新签名，**从旧版升级须先卸载再安装**，应用内连接配置和历史记录会丢失。
+
 ```
 ┌──────────────┐   UDP 47824 广播探测/应答   ┌──────────────────────┐
 │ 安卓 App      │ ──────────────────────────▶ │ Windows 接收端        │
@@ -19,7 +25,7 @@
 
 ### 1. 电脑端（Windows）
 
-需要 Python 3.8+（安装时勾选 *Add Python to PATH*）。把 `windows/` 整个目录拷到电脑上：
+发布压缩包自带 Python，解压后即可运行；从源码运行才需要另外安装 Python 3.8+。
 
 - **双击 `Start.exe`** ← 推荐。弹出小面板，能看见运行状态，一键启动/停止/开机自启。
 
@@ -33,21 +39,18 @@
 启动后电脑不弹任何窗口，只在任务管理器里有一个 `pythonw.exe` 进程。
 配置与日志在 `%APPDATA%\LanCmd\`（`agent.json`、`agent.log`、`paired.json`）。
 
-首次连接时电脑会弹一次确认框（“设备 Pixel 7 请求控制本机”），点“是”之后
-**该手机永久免确认**，以后打开 App 就直连。
-
-想彻底连这一次确认也不要，在电脑上执行一次：
+Windows 1.4.9 默认免确认，手机连接后直接授权。需要恢复首次连接人工确认时执行：
 
 ```bat
-python lan_command_agent.py --auto-accept
+LanCmdCtl.exe --no-auto-accept
 ```
 
 ### 2. 手机端（Android 7.0+，arm64-v8a）
 
-安装 `dist/LanCmd-1.3.apk`：
+从上方链接下载 `LanCmd-1.4.10.apk` 后安装：
 
 ```bash
-adb install -r dist/LanCmd-1.3.apk
+adb install LanCmd-1.4.10.apk
 ```
 
 打开 App 自动扫描并连上唯一的那台电脑；有多台时弹列表让你选。
@@ -101,7 +104,7 @@ adb install -r dist/LanCmd-1.3.apk
 |---|---|
 | 连接断开（Wi-Fi 抖动、电脑重启） | 立即重连，失败按 0.8s→1.5s→2.5s→4s→6s→8s→12s 退避，无限重试 |
 | 网络恢复（切 Wi-Fi、重连热点） | `ConnectivityManager` 回调，跳过倒计时立刻重试 |
-| 心跳超时 | 每 20s ping，连续 2 次 8s 超时 → 主动断开触发重连 |
+| 心跳超时 | 每 20s ping，连续 3 次 10s 超时 → 主动断开触发重连；有命令执行中时暂停心跳判定 |
 | 电脑 IP 变化 | 每 3 次失败重新 UDP 广播，按 `agent_id` 认回同一台电脑 |
 | 首次配对过 | 用本地 token 直连，**不再弹电脑确认框** |
 | 电脑端进程重启 | token 持久化在 `paired.json`，重连照旧免确认 |
@@ -279,7 +282,7 @@ LanCmd-UDP   UDP  47824
 
 ## 五、Windows 端 exe
 
-**已经编译好了，直接用 `dist/LanCmd-Windows-1.2.zip`。**
+**已编译的 Windows 版请从上方链接下载 `LanCmd-Windows-1.4.9.zip`。**
 
 解压到任意目录，双击 `LanCmdAgent.exe` 就能跑。**目标电脑不用装 Python，也不用装编译器。**
 
@@ -432,8 +435,8 @@ lan-cmd/
 - **热点模式下手机走移动数据会失效**：连电脑热点时手机通常没有互联网，属正常现象；
   如果系统自动切回移动数据，会连不上，需要在 Wi-Fi 设置里关掉“自动切换”。
 - **传输未加密**：JSON 明文 + token 明文的 TCP，仅适用于你信任的家庭/办公局域网。
-- **默认要一次人工确认**：防止同网段其他设备随手连上来。确认一次后永久免确认，
-  想零确认用 `--auto-accept`（等于对同网段完全敞开）。
+- **Windows 1.4.9 默认免确认**：仅在信任的局域网使用；需要首次连接人工确认时运行
+  `LanCmdCtl.exe --no-auto-accept`，确认一次后该设备可凭 token 重连。
 - 截屏、锁屏、剪贴板、开关机走 Windows API，只在 Windows 接收端生效；
   `sh` 模式是给 Linux/macOS 上跑同一份接收端调试用。
 - 前台服务保活不等于“永不掉线”：系统极端省电、强制停止 App、断网都会断开，

@@ -434,7 +434,7 @@ object ConnectionManager {
                 // 有别的请求在路上时服务端可能正忙着执行长命令，
                 // 它和 ping 共用同一条连接线程，此时 ping 必然慢。
                 // 这种情况不计入超时，否则跑个 pip install 就会被当成掉线断开。
-                if (c.otherPending() > 0) {
+                if (c.pendingRequests() > 0) {
                     miss = 0
                     continue
                 }
@@ -445,9 +445,11 @@ object ConnectionManager {
                     miss = 0
                     val latency = System.currentTimeMillis() - t0
                     publish(status.copy(latencyMs = latency))
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     // 同样：超时期间若冒出新请求，说明只是忙，不算掉线
-                    if (c.otherPending() > 0) {
+                    if (c.pendingRequests() > 0) {
                         miss = 0
                         continue
                     }

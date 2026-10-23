@@ -240,7 +240,9 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         }
         remember(line)
         log("$ $line", LogKind.CMD)
-        run("exec", JSONObject().put("shell", prefsShell).put("line", line)) { r ->
+        // 接收端最多执行 300 秒；另留 10 秒用于进程收尾和回包。
+        run("exec", JSONObject().put("shell", prefsShell).put("line", line)
+            .put("timeout", 300), timeoutMs = 310_000) { r ->
             val out = r.optString("out").trimEnd()
             val err = r.optString("err").trimEnd()
             val code = r.optInt("code", 0)
@@ -444,6 +446,8 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                     return@launch
                 }
                 block(r)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 log(e.message ?: "请求失败", LogKind.ERROR)
             }
@@ -461,6 +465,8 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                 ConnectionManager.send("ping", timeoutMs = 5000)
                 val ms = System.currentTimeMillis() - t0
                 log("延迟 ${ms}ms", LogKind.INFO)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 log(e.message ?: "ping 失败", LogKind.ERROR)
             }
