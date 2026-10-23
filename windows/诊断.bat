@@ -1,73 +1,72 @@
 @echo off
-chcp 65001 >nul 2>&1
+chcp 936 >nul 2>&1
 setlocal
 cd /d "%~dp0"
-title LanCmd è¯Šæ–­
+title LanCmd Õï¶Ï
 set "APP=%APPDATA%\LanCmd"
 
 echo ============================================
-echo   LanCmd è¯Šæ–­å·¥å…·
+echo   LanCmd Õï¶Ï¹¤¾ß
 echo ============================================
 echo.
 
-echo [1] æ£€æŸ¥æ–‡ä»¶æ˜¯å¦å®Œæ•´
-for %%F in (LanCmdAgent.exe LanCmdCtl.exe Start.exe lan_command_agent.py) do (
+echo [1] ÎÄ¼þÍêÕûÐÔ
+for %%F in (LanCmdAgent.exe LanCmdCtl.exe Start.exe Æô¶¯.vbs lan_command_agent.py) do (
     if exist "%%F" (echo     OK   %%F) else (echo     MISS %%F)
 )
-if exist "python\python.exe"   (echo     OK   python\python.exe)   else (echo     MISS python\python.exe)
-if exist "python\pythonw.exe"  (echo     OK   python\pythonw.exe)  else (echo     MISS python\pythonw.exe)
-if exist "python\python311.dll" (echo     OK   python\python311.dll) else (echo     MISS python\python311.dll)
-if exist "python\python311.zip" (echo     OK   python\python311.zip) else (echo     MISS python\python311.zip)
+for %%F in (python\python.exe python\pythonw.exe python\python311.dll python\python311.zip python\python311._pth) do (
+    if exist "%%F" (echo     OK   %%F) else (echo     MISS %%F)
+)
 echo.
 
-echo [2] æ£€æŸ¥ Python è¿è¡Œæ—¶èƒ½å¦å¯åŠ¨
+echo [2] Python ÔËÐÐÊ±
 if not exist "python\python.exe" (
-    echo     SKIP ç¼ºå°‘ python\python.exe
-    goto :logs
+    echo     SKIP È±ÉÙ python\python.exe
+    goto :direct
 )
-python\python.exe -c "import sys,json,socket,subprocess,ctypes,hashlib;print('    Python', sys.version.split()[0], 'OK')"
+python\python.exe -c "import sys,json,socket,subprocess,ctypes,hashlib,base64,logging;print('    Python',sys.version.split()[0],'Ä£¿éÆëÈ« OK')"
 if errorlevel 1 (
-    echo     [X] Python æ— æ³•è¿è¡Œï¼Œä¸Šé¢å°±æ˜¯é”™è¯¯åŽŸå› 
-    echo         å¸¸è§åŽŸå› ï¼šå®‰å…¨è½¯ä»¶éš”ç¦»äº† python æ–‡ä»¶å¤¹ï¼Œæˆ–è§£åŽ‹ä¸å®Œæ•´
+    echo     [X] Python ÎÞ·¨ÔËÐÐ£¬ÉÏÃæ¾ÍÊÇÔ­Òò
+    echo         ³£¼û£º°²È«Èí¼þ¸ôÀëÁË python ÎÄ¼þ¼Ð£¬»ò½âÑ¹²»ÍêÕû
 )
 echo.
 
-echo [3] ç›´æŽ¥å‰å°è¿è¡ŒæŽ¥æ”¶ç«¯ï¼ˆèƒ½çœ‹åˆ°å…¨éƒ¨è¾“å‡ºï¼‰
-echo     ----------------------------------------------------
-python lan_command_agent.py --status
-echo     ----------------------------------------------------
+:direct
+echo [3] Ö±½ÓÓÃ pythonw Æô¶¯Ò»´Î£¨ÈÆ¹ý LanCmdAgent.exe£¬ÑéÖ¤ÎÊÌâÔÚÄÄÒ»²ã£©
+if exist "python\pythonw.exe" (
+    python\pythonw.exe lan_command_agent.py --status
+    if errorlevel 1 (
+        echo     [X] pythonw Ö±½ÓÆô¶¯Ê§°Ü£¬ËµÃ÷ÊÇÔËÐÐÊ±/½Å±¾µÄÎÊÌâ
+    ) else (
+        echo     [OK] pythonw ÄÜÕý³£Æô¶¯½Å±¾£¬ÎÊÌâÔÚ LanCmdAgent.exe ÕâÒ»²ã
+    )
+) else (
+    echo     SKIP È±ÉÙ python\pythonw.exe
+)
 echo.
 
-:logs
-echo [4] å¯åŠ¨æ—¥å¿—
+echo [4] Æô¶¯ÈÕÖ¾
 if exist "%APP%\launcher.log" (
-    echo     ---- launcher.log æœ«å°¾ ----
-    powershell -NoProfile -Command "Get-Content -Path '%APP%\launcher.log' -Tail 20" 2>nul
+    powershell -NoProfile -Command "Get-Content -LiteralPath '%APP%\launcher.log' -Tail 30 -Encoding UTF8" 2>nul
 ) else (
-    echo     æ²¡æœ‰ launcher.logï¼ˆè¯´æ˜Žè¿˜æ²¡é€šè¿‡ exe å¯åŠ¨è¿‡ï¼‰
-)
-echo.
-if exist "%APP%\agent.log" (
-    echo     ---- agent.log æœ«å°¾ ----
-    powershell -NoProfile -Command "Get-Content -Path '%APP%\agent.log' -Tail 20" 2>nul
-) else (
-    echo     æ²¡æœ‰ agent.log
+    echo     Ã»ÓÐ launcher.log
 )
 echo.
 
-echo [5] ç«¯å£å ç”¨æƒ…å†µ
+echo [5] ¶Ë¿ÚÕ¼ÓÃ
 netstat -ano | findstr ":47823 :47824"
-if errorlevel 1 echo     47823 / 47824 éƒ½æ²¡æœ‰è¢«å ç”¨
+if errorlevel 1 echo     47823 / 47824 ¶¼Ã»ÓÐ±»Õ¼ÓÃ
 echo.
 
-echo [6] é˜²ç«å¢™çŠ¶æ€
+echo [6] ·À»ðÇ½
 netsh advfirewall firewall show rule name=LanCmd-TCP 2>nul | findstr /C:"47823" >nul
-if errorlevel 1 (echo     LanCmd-TCP è§„åˆ™ï¼šæœªæ”¾è¡Œ) else (echo     LanCmd-TCP è§„åˆ™ï¼šå·²æ”¾è¡Œ)
+if errorlevel 1 (echo     LanCmd-TCP Î´·ÅÐÐ) else (echo     LanCmd-TCP ÒÑ·ÅÐÐ)
 netsh advfirewall firewall show rule name=LanCmd-UDP 2>nul | findstr /C:"47824" >nul
-if errorlevel 1 (echo     LanCmd-UDP è§„åˆ™ï¼šæœªæ”¾è¡Œ) else (echo     LanCmd-UDP è§„åˆ™ï¼šå·²æ”¾è¡Œ)
+if errorlevel 1 (echo     LanCmd-UDP Î´·ÅÐÐ) else (echo     LanCmd-UDP ÒÑ·ÅÐÐ)
 echo.
 
 echo ============================================
-echo   è¯Šæ–­ç»“æŸã€‚æŠŠä¸Šé¢å†…å®¹æ•´ä¸ªæˆªå›¾å‘å‡ºæ¥å³å¯ã€‚
+echo   Õï¶Ï½áÊø£¬°ÑÉÏÃæÄÚÈÝ½ØÍ¼·¢³öÀ´¼´¿É¡£
 echo ============================================
 pause
+endlocal

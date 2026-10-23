@@ -1,94 +1,85 @@
 @echo off
-chcp 65001 >nul 2>&1
+chcp 936 >nul 2>&1
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
-title LanCmd 启动器
+title LanCmd ������
 set "PIDFILE=%APPDATA%\LanCmd\agent.pid"
 set "LAUNCHLOG=%APPDATA%\LanCmd\launcher.log"
 
 echo.
-echo   LanCmd 局域网命令接收端
+echo   LanCmd ������������ն�
 echo   ============================
 echo.
 
-if not exist "LanCmdAgent.exe" (
-    echo   [X] 找不到 LanCmdAgent.exe
-    echo       请保持整个文件夹完整，不要只拷单个文件。
-    echo.
-    goto :fail
-)
-if not exist "python\pythonw.exe" (
-    echo   [X] 找不到 python\pythonw.exe
-    echo       解压可能不完整，或者被安全软件隔离了。
-    echo       请重新完整解压整个文件夹，并把整个文件夹加入信任。
-    echo.
-    goto :fail
-)
+if not exist "LanCmdAgent.exe" goto :noagent
+if not exist "python\pythonw.exe" goto :nopy
+if not exist "lan_command_agent.py" goto :noscript
 
 set "OLDPID="
-if exist "%PIDFILE%" (
-    set /p OLDPID=<"%PIDFILE%"
-)
+if exist "%PIDFILE%" set /p OLDPID=<"%PIDFILE%"
 if defined OLDPID (
     tasklist /FI "PID eq !OLDPID!" 2>nul | find "!OLDPID!" >nul
-    if not errorlevel 1 (
-        echo   接收端已经在运行 ^(PID !OLDPID!^)
-        echo.
-        echo   手机打开 LanCmd App 就能连上。
-        echo.
-        pause
-        exit /b 0
-    )
+    if not errorlevel 1 goto :already
 )
 
-echo   正在启动接收端...
+echo   �����������ն�...
 start "" "LanCmdAgent.exe"
 
-:: 轮询等待，而不是死等 2 秒。
-:: 冷启动 + 首次安全检查可能要好几秒，固定睡眠会误判成"没起来"。
 set "NEWPID="
 set /a WAITED=0
 :poll
 timeout /t 1 >nul
 set /a WAITED+=1
-if exist "%PIDFILE%" (
-    set /p NEWPID=<"%PIDFILE%"
-)
+if exist "%PIDFILE%" set /p NEWPID=<"%PIDFILE%"
 if defined NEWPID goto :ok
 if !WAITED! lss 12 goto :poll
 
-echo   [!] 等待 12 秒仍未检测到接收端。
+echo   [!] �ȴ� 12 ����δ��⵽���նˡ�
+echo.
 if exist "%LAUNCHLOG%" (
-    echo.
-    echo   ---- 启动日志 ----
-    powershell -NoProfile -Command "Get-Content -Path '%LAUNCHLOG%' -Tail 15" 2>nul
+    echo   ---- ������־ ----
+    powershell -NoProfile -Command "Get-Content -LiteralPath '%LAUNCHLOG%' -Tail 20 -Encoding UTF8" 2>nul
     echo   ------------------
     echo.
-    echo   日志文件：%LAUNCHLOG%
 )
-goto :fail
+echo   ��˫�� ���.bat �����顣
+goto :end
+
+:already
+echo   ���ն��Ѿ������� ^(PID !OLDPID!^)
+echo   �ֻ��� LanCmd App �������ϡ�
+goto :end
 
 :ok
-echo   [OK] 已在后台运行 ^(PID !NEWPID!^)
+echo   [OK] ���ں�̨���� ^(PID !NEWPID!^)
 echo.
-echo   没有窗口是正常的，接收端就是静默运行。
+echo   û�д����������ģ����ն˾��Ǿ�Ĭ���С�
 echo.
-echo   接下来：
-echo     1. 手机连同一个网络 ^(同一 Wi-Fi、电脑开的热点都行^)
-echo     2. 打开 LanCmd App，会自动发现这台电脑
-echo     3. 首次连接时电脑会弹确认框，点「是」
+echo   ��������
+echo     1. �ֻ���ͬһ�����磨ͬһ Wi-Fi�����Կ����ȵ㶼�У�
+echo     2. �� LanCmd App�����Զ�������̨����
+echo     3. �״�����ʱ���Իᵯȷ�Ͽ򣬵㡸�ǡ�
 echo.
-echo   查看状态 / 停止 / 开机自启：双击 Start.exe
-echo.
-pause
-exit /b 0
+echo   �鿴״̬ / ֹͣ / ����������˫�� Start.exe
+goto :end
 
-:fail
-echo.
-echo   排查步骤：
-echo     1. 直接双击 LanCmdAgent.exe —— 如果弹窗，会告诉你具体原因
-echo     2. 查看日志：%LAUNCHLOG%
-echo     3. 确认安全软件没有隔离 python 文件夹
+:noagent
+echo   [X] �Ҳ��� LanCmdAgent.exe
+echo       ��������ѹ�����ļ��С�
+goto :end
+
+:nopy
+echo   [X] �Ҳ��� python\pythonw.exe
+echo       ��ѹ���������򱻰�ȫ�������롣
+echo       �����½�ѹ�����������ļ��м���ɱ���������Ρ�
+goto :end
+
+:noscript
+echo   [X] �Ҳ��� lan_command_agent.py
+echo       ��������ѹ�����ļ��С�
+goto :end
+
+:end
 echo.
 pause
-exit /b 1
+endlocal

@@ -313,6 +313,33 @@ static int launch_agent(void)
     return 1;
 }
 
+/* 兜底启动：直接用自带的 pythonw 跑脚本，不经过 LanCmdAgent.exe。
+   万一启动器的参数组装在某个环境上有问题，这条路仍然能起来。 */
+static int launch_via_pythonw(void)
+{
+    wchar_t pyw[MAX_PATH], script[MAX_PATH], cmd[MAX_PATH * 2 + 16];
+    join(pyw, MAX_PATH, g_dir, L"python\\pythonw.exe");
+    join(script, MAX_PATH, g_dir, L"lan_command_agent.py");
+    if (GetFileAttributesW(pyw) == INVALID_FILE_ATTRIBUTES) return 0;
+    if (GetFileAttributesW(script) == INVALID_FILE_ATTRIBUTES) return 0;
+
+    _snwprintf(cmd, MAX_PATH * 2 + 15, L"\"%s\" \"%s\"", pyw, script);
+    cmd[MAX_PATH * 2 + 15] = 0;
+
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    ZeroMemory(&pi, sizeof(pi));
+    if (!CreateProcessW(pyw, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW,
+                        NULL, g_dir, &si, &pi)) {
+        return 0;
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return 1;
+}
+
 static void do_stop(void)
 {
     int pid = running_pid();
@@ -418,14 +445,22 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_COMMAND:
         switch (LOWORD(wp)) {
-        case ID_START:
+        case ID_START: {
             launch_agent();
             /* 轮询等待，冷启动 + 安全检查可能要几秒 */
-            {
-                int waited = 0;
-                while (waited < 12000 && running_pid() <= 0) {
-                    Sleep(300);
-                    waited += 300;
+            int waited = 0;
+            while (waited < 10000 && running_pid() <= 0) {
+                Sleep(300);
+                waited += 300;
+            }
+            /* exe 起不来就换一条路：直接用 pythonw 跑脚本 */
+            if (running_pid() <= 0) {
+                if (launch_via_pythonw()) {
+                    int w2 = 0;
+                    while (w2 < 10000 && running_pid() <= 0) {
+                        Sleep(300);
+                        w2 += 300;
+                    }
                 }
             }
             refresh();
@@ -441,6 +476,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 MessageBoxW(hwnd, msg, L"LanCmd", MB_ICONERROR | MB_OK);
             }
             return 0;
+        }
         case ID_STOP:
             do_stop();
             return 0;
