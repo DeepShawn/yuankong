@@ -1,0 +1,141 @@
+name: Publish verified release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (for example v1.5.1)
+        required: true
+      android_run:
+        description: Successful Android signed APK run ID
+        required: true
+      windows_run:
+        description: Successful Windows feature checks run ID
+        required: true
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      ANDROID_RUN: ${{ inputs.android_run }}
+      WINDOWS_RUN: ${{ inputs.windows_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify successful builds match the release tag
+        shell: python
+        run: |
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          tag = os.environ['RELEASE_TAG']
+          if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag):
+              raise SystemExit('Use a semantic version release tag')
+          sha = subprocess.check_output(['git', 'rev-parse', tag + '^{commit}'], text=True).strip()
+          for variable, workflow in [('ANDROID_RUN', 'android-release.yml'), ('WINDOWS_RUN', 'windows-features.yml')]:
+              run_id = os.environ[variable]
+              if not run_id.isdecimal():
+                  raise SystemExit('Invalid workflow run ID')
+              endpoint = 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs/' + run_id
+              run = json.loads(subprocess.check_output(['gh', 'api', endpoint], text=True))
+              if run['conclusion'] != 'success' or run['head_sha'] != sha or run['path'] != '.github/workflows/' + workflow:
+                  raise SystemExit('Build must succeed on the exact tagged source: ' + variable)
+          if not Path('docs/releases/' + tag + '.md').is_file():
+              raise SystemExit('Missing reviewed release notes')
+          print('Both successful builds match ' + tag + ' at ' + sha)
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.android_run }}
+          pattern: LanCmd-signed-Android-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.windows_run }}
+          pattern: LanCmd-Windows-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.android_run }}
+          pattern: Android-test-reports-*
+          merge-multiple: true
+          path: test-reports
+      - name: Verify artifacts and prepare checksums
+        shell: python
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+          import struct
+          import subprocess
+          import xml.etree.ElementTree as ET
+          import zipfile
+
+          tag = os.environ['RELEASE_TAG']
+          version = tag[1:]
+          output = Path('dist')
+          apk = output / ('LanCmd-' + version + '.apk')
+          archive = output / ('LanCmd-Windows-' + version + '.zip')
+          expected = (output / 'SHA256SUMS-Android.txt').read_text().split()
+          if expected != [hashlib.sha256(apk.read_bytes()).hexdigest(), apk.name]:
+              raise SystemExit('Android checksum differs from signed build')
+          reports = list(Path('test-reports').glob('TEST-*.xml'))
+          if not reports:
+              raise SystemExit('Missing Android test results')
+          tests = 0
+          for report in reports:
+              suite = ET.parse(report).getroot()
+              tests += int(suite.get('tests', 0))
+              if any(int(suite.get(key, 0)) for key in ('failures', 'errors', 'skipped')):
+                  raise SystemExit('Android tests must pass without skipped tests')
+          if not tests:
+              raise SystemExit('No Android tests executed')
+          with zipfile.ZipFile(archive) as package:
+              if package.testzip() is not None:
+                  raise SystemExit('Damaged Windows archive')
+              for name in ('lan_command_agent.py', 'remote_features.py', '使用说明.txt'):
+                  source = subprocess.check_output(['git', 'show', tag + ':windows/' + name])
+                  if package.read('LanCmd-Windows/' + name) != source:
+                      raise SystemExit('Windows package differs from tagged source: ' + name)
+              for name in ('Start.exe', 'LanCmdAgent.exe', 'LanCmdCtl.exe', 'LanCmdCapture.exe'):
+                  data = package.read('LanCmd-Windows/' + name)
+                  pe = struct.unpack_from('<I', data, 0x3c)[0]
+                  if data[:2] != b'MZ' or data[pe:pe + 4] != b'PE\0\0' or struct.unpack_from('<H', data, pe + 4)[0] != 0x8664:
+                      raise SystemExit('Invalid Windows x64 executable: ' + name)
+          checksums = ''.join(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n' for path in (apk, archive))
+          (output / ('SHA256SUMS-' + version + '.txt')).write_text(checksums)
+          print('Verified ' + str(tests) + ' Android tests and both release packages')
+          print(checksums)
+      - name: Publish installation packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          notes="docs/releases/$RELEASE_TAG.md"
+          assets=("dist/LanCmd-$version.apk" "dist/LanCmd-Windows-$version.zip" "dist/SHA256SUMS-$version.txt")
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+            gh release edit "$RELEASE_TAG" --draft=false --latest --title "LanCmd $version" --notes-file "$notes"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --latest --title "LanCmd $version" --notes-file "$notes" "${assets[@]}"
+          fi
+          gh release view "$RELEASE_TAG" --json url,tagName,isDraft,assets
