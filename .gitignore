@@ -8,8 +8,10 @@ android/local.properties
 __pycache__/
 
 # 本地签名材料（口令在 keystore.properties 中）
-android/*.jks
-android/keystore.properties
+*.jks
+*.keystore
+keystore.properties
+LanCmd-Android-signing-backup.zip
 
 # 运行时状态
 *.log

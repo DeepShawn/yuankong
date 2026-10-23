@@ -6,12 +6,13 @@
 
 **1.5.0：远程工作台与可视化存储。手机和 Windows 接收端需要一起更新。**
 
-- [Android / Windows 下载与更新说明](https://github.com/DeepShawn/yuankong/releases)
+- [下载 Android 1.5.0 APK](https://github.com/DeepShawn/yuankong/releases/download/v1.5.0/LanCmd-1.5.0.apk)
+- [下载 Windows 1.5.0 接收端](https://github.com/DeepShawn/yuankong/releases/download/v1.5.0/LanCmd-Windows-1.5.0.zip)
 - 新增屏幕及摄像头 JPEG 预览、桌面消息、组合按键和 Unicode 文字输入。
 - 新增磁盘容量、目录导航、搜索、上传下载、重命名、新建目录与删除。
 - 手机对外统一显示「LanCmd 手机」，保留原有配对 ID，不再发送手机型号或机名。
 - 屏幕、摄像头、按键分别在电脑端允许，每次最长 5 分钟；本机停止、退出页面、断开连接或空闲 20 秒会结束会话。普通连接的免确认设置不替代这些授权。
-- 原 1.4.9 私钥未恢复时无法用其签名覆盖升级；安装前以发布页标注的签名兼容范围为准。
+- Android 1.5.0 沿用 1.4.10 签名，可覆盖安装 1.4.10；1.4.9 用户需要先卸载再安装。
 
 ```
 ┌──────────────┐   UDP 47824 广播探测/应答   ┌──────────────────────┐
@@ -342,8 +343,14 @@ export ANDROID_HOME=<你的 SDK>
 ./gradlew :app:testDebugUnitTest  # 路径、页面、客户端及跨语言集成测试
 ```
 
-签名用 `android/lancmd-release.jks`，口令放在 `keystore.properties`（不入库，见 `.gitignore`）。
-自己发布请重新生成密钥库。Android SDK 需 platforms;android-36 + build-tools;35.0.0。
+本地签名通过 `android/keystore.properties` 指向私有密钥库，口令与密钥都不入库。
+Android SDK 需 platforms;android-36 + build-tools;35.0.0。
+
+配置仓库 Actions Secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、
+`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。维护此项目的发布应沿用 1.4.10 的密钥；独立分发可使用自己的密钥。
+可在有 Secrets 管理权限的环境中运行 `python3 tools/import_signing_secrets.py --keystore <私有JKS路径> --properties <私有配置路径>`，脚本通过 GitHub CLI 加密写入，不输出密钥或口令。
+在 Actions 中运行 **Android signed APK**，或推送与应用版本一致的 `v*` 标签，会生成已签名 APK 和校验文件。
+工作流核对证书指纹，构建后清理临时密钥；产物在 Actions Artifacts 中下载，不会自动修改已有 Release 附件。
 
 **ABI**：App 纯 Kotlin + AndroidX/Material，无 JNI/native 库，任何 ABI 都能装，
 arm64-v8a 设备直接使用。`ndk.abiFilters` 里保留 `arm64-v8a` 只是给将来加 native 库时定调。
