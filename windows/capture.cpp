@@ -1,5 +1,6 @@
 // One JPEG frame per invocation. Consent and the visible stop control live in the agent.
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
 #include <mfapi.h>
 #include <mfidl.h>
