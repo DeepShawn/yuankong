@@ -58,7 +58,7 @@ echo.
 echo   接下来：
 echo     1. 手机连同一个网络（同一 Wi-Fi、电脑开的热点都行）
 echo     2. 打开 LanCmd App，会自动发现这台电脑
-echo     3. 首次连接时电脑会弹确认框，点「是」
+echo     3. 电脑不会弹确认框，手机直接连上
 echo.
 echo   查看状态 / 停止 / 开机自启：双击 Start.exe
 goto :end

@@ -1,6 +1,7 @@
 package com.aicode.lancmd.net
 
 import android.net.Network
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
@@ -25,6 +26,11 @@ class AgentClient(val host: String, val port: Int) {
     private var writer: BufferedWriter? = null
     private val pending = ConcurrentHashMap<Int, CompletableDeferred<JSONObject>>()
     private val serial = AtomicInteger(0)
+    private val inFlight = AtomicInteger(0)
+
+    /** 除自己以外还有几个请求在路上。服务端在同一个连接线程里串行执行命令，
+     *  长命令（pip install、dir /s…）会顺带把 ping 一起拖住，不能当掉线处理。 */
+    fun otherPending(): Int = (inFlight.get() - 1).coerceAtLeast(0)
 
     @Volatile
     var closed = true
@@ -123,6 +129,7 @@ class AgentClient(val host: String, val port: Int) {
         }
         val deferred = CompletableDeferred<JSONObject>()
         pending[id] = deferred
+        inFlight.incrementAndGet()
         try {
             val w = writer ?: throw IOException("未连接")
             synchronized(w) {
@@ -132,14 +139,32 @@ class AgentClient(val host: String, val port: Int) {
             }
         } catch (e: Exception) {
             pending.remove(id)
-            throw IOException("发送失败: ${e.message}")
+            inFlight.decrementAndGet()
+            throw IOException("发送失败（" + describe(e) + "）")
         }
         return try {
             withTimeout(timeoutMs) { deferred.await() }
+        } catch (e: CancellationException) {
+            pending.remove(id)
+            throw e
         } catch (e: Exception) {
             pending.remove(id)
-            throw IOException("请求超时: $cmd")
+            throw IOException("请求超时: " + cmd)
+        } finally {
+            inFlight.decrementAndGet()
         }
+    }
+
+    /** 保证错误信息永远有内容：类型名 + message + 第一层 cause，不会出现 "null"。 */
+    private fun describe(e: Throwable): String {
+        val parts = ArrayList<String>()
+        parts.add(e.javaClass.simpleName)
+        e.message?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
+        e.cause?.let { c ->
+            val m = c.message?.takeIf { it.isNotBlank() } ?: c.javaClass.simpleName
+            parts.add("cause: " + m)
+        }
+        return parts.joinToString(": ")
     }
 
     fun close() {

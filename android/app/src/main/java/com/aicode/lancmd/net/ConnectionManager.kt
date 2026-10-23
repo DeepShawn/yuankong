@@ -61,8 +61,8 @@ object ConnectionManager {
     }
 
     private const val PING_INTERVAL_MS = 20_000L
-    private const val PING_TIMEOUT_MS = 8_000L
-    private const val PING_MAX_MISS = 2
+    private const val PING_TIMEOUT_MS = 10_000L
+    private const val PING_MAX_MISS = 3
 
     private val ioExec = Executors.newCachedThreadPool()
     private val io = ioExec.asCoroutineDispatcher()
@@ -431,17 +431,29 @@ object ConnectionManager {
             while (isActive && running && !c.closed) {
                 delay(PING_INTERVAL_MS)
                 if (c.closed || !running) break
+                // 有别的请求在路上时服务端可能正忙着执行长命令，
+                // 它和 ping 共用同一条连接线程，此时 ping 必然慢。
+                // 这种情况不计入超时，否则跑个 pip install 就会被当成掉线断开。
+                if (c.otherPending() > 0) {
+                    miss = 0
+                    continue
+                }
                 try {
                     val t0 = System.currentTimeMillis()
                     val r = c.call("ping", JSONObject(), PING_TIMEOUT_MS)
-                    if (!r.optBoolean("ok")) throw IOException("ping 失败")
+                    if (!r.optBoolean("ok")) throw IOException("心跳无响应")
                     miss = 0
                     val latency = System.currentTimeMillis() - t0
                     publish(status.copy(latencyMs = latency))
                 } catch (e: Exception) {
+                    // 同样：超时期间若冒出新请求，说明只是忙，不算掉线
+                    if (c.otherPending() > 0) {
+                        miss = 0
+                        continue
+                    }
                     miss++
                     if (miss >= PING_MAX_MISS) {
-                        event("心跳超时，主动断开以触发重连", LogKind.ERROR)
+                        event("心跳连续超时，断开以触发重连", LogKind.ERROR)
                         c.close()
                         break
                     }

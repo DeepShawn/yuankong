@@ -38,7 +38,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "1.4.8"
+VERSION = "1.4.9"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -77,7 +77,9 @@ DEFAULT_CFG = {
     "bind": "0.0.0.0",
     "port": DEF_TCP_PORT,
     "discovery_port": DEF_UDP_PORT,
-    "auto_accept": False,
+    # 默认免确认：手机连上来不再弹「是否允许」对话框。
+    # 需要恢复确认可在菜单/命令行用 --no-auto-accept。
+    "auto_accept": True,
     "approval_timeout": 45,
     "exec_timeout": 300,
     "max_file_bytes": 32 * 1024 * 1024,
@@ -115,9 +117,21 @@ def save_json(path, data):
 
 def load_cfg():
     cfg = dict(DEFAULT_CFG)
-    cfg.update(load_json(CFG_PATH, {}))
+    disk = load_json(CFG_PATH, {})
+    cfg.update(disk)
     if not cfg.get("name"):
         cfg["name"] = socket.gethostname() or "PC"
+
+    # 一次性迁移：旧版本默认弹确认框，升级后应改为免确认。
+    # 只在配置里还没有该标记时执行，避免覆盖用户之后的手动选择。
+    if not disk.get("auto_accept_migrated"):
+        cfg["auto_accept"] = True
+        cfg["auto_accept_migrated"] = True
+        try:
+            save_cfg(cfg)
+            log.info("已把 auto_accept 迁移为开启（不再弹确认框）")
+        except Exception:
+            pass
     return cfg
 
 
@@ -455,28 +469,83 @@ def run_exec(line, shell="cmd", cwd=None, timeout=None):
     timeout = float(timeout or cfg["exec_timeout"])
     argv = _shell_argv(shell, line)
     started = time.time()
+
+    out_chunks, err_chunks = [], []
+
+    def reader(stream, sink):
+        # 必须用 read1：BufferedReader.read(n) 会一直攒够 n 字节或等到 EOF，
+        # 遇到 hold 住管道的分离进程就一个字节也读不出来。
+        read = getattr(stream, "read1", None) or stream.read
+        try:
+            while True:
+                chunk = read(65536)
+                if not chunk:
+                    break
+                sink.append(chunk)
+        except Exception:
+            pass
+        finally:
+            try:
+                stream.close()
+            except Exception:
+                pass
+
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             argv,
             cwd=cwd or None,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
-            timeout=timeout,
             creationflags=_no_window_flags(),
         )
-        code, out, err = proc.returncode, decode_bytes(proc.stdout), decode_bytes(proc.stderr)
-    except subprocess.TimeoutExpired as e:
-        code = 124
-        out = decode_bytes(e.stdout or b"")
-        err = decode_bytes(e.stderr or b"") + "\n[超时 %.0fs，进程已终止]" % timeout
     except FileNotFoundError:
         raise RpcError("找不到解释器: %s" % argv[0])
+
+    # 用独立线程读，进程退出后最多再等一小会儿就把管道关掉。
+    #
+    # 关键：不能用 subprocess.run / communicate()。
+    # 它们会一直读到管道 EOF；而像 `start notepad`、`start cmd` 这类命令
+    # 会派生一个脱离的进程并让它继承管道，EOF 永远不到，
+    # 于是 handler 把整条连接卡满 300 秒，手机端心跳全超时后就判定掉线——
+    # 用户看到的就是「执行命令直接报发送失败」。
+    t_out = threading.Thread(target=reader, args=(proc.stdout, out_chunks), daemon=True)
+    t_err = threading.Thread(target=reader, args=(proc.stderr, err_chunks), daemon=True)
+    t_out.start()
+    t_err.start()
+
+    timed_out = False
+    try:
+        code = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        code = 124
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+
+    # 给读取线程一点收尾时间，但绝不等 EOF
+    t_out.join(0.6)
+    t_err.join(0.6)
+    # 线程还没结束，说明有子进程仍持有管道（start / & 这类），输出可能不完整
+    still_open = t_out.is_alive() or t_err.is_alive()
+
+    out = decode_bytes(b"".join(out_chunks))
+    err = decode_bytes(b"".join(err_chunks))
+    if timed_out:
+        err += "\n[超时 %.0fs，进程已终止]" % timeout
+
     return {
         "code": code,
         "out": out,
         "err": err,
         "ms": int((time.time() - started) * 1000),
+        "detached": still_open,
     }
 
 
@@ -1214,6 +1283,7 @@ def _handle_hello(state, req, cfg):
     if cfg.get("auto_accept"):
         allow = True
         log.info("auto_accept 开启，直接授权 %s %s", name, state.peer)
+        # 直接返回，不进任何弹窗逻辑
     else:
         allow = _ask_approval(name, state.peer, int(cfg.get("approval_timeout", 45)))
         log.info("配对确认 %s -> %s", name, "允许" if allow else "拒绝")

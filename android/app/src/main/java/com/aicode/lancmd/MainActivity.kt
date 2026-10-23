@@ -247,6 +247,10 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             if (out.isNotEmpty()) log(out, LogKind.PLAIN)
             if (err.isNotEmpty()) log(err, LogKind.ERROR)
             if (code != 0) log("[exit $code]", LogKind.ERROR)
+            // start / & 这类会派生后台进程，命令本身已返回但输出可能不完整
+            if (r.optBoolean("detached", false)) {
+                log("（命令已启动，仍有进程在后台运行）", LogKind.INFO)
+            }
         }
     }
 
