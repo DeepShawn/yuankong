@@ -20,6 +20,20 @@ for /f "tokens=2 delims= " %%v in ('python -V 2^>^&1') do set PYVER=%%v
 echo [i] Python %PYVER%
 
 echo.
+echo [0/3] Building the Windows capture helper ...
+where cl >nul 2>nul
+if not errorlevel 1 (
+    cl /nologo /O2 /EHsc /std:c++17 /Fe:LanCmdCapture.exe capture.cpp /link windowscodecs.lib mf.lib mfreadwrite.lib mfplat.lib mfuuid.lib ole32.lib gdi32.lib user32.lib uuid.lib
+    if errorlevel 1 exit /b 1
+)
+if not exist LanCmdCapture.exe (
+    echo [X] Run in an x64 Native Tools Command Prompt with the Windows SDK,
+    echo     or copy LanCmdCapture.exe from the official 1.5.0 Windows ZIP here.
+    pause
+    exit /b 1
+)
+
+echo.
 echo [1/3] Installing PyInstaller ...
 python -m pip install --upgrade pyinstaller
 if errorlevel 1 (
@@ -35,6 +49,7 @@ python -m PyInstaller --noconfirm --clean --onefile --noconsole ^
     --name LanCmdAgent ^
     --icon icon.ico ^
     --version-file version_info.txt ^
+    --hidden-import remote_features ^
     --hidden-import tkinter ^
     --hidden-import tkinter.messagebox ^
     lan_command_agent.py
@@ -50,6 +65,7 @@ python -m PyInstaller --noconfirm --clean --onefile --console ^
     --name LanCmdCtl ^
     --icon icon.ico ^
     --version-file version_info.txt ^
+    --hidden-import remote_features ^
     lan_command_agent.py
 if errorlevel 1 (
     echo [!] Control exe failed, main agent is still usable.
@@ -57,6 +73,7 @@ if errorlevel 1 (
 
 echo.
 echo ============================================
+if exist dist\LanCmdAgent.exe copy /y LanCmdCapture.exe dist\LanCmdCapture.exe >nul
 echo  Done.
 echo ============================================
 echo  dist\LanCmdAgent.exe   <- run this (no window, background)

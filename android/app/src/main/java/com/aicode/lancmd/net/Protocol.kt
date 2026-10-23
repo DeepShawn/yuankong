@@ -26,6 +26,9 @@ fun joinPath(base: String, name: String): String {
 }
 
 fun parentOf(path: String): String {
+    if (path == "/") return "/"
+    if (Regex("^[A-Za-z]:[\\\\/]*$").matches(path)) return path.take(2) + "\\"
+    if (Regex("^\\\\\\\\[^\\\\]+\\\\[^\\\\]+\\\\?$").matches(path)) return path.trimEnd('\\') + "\\"
     val p = path.trimEnd('/', '\\')
     val idx = p.lastIndexOfAny(charArrayOf('/', '\\'))
     if (idx < 0) return p

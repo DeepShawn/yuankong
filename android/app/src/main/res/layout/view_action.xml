@@ -9,12 +9,13 @@
     android:focusable="true"
     android:gravity="center"
     android:orientation="vertical"
-    android:paddingVertical="10dp">
+    android:minHeight="78dp"
+    android:paddingVertical="12dp">
 
     <ImageView
         android:id="@+id/ivIcon"
-        android:layout_width="22dp"
-        android:layout_height="22dp"
+        android:layout_width="26dp"
+        android:layout_height="26dp"
         android:contentDescription="@null"
         android:tint="@color/accent" />
 

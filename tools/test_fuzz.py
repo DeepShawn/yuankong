@@ -134,7 +134,7 @@ payload = b"Z" * (600 * 1024)
 b = c.call("upload", action="begin", path=work + "/interrupt.bin", size=len(payload))
 sid = b.get("sid")
 c.call("upload", action="chunk", sid=sid, seq=0, data=base64.b64encode(payload[:512*1024]).decode())
-part = work + "/interrupt.bin.lancmd-part"
+part = work + "/interrupt.bin." + sid + ".lancmd-part"
 check("中途存在 .part 文件", os.path.exists(part))
 c.close()   # 直接断开，不发 abort
 time.sleep(0.8)
