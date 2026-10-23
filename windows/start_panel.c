@@ -264,6 +264,28 @@ static void refresh(void)
     g_lastRunning = pid > 0 ? 1 : 0;
 }
 
+/* 读 launcher.log 尾部，启动失败时给用户看 */
+static void panel_log_tail(wchar_t *out, size_t cap)
+{
+    out[0] = 0;
+    wchar_t *appdata = _wgetenv(L"APPDATA");
+    if (!appdata || !*appdata) return;
+    wchar_t path[MAX_PATH];
+    _snwprintf(path, MAX_PATH - 1, L"%s\\LanCmd\\launcher.log", appdata);
+    path[MAX_PATH - 1] = 0;
+
+    HANDLE fh = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                            NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (fh == INVALID_HANDLE_VALUE) return;
+    char buf[1600];
+    DWORD got = 0;
+    ReadFile(fh, buf, sizeof(buf) - 1, &got, NULL);
+    buf[got] = 0;
+    CloseHandle(fh);
+    MultiByteToWideChar(CP_UTF8, 0, buf, -1, out, (int)cap - 1);
+    out[cap - 1] = 0;
+}
+
 static int launch_agent(void)
 {
     wchar_t exe[MAX_PATH], cmd[MAX_PATH + 4];
@@ -398,8 +420,26 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         switch (LOWORD(wp)) {
         case ID_START:
             launch_agent();
-            Sleep(400);
+            /* 轮询等待，冷启动 + 安全检查可能要几秒 */
+            {
+                int waited = 0;
+                while (waited < 12000 && running_pid() <= 0) {
+                    Sleep(300);
+                    waited += 300;
+                }
+            }
             refresh();
+            if (running_pid() <= 0) {
+                wchar_t tail[1600], msg[2200];
+                panel_log_tail(tail, 1600);
+                _snwprintf(msg, 2199,
+                    L"接收端没能启动。\n\n--- 启动日志 ---\n%s\n\n"
+                    L"如果日志为空，请双击文件夹里的「诊断.bat」，\n"
+                    L"它会逐项检查文件完整性与 Python 运行时。",
+                    tail[0] ? tail : L"(没有日志)");
+                msg[2199] = 0;
+                MessageBoxW(hwnd, msg, L"LanCmd", MB_ICONERROR | MB_OK);
+            }
             return 0;
         case ID_STOP:
             do_stop();

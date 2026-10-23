@@ -69,6 +69,84 @@ static void append_arg(wchar_t *out, size_t cap, const wchar_t *arg)
     if (need_quote && used + 1 < cap) { out[used++] = L'"'; out[used] = L'\0'; }
 }
 
+/* ---------------- 启动日志 ----------------
+ * 接收端是 GUI 子系统、无控制台，一旦 Python 起不来，
+ * 用户什么提示都看不到。这里把子进程的输出重定向进日志，
+ * 并在启动失败时把日志尾部落到弹窗里，避免"双击没反应"。
+ */
+static wchar_t g_log_path[MAX_PATH];
+
+static void log_path_init(void)
+{
+    wchar_t *appdata = _wgetenv(L"APPDATA");
+    if (!appdata || !*appdata) { g_log_path[0] = 0; return; }
+    wchar_t dir[MAX_PATH];
+    _snwprintf(dir, MAX_PATH - 1, L"%s\\LanCmd", appdata);
+    dir[MAX_PATH - 1] = 0;
+    CreateDirectoryW(dir, NULL);
+    _snwprintf(g_log_path, MAX_PATH - 1, L"%s\\launcher.log", dir);
+    g_log_path[MAX_PATH - 1] = 0;
+}
+
+typedef struct { HANDLE rd; } PUMP;
+
+static DWORD WINAPI pump_proc(LPVOID param)
+{
+    HANDLE rd = ((PUMP *)param)->rd;
+    HANDLE fh = INVALID_HANDLE_VALUE;
+    if (g_log_path[0]) {
+        fh = CreateFileW(g_log_path, FILE_APPEND_DATA, FILE_SHARE_READ, NULL,
+                         OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (fh != INVALID_HANDLE_VALUE) {
+            SYSTEMTIME st;
+            GetLocalTime(&st);
+            char head[128];
+            int n = _snprintf(head, sizeof(head) - 1,
+                              "\r\n===== %04d-%02d-%02d %02d:%02d:%02d =====\r\n",
+                              st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+            if (n > 0) { DWORD w; WriteFile(fh, head, (DWORD)n, &w, NULL); }
+        }
+    }
+    char buf[4096];
+    DWORD got = 0;
+    while (ReadFile(rd, buf, sizeof(buf), &got, NULL) && got > 0) {
+        if (fh != INVALID_HANDLE_VALUE) { DWORD w; WriteFile(fh, buf, got, &w, NULL); }
+    }
+    if (fh != INVALID_HANDLE_VALUE) CloseHandle(fh);
+    CloseHandle(rd);
+    return 0;
+}
+
+/* 读日志尾部，给弹窗用 */
+static void log_tail(wchar_t *out, size_t cap)
+{
+    out[0] = 0;
+    if (!g_log_path[0]) return;
+    HANDLE fh = CreateFileW(g_log_path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                            NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (fh == INVALID_HANDLE_VALUE) return;
+    LARGE_INTEGER size;
+    if (!GetFileSizeEx(fh, &size) || size.QuadPart == 0) { CloseHandle(fh); return; }
+    long long want = 1800;
+    long long start = (size.QuadPart > want) ? size.QuadPart - want : 0;
+    LARGE_INTEGER pos;
+    pos.QuadPart = start;
+    SetFilePointerEx(fh, pos, NULL, FILE_BEGIN);
+
+    char tmp[2048];
+    DWORD got = 0;
+    ReadFile(fh, tmp, sizeof(tmp) - 1, &got, NULL);
+    tmp[got] = 0;
+    CloseHandle(fh);
+
+    /* UTF-8 -> 宽字符 */
+    int wn = MultiByteToWideChar(CP_UTF8, 0, tmp, -1, out, (int)cap - 1);
+    if (wn <= 0) {
+        MultiByteToWideChar(CP_ACP, 0, tmp, -1, out, (int)cap - 1);
+    }
+    out[cap - 1] = 0;
+}
+
 static void report(const wchar_t *detail)
 {
     wchar_t msg[2048];
@@ -98,6 +176,7 @@ static int run(void)
 
     wchar_t dir[MAX_PATH];
     dir_of(self, dir, MAX_PATH);
+    log_path_init();
 
     /* 脚本：优先同目录 */
     wchar_t script[MAX_PATH];
@@ -153,18 +232,40 @@ static int run(void)
     si.cb = sizeof(si);
     ZeroMemory(&pi, sizeof(pi));
 
+    HANDLE pipe_rd = NULL, pipe_wr = NULL;
+    BOOL inherit = FALSE;
+
     DWORD flags = CREATE_NO_WINDOW;
 #ifdef LANCMD_CONSOLE
     /* 控制台版继承当前窗口，方便直接看到输出 */
     flags = 0;
+#else
+    /* GUI 版：把输出接进日志，失败时才查得到原因 */
+    SECURITY_ATTRIBUTES sa;
+    ZeroMemory(&sa, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    if (CreatePipe(&pipe_rd, &pipe_wr, &sa, 0)) {
+        SetHandleInformation(pipe_rd, HANDLE_FLAG_INHERIT, 0);
+        si.dwFlags |= STARTF_USESTDHANDLES;
+        si.hStdOutput = pipe_wr;
+        si.hStdError = pipe_wr;
+        si.hStdInput = NULL;
+        inherit = TRUE;
+    }
 #endif
 
-    if (!CreateProcessW(exe, cmd, NULL, NULL, FALSE, flags, NULL, dir, &si, &pi)) {
+    if (!CreateProcessW(exe, cmd, NULL, NULL, inherit, flags, NULL, dir, &si, &pi)) {
+        DWORD err = GetLastError();
+        if (pipe_wr) CloseHandle(pipe_wr);
+        if (pipe_rd) CloseHandle(pipe_rd);
         wchar_t detail[MAX_PATH + 96];
-        _snwprintf(detail, MAX_PATH + 95, L"无法启动 %s（错误码 %lu）", exe, GetLastError());
+        _snwprintf(detail, MAX_PATH + 95, L"无法启动 %s（错误码 %lu）", exe, err);
         report(detail);
         return 3;
     }
+
+    if (pipe_wr) CloseHandle(pipe_wr);   /* 父进程留着会永远读不到 EOF */
 
 #ifdef LANCMD_CONSOLE
     WaitForSingleObject(pi.hProcess, INFINITE);
@@ -174,6 +275,41 @@ static int run(void)
     CloseHandle(pi.hProcess);
     return (int)code;
 #else
+    if (pipe_rd) {
+        PUMP *pp = (PUMP *)LocalAlloc(LPTR, sizeof(PUMP));
+        if (pp) {
+            pp->rd = pipe_rd;
+            HANDLE th = CreateThread(NULL, 0, pump_proc, pp, 0, NULL);
+            if (th) CloseHandle(th);
+        } else {
+            CloseHandle(pipe_rd);
+        }
+    }
+
+    /* 等一小会儿看它是不是活着。
+       pythonw 起不来时会立刻退出，这时要把原因告诉用户，
+       否则就是"双击没反应 / 显示未运行"。 */
+    DWORD wait = WaitForSingleObject(pi.hProcess, 2000);
+    if (wait == WAIT_OBJECT_0) {
+        DWORD code = 0;
+        GetExitCodeProcess(pi.hProcess, &code);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        Sleep(200);   /* 给泵线程一点时间把日志刷完 */
+
+        wchar_t tail[1800];
+        log_tail(tail, 1800);
+        wchar_t msg[2600];
+        _snwprintf(msg, 2599,
+            L"接收端启动失败（退出码 %lu）。\n\n"
+            L"--- 输出 ---\n%s\n\n"
+            L"日志：%%APPDATA%%\\LanCmd\\launcher.log",
+            code, tail[0] ? tail : L"(没有输出)");
+        msg[2599] = 0;
+        MessageBoxW(NULL, msg, L"LanCmd", MB_ICONERROR | MB_OK);
+        return 4;
+    }
+
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     return 0;

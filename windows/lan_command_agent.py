@@ -38,7 +38,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "1.4.5"
+VERSION = "1.4.7"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -195,6 +195,7 @@ def _netsh(args, timeout=15):
     try:
         r = subprocess.run(
             ["netsh"] + args,
+            stdin=DEVNULL_IN,
             capture_output=True,
             timeout=timeout,
             creationflags=_no_window_flags(),
@@ -310,6 +311,7 @@ def list_ipv4_interfaces():
         try:
             r = subprocess.run(
                 ["ipconfig"],
+                stdin=DEVNULL_IN,
                 capture_output=True,
                 timeout=8,
                 creationflags=_no_window_flags(),
@@ -339,7 +341,8 @@ def list_ipv4_interfaces():
     else:
         try:
             r = subprocess.run(
-                ["ip", "-4", "-o", "addr", "show"], capture_output=True, timeout=8
+                ["ip", "-4", "-o", "addr", "show"],
+                stdin=DEVNULL_IN, capture_output=True, timeout=8
             )
             for line in decode_bytes(r.stdout).splitlines():
                 m = re.search(r"\d+:\s+(\S+).*?inet\s+([0-9.]+)/", line)
@@ -418,6 +421,11 @@ def _no_window_flags():
     if IS_WIN:
         return 0x08000000  # CREATE_NO_WINDOW，避免闪黑框
     return 0
+
+
+# pythonw.exe 没有标准输入输出。子进程若继承到无效句柄，
+# 在 Windows 上可能直接报 [WinError 6] 句柄无效，导致 netsh 之类的调用失败。
+DEVNULL_IN = subprocess.DEVNULL
 
 
 def _shell_argv(shell, line):
@@ -1031,7 +1039,8 @@ def cmd_kill(pid, force=True):
         raise RpcError("拒绝结束该进程（系统进程或接收端自身）", 8)
     if IS_WIN:
         argv = ["taskkill", "/PID", str(pid)] + (["/F"] if force else [])
-        r = subprocess.run(argv, capture_output=True, creationflags=_no_window_flags())
+        r = subprocess.run(argv, stdin=DEVNULL_IN, capture_output=True,
+                           creationflags=_no_window_flags())
         text = decode_bytes(r.stdout + r.stderr).strip()
         if r.returncode != 0:
             raise RpcError(text or ("结束进程失败，退出码 %d" % r.returncode), 9)
@@ -1552,6 +1561,7 @@ def _pid_alive(pid):
         if IS_WIN:
             out = subprocess.run(
                 ["tasklist", "/FI", "PID eq %d" % pid],
+                stdin=DEVNULL_IN,
                 capture_output=True,
                 creationflags=_no_window_flags(),
             ).stdout
@@ -1611,7 +1621,8 @@ def do_stop():
             pass
         time.sleep(0.6)
         if _pid_alive(pid) and IS_WIN:
-            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"],
+                           stdin=DEVNULL_IN, capture_output=True)
         cleanup_pid()
         print("已停止 PID %s" % pid)
         return 0
@@ -1797,21 +1808,29 @@ def main(argv):
         print("LanCmd 接收端已启动：TCP %s  UDP %s  免确认=%s"
               % (cfg["port"], cfg["discovery_port"], cfg["auto_accept"]))
 
-    # 起步先看一眼防火墙：热点/USB 共享场景下这是最常见的“连不上”原因
-    fw = firewall_status()
-    if fw.get("supported") and not fw["ok"]:
-        if fw.get("block_inbound"):
-            log.warning("防火墙策略为「阻止所有入站」，放行规则会被覆盖")
-            if console:
-                print("提示：防火墙策略是「阻止所有入站连接」，即使加了放行规则也会被覆盖。")
-                print("      请到 Windows 安全中心 → 防火墙 → 当前网络，取消该选项。")
-        else:
-            log.warning("防火墙未放行 47823/47824，手机可能连不上（尤其开热点时）")
-        if console:
-            print("提示：防火墙未放行 47823/47824。")
-            print("      手机连不上时，用管理员身份执行：LanCmdCtl.exe --fix-firewall")
-    elif fw.get("supported"):
-        log.info("防火墙规则已放行")
+    # 防火墙检测放到后台做：netsh 单次就要几百毫秒，
+    # 放在主路径会把启动拖慢，导致启动脚本误判“没起来”。
+    def _check_firewall_async():
+        try:
+            fw = firewall_status()
+        except Exception as e:
+            log.warning("防火墙检测失败: %s", e)
+            return
+        if fw.get("supported") and not fw["ok"]:
+            if fw.get("block_inbound"):
+                log.warning("防火墙策略为「阻止所有入站」，放行规则会被覆盖")
+                if console:
+                    print("提示：防火墙策略是「阻止所有入站连接」，即使加了放行规则也会被覆盖。")
+                    print("      请到 Windows 安全中心 → 防火墙 → 当前网络，取消该选项。")
+            else:
+                log.warning("防火墙未放行 47823/47824，手机可能连不上（尤其开热点时）")
+                if console:
+                    print("提示：防火墙未放行 47823/47824。")
+                    print("      手机连不上时，用管理员身份执行：LanCmdCtl.exe --fix-firewall")
+        elif fw.get("supported"):
+            log.info("防火墙规则已放行")
+
+    threading.Thread(target=_check_firewall_async, daemon=True, name="fwcheck").start()
 
     sup = Supervisor(cfg)
     sup.spawn("tcp", tcp_server)

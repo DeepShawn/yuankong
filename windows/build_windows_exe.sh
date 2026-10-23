@@ -48,7 +48,7 @@ echo "[4/5] 组装目录"
 rm -rf "$PKG"
 mkdir -p "$PKG/python"
 cp "$WORK/LanCmdAgent.exe" "$WORK/LanCmdCtl.exe" "$WORK/Start.exe" "$PKG/"
-cp lan_command_agent.py start.bat "$PKG/"
+cp lan_command_agent.py start.bat 诊断.bat "$PKG/"
 (cd "$PKG/python" && unzip -qo "$WORK/$EMBED_ZIP")
 # 精简：接收端用不到这些
 rm -f "$PKG/python"/_msi.pyd "$PKG/python"/_sqlite3.pyd "$PKG/python"/sqlite3.dll \
