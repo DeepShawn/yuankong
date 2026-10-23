@@ -15,8 +15,8 @@ UDP 47824 做发现，TCP 47823 做命令。帧 = 一行 UTF-8 JSON，以 `\n` �
 
 ```json
 {"app":"LANCMD","v":1,"type":"agent","name":"DESKTOP-8K2",
- "host":"DESKTOP-8K2","port":47823,"os":"Windows","ver":"1.3",
- "id":"9f3c1a7b2e","auto_accept":false,
+ "host":"DESKTOP-8K2","port":47823,"os":"Windows","ver":"1.5.1",
+ "id":"9f3c1a7b2e","auto_accept":true,
  "ips":["192.168.1.5","192.168.137.1","10.8.0.2"],
  "lan_ips":["192.168.1.5","192.168.137.1"],
  "hotspot_ips":["192.168.137.1"]}
@@ -58,9 +58,8 @@ VMware / VirtualBox / Hyper-V 网卡**不排除**，它们有时确实能到局�
 ```
 
 - `client_id` 首次由手机生成并存本地，之后不变。
-- `token` 为空或与电脑端记录不符 → 进入配对流程：
-  - `auto_accept=true`：直接配对
-  - 否则电脑端弹确认框，`approval_timeout`（默认 45s）无人应答视为拒绝
+- 当前接收端不校验 token 来限制连接；`token` 为空或不符时仍完成握手，并返回已有或新建的配对 token。
+- `auto_accept` 在发现应答中固定为 `true`。`--auto-accept` / `--no-auto-accept` 是被忽略的兼容参数，没有确认窗口或 `approval_timeout`。
 
 成功：
 
@@ -71,31 +70,24 @@ VMware / VirtualBox / Hyper-V 网卡**不排除**，它们有时确实能到局�
 
 - `agent_id` 是电脑的稳定标识（主机名+架构+CPU 数派生）。手机重连时用它核对
   “还是不是同一台电脑”，即使 IP 变了也能认回来。
-- `fresh` 只在首次配对时为 true；带有效 token 重连时省略。
-  手机据此判断“是否还需要电脑确认”。
+- `fresh` 表示是否新建配对记录：首次配对为 `true`，已有配对记录为 `false`。它不是授权凭据。
 
 ## 2.1 断线重连语义
 
 | 场景 | 行为 |
 |---|---|
 | 手机断 Wi-Fi / 杀进程 | TCP 连接由 RST 或 keepalive 超时（30s 空闲探测、10s×3 次）判定失效 |
-| 手机重连 | 用本地 token 直接 `hello`，`paired=true`、无 `fresh`，**不需要电脑确认** |
-| 电脑端进程重启 | `paired.json` 持久化，token 仍有效，手机重连照旧免确认 |
+| 手机重连 | 发送 `hello`，返回 `paired=true`、`fresh=false`（已有记录） |
+| 电脑端进程重启 | `paired.json` 持久化，返回已有配对记录；手机重新握手 |
 | 电脑端 IP 变化 | 手机每 3 次失败重新 UDP 广播，按 `agent_id` 认回同一台机器 |
 | 手机侧网络恢复 | `ConnectivityManager` 回调立即触发重连，不等退避计时 |
-| 心跳 | 手机每 20s `ping`，连续 2 次超时（8s）主动断开并重连 |
+| 心跳 | 手机每 20s `ping`，连续 3 次超时（10s）主动断开并重连；其他请求在途时暂停心跳失败判定 |
 
-电脑端不主动断开空闲连接以外的任何状态；单次断线只结束该连接线程，
+电脑端不设 TCP 连接空闲超时；单次断线只结束该连接线程，
 监听循环与发现应答继续提供服务（看护线程会在循环意外退出时退避重启）。
 
-被拒：
-
-```json
-{"id":1,"ok":false,"error":"denied","message":"电脑端拒绝了连接"}
-```
-
 之后每条请求都要先握手；未握手的请求返回 `未授权，请先握手`（ecode 401）。
-token 存 `paired.json`，手机存 SharedPreferences，所以再次连接是静默的。
+配对记录存 `paired.json`，手机存 SharedPreferences；当前 token 不构成访问控制。
 
 ## 3. 请求/响应
 
@@ -132,7 +124,7 @@ token 存 `paired.json`，手机存 SharedPreferences，所以再次连接是静
 
 错误码：`1` 一般错误，`2` 超过文件上限，`3` 传输会话不存在/过期，
 `4` 分块序号错乱，`5` 数据超过声明大小，`6` 大小不匹配，`7` sha256 校验失败，
-`8` 拒绝结束受保护进程，`9` 结束进程失败，`401` 未握手，`403` 共享未批准/停止/过期。
+`8` 拒绝结束受保护进程，`9` 结束进程失败，`401` 未握手，`403` 共享会话不存在、已停止或作用域/身份不符。
 
 ## 3.1 分块传输
 
@@ -157,7 +149,8 @@ token 存 `paired.json`，手机存 SharedPreferences，所以再次连接是静
 ```
 
 - `seq` 必须从 0 连续递增，错序直接报错（防止丢块悄悄写坏文件）
-- 数据先写 `目标.<sid>.lancmd-part`，`end` 时大小与 sha256 都对上才 `os.replace` 原子落盘
+- 数据先写 `目标.<sid>.lancmd-part`，`end` 时大小与可选 sha256 校验通过后提交。`overwrite` 默认 `true`；设为 `false` 时，提交会原子拒绝已存在的目标，即使目标是在上传期间新建的。
+- 1.5.1 起严格拒绝非法 base64 和超过声明总大小的分块，拒绝时不推进块序号或写入数据。提交失败会清理传输会话与临时文件。小文件 `put` 的 `overwrite=false` 同样使用独占创建。
 - `{"action":"abort"}` 或连接断开时删除临时文件，不留半截
 - 默认上限 `max_upload_bytes` = 4GB
 
@@ -193,8 +186,7 @@ token 存 `paired.json`，手机存 SharedPreferences，所以再次连接是静
   `[Console]::OutputEncoding=[Text.Encoding]::UTF8`）统一成 UTF-8，再按
   utf-8 → gbk → mbcs 多级解码兜底；`CREATE_NO_WINDOW` 防止闪黑框。
 - `screen` / `screenshot` 使用 GDI 捕获全部显示器，`camera` 使用 Media Foundation；WIC 编码 JPEG，不依赖 Pillow，最大单帧 4MB。
-- 每个 TCP 连接一个线程，长连接保持；`sock.settimeout(300)` 空闲 5 分钟断开
-  （手机会每 20s 心跳，正常不会触发）。
+- 每个 TCP 连接一个线程，长连接保持，不设连接空闲超时。`exec_timeout=0` 表示接收端不限制命令时长，客户端仍可通过 `timeout` 指定单次执行时限。
 - 监听套接字启用 TCP keepalive（idle 30s / interval 10s / count 3），
   半开连接约 60s 内被内核判定失效，不会长期占用。
 - 端口被上一次实例占用时持续重试（最长 30 次、退避 0.2~2s），不直接退出。
@@ -207,15 +199,15 @@ token 存 `paired.json`，手机存 SharedPreferences，所以再次连接是静
 - `SIGTERM/SIGINT/SIGBREAK/SIGHUP` 均触发优雅退出并清理 pid 文件。
 
 
-## 5. 1.5.0 工作台命令
+## 5. 工作台命令（1.5.1）
 
-所有命令先完成 `hello`；普通配对不授权屏幕、摄像头或键盘。
+所有命令先完成 `hello`。屏幕、摄像头和键盘使用独立作用域的会话 ID；当前接收端创建会话时不要求本机确认。
 
 | cmd | 参数 | 成功返回 |
 |---|---|---|
 | `capabilities` | — | `version features[] session_seconds` |
 | `storage` | — | `home drives[{path,total,free,used,percent}]` |
-| `session` | `action:"begin" scope:"screen"/"camera"/"input"` | `sid scope expires_in:300` |
+| `session` | `action:"begin" scope:"screen"/"camera"/"input"` | `sid scope expires_in:null` |
 | `session` | `action:"keepalive" sid` | `active:true` |
 | `session` | `action:"end" sid` | `stopped:true`，重复调用也成功 |
 | `screen` | `sid` | `format:"jpeg" data`(base64) |
@@ -224,11 +216,10 @@ token 存 `paired.json`，手机存 SharedPreferences，所以再次连接是静
 | `input` | `sid keys:["CTRL","V"]` 或 `sid text:"你好"` | `sent:true` |
 | `message` | `title? text` | `sent:true`（桌面消息已排入显示） |
 
-- 本机授权窗口等待最多 45 秒，客户端 `begin` 超时建议 55 秒。每个作用域单独授权；`auto_accept` 和记住配对都不能跳过本次授权。
-- 授权绑定当前 TCP 连接、配对 ID 和作用域，最长 300 秒。重连必须重新授权；每次数据操作或 `keepalive` 刷新活动时间，但不能延长总时限。空闲 20 秒停止。
-- 本机窗口持续可见，关闭、隐藏、最小化或点「立即停止」会撤销。采集中途撤销的结果被丢弃；手机页面进入后台时发送 `end`。
+- 会话绑定当前 TCP 连接、客户端 ID 和作用域，重连必须重新创建。`expires_in` 和 `capabilities.session_seconds` 均为 `null`，没有总时长或空闲时限。
+- 手机页面进入后台时发送 `end`；连接关闭时接收端释放该连接的所有会话。接收端没有本机会话窗口；本机可停止整个接收服务。
 - 手机通过原连接释放会话，不将旧会话 ID 发到自动重连后的新电脑连接。键盘页每 8 秒保活；屏幕约 800ms、摄像头约 1200ms 请求一帧（还需加上采集耗时）。这是 JPEG 预览，没有录音与视频编码。
 - 按键与文字二选一；组合键最多 5 个不同按键，文字最多 1000 字。只控制当前用户桌面的前台应用；无法控制 UAC 安全桌面或权限更高的应用。
-- 消息 1–2000 字、标题最多 60 字；每连接间隔 5 秒，最多 3 个未关闭消息框。
-- 手机 `hello.client` 统一为「LanCmd 手机」，不再发送制造商或机型；`client_id` 保持不变用于配对和授权窗口中的短 ID。
-- 旧版 `screenshot` 无授权调用在 1.5.0 会拒绝。旧手机的其他命令仍兼容；新工作台页面需要 Windows 1.5.0 与完整辅助程序。
+- 消息 1–2000 字、标题最多 60 字；后端最多同时显示 3 个消息框，不设每连接发送间隔。
+- 手机 `hello.client` 统一为「LanCmd 手机」，不再发送制造商或机型；`client_id` 保持不变用于配对记录和会话身份。
+- `screenshot` 与 `screen` 均要求有效的屏幕会话 ID。旧手机的其他命令仍兼容；工作台页面需要 Windows 1.5.0 或更新版本及完整辅助程序。

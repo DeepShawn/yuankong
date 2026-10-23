@@ -1,24 +1,25 @@
 # LanCmd — 局域网命令控制（安卓 → Windows）
 
 手机在同一个局域网下直接控制电脑：执行命令、查看屏幕和摄像头、发送消息和按键、管理磁盘文件、锁屏与剪贴板。
-电脑端可后台接收，屏幕、摄像头和键盘会话需要本机授权，始终显示停止入口；手机端开机即自动发现、**不用输连接码**、
-**掉线自动重连**。
+电脑端由本机启动、停止接收服务；手机端开机即自动发现、**不用输连接码**、**掉线自动重连**。
 
-**1.5.0：远程工作台与可视化存储。手机和 Windows 接收端需要一起更新。**
+**1.5.1：修复 Windows 启动参数与文件上传完整性问题。建议手机和 Windows 接收端一起更新。**
 
-- [下载 Android 1.5.0 APK](https://github.com/DeepShawn/yuankong/releases/download/v1.5.0/LanCmd-1.5.0.apk)
-- [下载 Windows 1.5.0 接收端](https://github.com/DeepShawn/yuankong/releases/download/v1.5.0/LanCmd-Windows-1.5.0.zip)
-- 新增屏幕及摄像头 JPEG 预览、桌面消息、组合按键和 Unicode 文字输入。
-- 新增磁盘容量、目录导航、搜索、上传下载、重命名、新建目录与删除。
+- [下载 Android 1.5.1 APK](https://github.com/DeepShawn/yuankong/releases/download/v1.5.1/LanCmd-1.5.1.apk)
+- [下载 Windows 1.5.1 接收端](https://github.com/DeepShawn/yuankong/releases/download/v1.5.1/LanCmd-Windows-1.5.1.zip)
+- 修复 Windows 启动器命令行前导空格及引号、反斜线转义，避免解释器路径被当作脚本。
+- 修复 `overwrite=false` 上传时的同名文件竞争覆盖；拒绝非法 base64 和超过声明大小的分块，提交失败会清理会话与临时文件。
+- 修复 Android 未知大小文件上传失败后的缓存残留，缓存复制期间支持取消。
+- 保留屏幕及摄像头 JPEG 预览、桌面消息、组合按键、文字输入和可视化文件管理。
 - 手机对外统一显示「LanCmd 手机」，保留原有配对 ID，不再发送手机型号或机名。
-- 屏幕、摄像头、按键分别在电脑端允许，每次最长 5 分钟；本机停止、退出页面、断开连接或空闲 20 秒会结束会话。普通连接的免确认设置不替代这些授权。
-- Android 1.5.0 沿用 1.4.10 签名，可覆盖安装 1.4.10；1.4.9 用户需要先卸载再安装。
+- 接收端沿用 1.5.0 的连接行为：完成握手即可使用功能，不校验配对 token，也没有本机确认窗口或共享时长上限。停止接收服务可终止连接。
+- Android 1.5.1 沿用 1.4.10/1.5.0 签名，可覆盖安装这两个版本；1.4.9 用户需要先卸载再安装。
 
 ```
 ┌──────────────┐   UDP 47824 广播探测/应答   ┌──────────────────────┐
 │ 安卓 App      │ ──────────────────────────▶ │ Windows 接收端        │
 │ com.aicode.  │                             │ pythonw 静默运行      │
-│   lancmd     │   TCP 47823 行分隔 JSON     │ 本机授权 / 随时停止    │
+│   lancmd     │   TCP 47823 行分隔 JSON     │ 本机启动 / 停止服务    │
 │ 前台常驻保活  │ ◀─────────────────────────▶ │ 看护线程 / 端口自愈    │
 └──────────────┘                             └──────────────────────┘
 ```
@@ -36,25 +37,21 @@
 也可以：
 
 - **双击 `start.bat`**：命令行方式，显示启动结果后自动结束
-- **双击 `LanCmdAgent.exe`**：后台运行；使用画面与按键功能时显示本机授权和停止窗口
+- **双击 `LanCmdAgent.exe`**：启动后台接收服务
 - **前台调试（看日志）**：`start_console.bat`
 - **开机自启**：`install_autostart.bat`，或在 `Start.exe` 里点「开机自启」
 
-启动接收服务不弹主窗口；画面共享和按键控制期间会显示持续可见的授权及停止窗口。
+通过 `Start.exe` 或 `LanCmdCtl.exe --stop` 可停止接收服务。画面与按键会话没有额外的本机确认窗口。
 配置与日志在 `%APPDATA%\LanCmd\`（`agent.json`、`agent.log`、`paired.json`）。
 
-Windows 接收端普通连接默认免确认，手机连接后直接授权。需要恢复首次连接人工确认时执行：
-
-```bat
-LanCmdCtl.exe --no-auto-accept
-```
+Windows 接收端完成握手后即可接收命令。旧参数 `--auto-accept` / `--no-auto-accept` 仅兼容保留，执行时会提示已忽略，不能用来开启人工确认。
 
 ### 2. 手机端（Android 7.0+，arm64-v8a）
 
-从上方链接下载 `LanCmd-1.5.0.apk` 后安装：
+从上方链接下载 `LanCmd-1.5.1.apk` 后安装：
 
 ```bash
-adb install LanCmd-1.5.0.apk
+adb install LanCmd-1.5.1.apk
 ```
 
 打开 App 自动扫描并连上唯一的那台电脑；有多台时弹列表让你选。
@@ -272,9 +269,9 @@ LanCmd-UDP   UDP  47824
 |---|---|
 | 输入任意命令 | `cmd /c` 或 `powershell -Command` 执行，回传 stdout/stderr/退出码 |
 | 存储 | 磁盘容量、目录浏览、搜索、上传下载与文件管理 |
-| 屏幕 / 摄像头 | 本机允许后按帧预览，可选择保存当前 JPEG；无录音 |
+| 屏幕 / 摄像头 | 按帧预览，可选择保存当前 JPEG；无录音 |
 | 消息 | 在 Windows 桌面显示可关闭的消息框 |
-| 按键 | 本机允许后向当前前台应用发送组合键或文字 |
+| 按键 | 向当前前台应用发送组合键或文字 |
 | 剪贴板 | 读电脑剪贴板，也能把手机上编辑的文本写回电脑 |
 | 进程 | 列出进程 PID/内存 |
 | 锁屏 | `LockWorkStation` |
@@ -289,7 +286,7 @@ LanCmd-UDP   UDP  47824
 
 ## 五、Windows 端 exe
 
-**Windows 1.5.0 完整包见发布页。升级前运行 `LanCmdCtl.exe --stop`，替换整个目录后重新启动。**
+**Windows 1.5.1 完整包见发布页。升级前运行 `LanCmdCtl.exe --stop`，替换整个目录后重新启动。**
 
 解压到任意目录，双击 `LanCmdAgent.exe` 就能跑。**目标电脑不用装 Python，也不用装编译器。**
 
@@ -300,7 +297,7 @@ LanCmd-Windows/
 ├── LanCmdAgent.exe        接收端本体（29KB，无控制台窗口）
 ├── LanCmdCtl.exe          管理工具（53KB，有输出）
 ├── LanCmdCapture.exe      画面采集辅助程序
-├── remote_features.py     授权、停止与输入逻辑
+├── remote_features.py     会话、消息与输入逻辑
 ├── lan_command_agent.py   主逻辑，不要删
 ├── python/                自带的 Python 3.11 运行时
 └── 使用说明.txt
@@ -316,7 +313,7 @@ LanCmdCtl.exe --status                    :: 查状态
 LanCmdCtl.exe --stop                      :: 停止
 ```
 
-接收端启动器使用 GUI 子系统，普通后台运行没有控制台；`LanCmdCtl.exe` 提供状态和停止命令。共享期间另有持续可见的本机停止窗口。
+接收端启动器使用 GUI 子系统，普通后台运行没有控制台；`LanCmdCtl.exe` 提供状态和停止命令。停止整个服务可使用 `Start.exe` 或 `LanCmdCtl.exe --stop`。
 
 **怎么编出来的**：`mingw-w64` 交叉编译 `launcher.c`（aarch64 容器里也能产出 x86-64 PE），
 配官方 Windows embeddable Python 运行时。不依赖 PyInstaller，不需要 Windows 环境。
@@ -328,7 +325,7 @@ apt-get install -y gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-
 cd windows && ./build_windows_exe.sh
 ```
 
-细节（PE 结构、资源编译、无 tkinter 的回退、未验证项）见
+细节（PE 结构、资源编译、回归测试、未验证项）见
 [windows/BUILD-WINDOWS.md](windows/BUILD-WINDOWS.md)。
 
 > 也可以在这台 Windows 上跑 `build_exe.bat` 用 PyInstaller 打包，或者干脆不编译、
@@ -350,7 +347,7 @@ Android SDK 需 platforms;android-36 + build-tools;35.0.0。
 `ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。维护此项目的发布应沿用 1.4.10 的密钥；独立分发可使用自己的密钥。
 可在有 Secrets 管理权限的环境中运行 `python3 tools/import_signing_secrets.py --keystore <私有JKS路径> --properties <私有配置路径>`，脚本通过 GitHub CLI 加密写入，不输出密钥或口令。
 在 Actions 中运行 **Android signed APK**，或推送与应用版本一致的 `v*` 标签，会生成已签名 APK 和校验文件。
-工作流核对证书指纹，构建后清理临时密钥；产物在 Actions Artifacts 中下载，不会自动修改已有 Release 附件。
+工作流先启动真实接收端并运行 Android 单元/集成测试，再核对证书指纹，构建后清理临时密钥。**Windows feature checks** 运行 Windows 原生回归，并交叉编译完整 Windows ZIP。双端产物在 Actions Artifacts 中下载，不会自动修改已有 Release 附件。
 
 **ABI**：App 纯 Kotlin + AndroidX/Material，无 JNI/native 库，任何 ABI 都能装，
 arm64-v8a 设备直接使用。`ndk.abiFilters` 里保留 `arm64-v8a` 只是给将来加 native 库时定调。
@@ -358,11 +355,12 @@ arm64-v8a 设备直接使用。`ndk.abiFilters` 里保留 `arm64-v8a` 只是给�
 电脑端 Python 逻辑只依赖标准库；屏幕与摄像头需要编译 `capture.cpp` 或使用完整 Windows 包。验证协议：
 
 ```bash
-python3 windows/lan_command_agent.py --auto-accept --console   # 终端 A
+python3 windows/lan_command_agent.py --console   # 终端 A
 python3 tools/test_client.py 127.0.0.1          # 基础功能（10 项）
 python3 tools/test_transfer.py 127.0.0.1        # 分块传输 + 进程管理（25 项）
 python3 tools/test_reconnect.py 127.0.0.1 8     # 断线重连（8 轮 RST 风暴）
 python3 -m unittest discover -s tools -p test_remote_features.py -v
+python3 -m unittest discover -s tools -p test_file_operations.py -v
 ```
 
 ---
@@ -387,7 +385,7 @@ lan-cmd/
 │   └── app/src/test/              路径单测 + 跨语言协议/重连集成测试
 ├── windows/
 │   ├── lan_command_agent.py       接收端与看护线程
-│   ├── remote_features.py         本机授权和可撤销会话
+│   ├── remote_features.py         会话、消息与输入逻辑
 │   ├── capture.cpp                GDI / Media Foundation / WIC 画面采集
 │   ├── start_hidden.vbs           无窗口启动
 │   ├── start_console.bat          前台调试
@@ -438,7 +436,7 @@ lan-cmd/
   网卡分类实测（`WireGuard Tunnel`/`TAP-Windows` → VPN 排除，`本地连接*`/`Wi-Fi Direct` → 热点保留，
   `WLAN`/`VMware` → 普通保留）；三套协议测试仍全过
 
-1.5.0 额外验证：19 项共享授权/撤销/会话隔离测试；Robolectric 页面渲染与页面退出停止测试；原生画面辅助程序交叉编译；GitHub Windows 运行器通过原生授权/拒绝/停止、隐藏提示撤销、JPEG 屏幕采集与摄像头枚举检查。
+1.5.1 增加文件上传完整性和 Windows 启动器参数回归测试。工作流覆盖作用域与连接隔离、页面退出释放、MSVC 编译、JPEG 屏幕采集与摄像头枚举；具体运行结果见对应提交的 Actions 记录。授权窗口和授权到期已不属于当前版本行为，旧版相关测试结论不适用。
 
 **待真机验证**：Windows 实际摄像头画面、多屏与缩放、真实前台按键，以及 Android 真机视觉、网络切换与前台服务保活。Robolectric 渲染不能替代设备测试。
 
@@ -446,16 +444,14 @@ lan-cmd/
 
 ## 九、边界与已知限制
 
-- **只有电脑端能“隐藏”**：`start_hidden.vbs` / exe 可后台运行，画面/按键会话显示授权及停止窗口；进程在任务管理器可见；
-  安卓端是正常可见的 App（外加一条低优先级常驻通知）。没有做进程名伪装、没有反卸载/守护。
+- **运行方式**：Windows 接收端可后台运行，进程在任务管理器可见；Android 是正常可见的 App，带一条前台服务通知。
 - **同一局域网**：优先靠 UDP 广播。跨网段、开了 AP 隔离的 Wi-Fi 发现不到，此时用“手动输入 IP”。
   VPN 与电脑热点场景已单独处理（见三·四节），但**手机连 VPN 且 VPN 客户端强制全局代理时**，
   局域网流量仍可能被劫持，需要在 VPN 里配置绕过规则。
 - **热点模式下手机走移动数据会失效**：连电脑热点时手机通常没有互联网，属正常现象；
   如果系统自动切回移动数据，会连不上，需要在 Wi-Fi 设置里关掉“自动切换”。
 - **传输未加密**：JSON 明文 + token 明文的 TCP，仅适用于你信任的家庭/办公局域网。
-- **Windows 接收端普通连接默认免确认**：仅在信任的局域网使用；需要首次连接人工确认时运行
-  `LanCmdCtl.exe --no-auto-accept`，确认一次后该设备可凭 token 重连。
+- **Windows 接收端没有连接授权校验**：仅在信任的局域网使用。配对记录用于客户端保存连接信息，token 不限制访问；兼容参数 `--no-auto-accept` 不会恢复人工确认。
 - 截屏、锁屏、剪贴板、开关机走 Windows API，只在 Windows 接收端生效；
   `sh` 模式是给 Linux/macOS 上跑同一份接收端调试用。
 - 前台服务保活不等于“永不掉线”：系统极端省电、强制停止 App、断网都会断开，
@@ -467,8 +463,8 @@ lan-cmd/
 |---|---|
 | App 一直转圈找不到电脑 | 确认同一 Wi-Fi；关路由器 AP 隔离；防火墙放行 `pythonw.exe` 的 47823/47824；手动输 IP |
 | 显示“已掉线，自动重连中”不动 | 电脑端是否在跑（`status.bat`）；点浮层「立即重连」或测延迟 |
-| 一直“等待电脑确认” | 电脑端弹框被其他窗口挡住，或 `approval_timeout` 到了；重连一次 |
-| 连接被拒绝 | 电脑上曾点过“否”，重试会再次弹框 |
+| 一直“等待电脑确认” | 当前版本不会弹确认框；检查是否仍在运行旧版接收端，以及 TCP 端口、防火墙和网络 |
+| 连接被拒绝 | 检查接收服务是否启动，以及 IP、端口和防火墙配置 |
 | 命令乱码 | 中文 Windows 的 GBK 已多级解码；仍乱码时切 PowerShell 模式 |
 | 后台常驻通知烦 | `⋮` →「关闭后台常驻」 |
 | 想彻底重置 | 手机 `⋮` → 清除配对记录；电脑 `python lan_command_agent.py --reset-pairing` |
