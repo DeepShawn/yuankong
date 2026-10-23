@@ -158,7 +158,13 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         super.onStart()
         ConnectionManager.addListener(this)
         ConnectionManager.start(this)
-        render(ConnectionManager.snapshot())
+        // 不要无条件用快照覆盖：快照可能还是初始空值，
+        // 会把已经收到的有效状态（host/name）冲掉，
+        // 导致随后的电源确认弹窗显示空白目标。
+        val snap = ConnectionManager.snapshot()
+        if (snap.state != State.IDLE || status.state == State.IDLE) {
+            render(snap)
+        }
     }
 
     override fun onStop() {
@@ -731,17 +737,65 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         run("lock", JSONObject()) { log("✓ 电脑已锁屏", LogKind.OK) }
     }
 
+    /**
+     * 关机 / 重启 / 注销 / 睡眠的二次确认。
+     *
+     * 电源类操作不可撤销，且快捷键就排在快捷操作第二行，
+     * 手指滑动时很容易误触，所以做两级：
+     *   第一级 —— 说明后果，按钮是「继续」
+     *   第二级 —— 列出具体目标电脑和不可逆提示，按钮才是「确认执行」
+     * 第二级的按钮默认不是高亮的，避免连点两下直接穿透。
+     */
     private fun confirmPower(action: String, label: String) {
-        AlertDialog.Builder(this)
-            .setTitle("确认${label}")
-            .setMessage("将向 ${status.name} 发送${label}指令，继续？")
-            .setPositiveButton("执行") { _, _ ->
+        val irreversible = action in arrayOf("shutdown", "restart", "logoff")
+        val warning = if (irreversible) {
+            "电脑上未保存的内容会丢失，该操作无法撤销。"
+        } else {
+            "电脑将进入睡眠，可正常唤醒。"
+        }
+        // 目标信息在第一级就固定下来。status 会被后台状态回调覆盖，
+        // 若等第二级现读，可能已经变成空值。
+        val name = status.name.ifBlank { "这台电脑" }
+        val addr = if (status.host.isBlank()) "未知地址" else "${status.host}:${status.port}"
+
+        safeDialog {
+            setTitle("${label}电脑？")
+            setMessage(
+                "将向「" + name + "」发送" + label + "指令。\n\n" + warning
+            )
+            setPositiveButton("继续") { _, _ ->
+                confirmPowerFinal(action, label, irreversible, name, addr)
+            }
+            setNegativeButton("取消", null)
+        }
+    }
+
+    private fun confirmPowerFinal(
+        action: String,
+        label: String,
+        irreversible: Boolean,
+        name: String,
+        addr: String
+    ) {
+        val consequence = if (irreversible) {
+            "这是最后一步。点「确认${label}」后电脑会立即${label}，" +
+                "手机上的连接也会随之断开。"
+        } else {
+            "确认让这台电脑进入睡眠？"
+        }
+        safeDialog {
+            setTitle("再次确认：${label}")
+            setMessage(
+                "目标电脑：" + "\n" + name + "\n" + addr + "\n\n" + consequence
+            )
+            setPositiveButton("确认${label}") { _, _ ->
+                log("正在发送" + label + "指令到 " + addr, LogKind.INFO)
                 run("power", JSONObject().put("action", action)) {
                     log("✓ 已发送${label}指令", LogKind.OK)
                 }
             }
-            .setNegativeButton("取消", null)
-            .show()
+            setNegativeButton("取消", null)
+        }
     }
 
     // ------------------------------------------------------------ 菜单
@@ -882,7 +936,6 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     // ------------------------------------------------------------ 状态渲染
 
     override fun onStatus(s: Status) {
-        status = s
         render(s)
     }
 
@@ -891,7 +944,9 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     }
 
     private fun render(s: Status) {
-        // render 是主线程回调，一旦抛异常就是闪退；出问题也要保住界面可用
+        // 先把状态存下来：界面不可见时也要保证 status 是最新的，
+        // 否则后续 confirmPower 之类的动作会读到空 host/name。
+        status = s
         try {
             renderInner(s)
         } catch (t: Throwable) {
