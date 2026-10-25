@@ -80,13 +80,14 @@ jobs:
           path: android/app/build/test-results/testDebugUnitTest/
           if-no-files-found: ignore
       - name: Upload UI previews
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: LanCmd-UI-previews-${{ github.run_number }}
           path: |
             android/app/build/ui-previews/*.png
             android/build/ui-previews/*.png
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
       - name: Restore signing configuration
         env:

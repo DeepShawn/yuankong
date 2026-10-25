@@ -65,7 +65,9 @@ class DesktopUiTest {
     private fun waitUntil(timeout: Long = 8000, condition: () -> Boolean) {
         val end = System.nanoTime() + timeout * 1_000_000
         while (System.nanoTime() < end) {
-            shadowOf(Looper.getMainLooper()).idle()
+            // Advance coroutine delays as well as immediate callbacks. Robolectric
+            // pauses the main clock, unlike a device running the preview loop.
+            shadowOf(Looper.getMainLooper()).idleFor(10, TimeUnit.MILLISECONDS)
             if (condition()) return
             Thread.sleep(10)
         }
