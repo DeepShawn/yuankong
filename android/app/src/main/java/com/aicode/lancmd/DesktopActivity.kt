@@ -38,7 +38,7 @@ import org.json.JSONObject
 import kotlin.coroutines.coroutineContext
 
 /** Screen, touch/mouse, keyboard and command console share one visible workspace. */
-class DesktopActivity : FeatureActivity() {
+class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
     private data class InputCommand(val command: String, val params: JSONObject)
     private lateinit var screen: RemoteScreenView
     private lateinit var start: MaterialButton
@@ -370,7 +370,22 @@ class DesktopActivity : FeatureActivity() {
         sessionJob?.cancel(); terminalJob?.cancel()
     }
 
+    override fun onStart() {
+        super.onStart()
+        ConnectionManager.addListener(this)
+    }
+
+    override fun onStatus(status: ConnectionManager.Status) {
+        val source = origin ?: return
+        if (runCatching { ConnectionManager.sessionClient() }.getOrNull() !== source) {
+            sessionJob?.cancel(); terminalJob?.cancel()
+        }
+    }
+
+    override fun onEvent(text: String, kind: ConnectionManager.LogKind) = Unit
+
     override fun onStop() {
+        ConnectionManager.removeListener(this)
         screen.cancelGesture()
         sessionJob?.cancel(); terminalJob?.cancel()
         super.onStop()
