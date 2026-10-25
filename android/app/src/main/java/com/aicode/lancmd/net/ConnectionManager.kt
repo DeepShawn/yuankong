@@ -137,6 +137,25 @@ object ConnectionManager {
 
     fun sessionClient(): AgentClient = client?.takeUnless { it.closed } ?: throw IOException("未连接")
 
+    /** A feature owns and closes this client; keep long commands off the input connection. */
+    suspend fun connectFeatureClient(feature: AgentClient, origin: AgentClient) = withContext(Dispatchers.IO) {
+        try {
+            if (client !== origin || origin.closed || feature.host != origin.host || feature.port != origin.port) {
+                throw IOException("连接已切换，请重新开始远程桌面")
+            }
+            feature.connect(via = physicalNetwork())
+            val expected = Prefs.target(ctx())?.agentId.orEmpty()
+            val hello = feature.handshake(Prefs.clientId(ctx()), deviceLabel(), Prefs.token(ctx(), feature.host, feature.port))
+            if (!hello.optBoolean("ok")) throw IOException(hello.optString("error", "无法连接电脑"))
+            if (client !== origin || origin.closed || (expected.isNotEmpty() && hello.optString("agent_id") != expected)) {
+                throw IOException("连接目标已改变，请重新开始远程桌面")
+            }
+        } catch (e: Exception) {
+            feature.close()
+            throw e
+        }
+    }
+
     fun forget(ctx: Context) {
         Prefs.forget(ctx)
         reconnects = 0

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="desktopStatus" type="id" />
+    <item name="desktopStart" type="id" />
+    <item name="desktopStop" type="id" />
+    <item name="desktopScreen" type="id" />
+    <item name="desktopTouchTab" type="id" />
+    <item name="desktopKeyboardTab" type="id" />
+    <item name="desktopTerminalTab" type="id" />
+    <item name="desktopFullscreen" type="id" />
+    <item name="desktopKeyboardText" type="id" />
+    <item name="desktopKeyboardSend" type="id" />
+    <item name="desktopTerminalLog" type="id" />
+    <item name="desktopCommand" type="id" />
+    <item name="desktopExecute" type="id" />
+</resources>

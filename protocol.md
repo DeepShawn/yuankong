@@ -214,6 +214,7 @@ VMware / VirtualBox / Hyper-V 网卡**不排除**，它们有时确实能到局�
 | `camera` | `sid action:"list"` | `devices[{id,name}]` |
 | `camera` | `sid device:0..31 action:"frame"` | `format:"jpeg" data`(base64) |
 | `input` | `sid keys:["CTRL","V"]` 或 `sid text:"你好"` | `sent:true` |
+| `pointer` | `sid action x y button? delta?` | `sent:true`（Windows 1.6.0 起） |
 | `message` | `title? text` | `sent:true`（桌面消息已排入显示） |
 
 - 会话绑定当前 TCP 连接、客户端 ID 和作用域，重连必须重新创建。`expires_in` 和 `capabilities.session_seconds` 均为 `null`，没有总时长或空闲时限。
@@ -223,3 +224,17 @@ VMware / VirtualBox / Hyper-V 网卡**不排除**，它们有时确实能到局�
 - 消息 1–2000 字、标题最多 60 字；后端最多同时显示 3 个消息框，不设每连接发送间隔。
 - 手机 `hello.client` 统一为「LanCmd 手机」，不再发送制造商或机型；`client_id` 保持不变用于配对记录和会话身份。
 - `screenshot` 与 `screen` 均要求有效的屏幕会话 ID。旧手机的其他命令仍兼容；工作台页面需要 Windows 1.5.0 或更新版本及完整辅助程序。
+
+### 1.6.0 远程桌面触控
+
+`capabilities.features` 新增 `pointer`。鼠标命令使用 `input` 作用域会话，不能复用屏幕会话；与按键共享同一连接。`action` 可为 `move`、`click`、`double_click`、`down`、`up`、`scroll`，`button` 为 `left`（默认）、`right` 或 `middle`；滚动的 `delta` 为 -10 到 10 的非零整数，每步 120 个 Windows 滚轮单位。
+
+`x`、`y` 是完整虚拟桌面 JPEG 的归一化坐标，必须是 0 到 1 的有限数值。Windows 使用绝对虚拟桌面坐标，因此兼容截图缩放及位于主显示器左侧、上方的屏幕。Android 按 FIT_CENTER 实际画面映射，黑边不产生点击；拖动离开图像时将结束位置限制在图像边缘。
+
+```json
+{"id":21,"cmd":"pointer","sid":"input-session-id","action":"click","x":0.5,"y":0.5,"button":"left"}
+```
+
+停止输入会话、关闭连接或发送输入失败时，接收端释放该会话持有的鼠标按键。另一个会话不能移动或释放正在拖动的鼠标。`up` 可重复调用；停止和旋转页面也会结束当前手势。
+
+Android 工作台建立画面、键鼠和终端三条专属连接，各自重新握手，绑定原目标。`exec` 不占用键鼠或画面连接。停止等待终端结果不等于撤销已经执行的电脑命令；命令仍受客户端指定的执行超时约束。页面不自动开始共享，离开或切换电脑后需要重新开始。

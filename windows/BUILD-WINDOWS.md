@@ -1,4 +1,4 @@
-# Windows 1.5.1 构建
+# Windows 1.6.0 构建
 
 发布 ZIP 为 Windows x64 解压包，适用于 Windows 10/11。目标电脑不需要安装 Python。升级时先执行 `LanCmdCtl.exe --stop`，替换完整目录，再启动；配置继续保存在 `%APPDATA%\LanCmd`。
 
@@ -42,6 +42,7 @@ PyInstaller 产物需连同 `LanCmdCapture.exe` 分发。它与主发布 ZIP 使
 ```bash
 python3 -m unittest discover -s tools -p test_remote_features.py -v
 python3 -m unittest discover -s tools -p test_file_operations.py -v
+python3 -m unittest discover -s tools -p test_pointer.py -v
 # Windows 下先编译 LanCmdCtl.exe，再运行启动器参数回归
 python -m unittest discover -s tools -p test_launcher.py -v
 ```

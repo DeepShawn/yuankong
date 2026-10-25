@@ -5,9 +5,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.IOException
 
-/** Bound to the exact connection that the Windows user approved. */
-class RemoteLease(private val scope: String) {
-    private val client = ConnectionManager.sessionClient()
+/** Pinned to its original connection; it never follows automatic reconnection. */
+class RemoteLease(private val scope: String, private val client: AgentClient = ConnectionManager.sessionClient()) {
     private var sid = ""
 
     suspend fun open() = withContext(NonCancellable) {

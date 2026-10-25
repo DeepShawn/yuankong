@@ -79,6 +79,15 @@ jobs:
           name: Android-test-reports-${{ github.run_number }}
           path: android/app/build/test-results/testDebugUnitTest/
           if-no-files-found: ignore
+      - name: Upload UI previews
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanCmd-UI-previews-${{ github.run_number }}
+          path: |
+            android/app/build/ui-previews/*.png
+            android/build/ui-previews/*.png
+          if-no-files-found: error
+          retention-days: 14
       - name: Restore signing configuration
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}

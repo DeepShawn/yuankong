@@ -197,10 +197,16 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     // ------------------------------------------------------------ 快捷操作
 
     private fun buildActions() {
+        findViewById<View>(R.id.cardDesktop).setOnClickListener {
+            if (!ConnectionManager.isConnected()) {
+                toast("未连接，正在重连…")
+                ConnectionManager.retryNow()
+            } else openFeature(DesktopActivity::class.java)
+        }
         val row1 = findViewById<LinearLayout>(R.id.rowActions1)
         val row2 = findViewById<LinearLayout>(R.id.rowActions2)
         val actions = listOf(
-            Action(R.drawable.ic_screenshot, "屏幕") { openFeature(MediaActivity::class.java, "screen") },
+            Action(R.drawable.ic_screenshot, "屏幕") { openFeature(DesktopActivity::class.java) },
             Action(R.drawable.ic_camera, "摄像头") { openFeature(MediaActivity::class.java, "camera") },
             Action(R.drawable.ic_keyboard, "按键") { openFeature(ControlActivity::class.java, "input") },
             Action(R.drawable.ic_message, "消息") { openFeature(ControlActivity::class.java, "message") },

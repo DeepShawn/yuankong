@@ -38,7 +38,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "1.5.1"
+VERSION = "1.6.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1087,7 +1087,7 @@ _remote = RemoteFeatures(RpcError, log, os.path.join(_capture_dir, "LanCmdCaptur
 def remote_capabilities():
     features = ["storage"]
     if IS_WIN:
-        features.extend(["message", "input"])
+        features.extend(["message", "input", "pointer"])
         if os.path.isfile(_remote.backend.capture_exe):
             features.extend(["screen", "camera"])
     # session_seconds 为 None 表示共享会话不设时长上限
@@ -1101,6 +1101,7 @@ HANDLERS = {
     "screen": lambda q, st: _remote.frame(q, st, "screen"),
     "camera": lambda q, st: _remote.frame(q, st, "camera"),
     "input": _remote.keyboard,
+    "pointer": _remote.pointer,
     "message": _remote.message,
     "info": lambda q, st: cmd_info(),
     "exec": lambda q, st: run_exec(
@@ -1197,6 +1198,10 @@ def _handle_hello(state, req, cfg):
     cid = str(req.get("client_id") or "").strip()
     if not cid:
         raise RpcError("缺少 client_id")
+    if state.client_id and state.client_id != cid:
+        # A repeated handshake may change the device identity on this socket.
+        # End old sessions first, including any mouse button held by a drag.
+        state.close_transfers()
     name = str(req.get("client") or "安卓设备")[:64]
     token = str(req.get("token") or "")
 

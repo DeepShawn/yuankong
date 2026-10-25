@@ -3,6 +3,7 @@
 import base64
 import ctypes
 import json
+import math
 import os
 import secrets
 import subprocess
@@ -33,12 +34,15 @@ class ConsentSession:
         self.created = time.monotonic()
         self.last_active = time.monotonic()
         self.client_id = ""
+        self.on_close = None
 
     def alive(self):
         return not self.stopped.is_set()
 
     def close(self):
         self.stopped.set()
+        if self.on_close:
+            self.on_close()
 
 
 class WindowsBackend:
@@ -68,6 +72,55 @@ class WindowsBackend:
         if r.returncode:
             raise RuntimeError(r.stderr.decode("utf-8", "replace").strip() or "读取摄像头失败")
         return json.loads(r.stdout.decode("utf-8"))
+
+    @staticmethod
+    def _mouse_event(flags, x=0, y=0, data=0):
+        from ctypes import wintypes as w
+        class Mouse(ctypes.Structure):
+            _fields_ = [("dx", w.LONG), ("dy", w.LONG), ("data", w.DWORD),
+                        ("flags", w.DWORD), ("time", w.DWORD), ("extra", ctypes.c_size_t)]
+        class Keyboard(ctypes.Structure):
+            _fields_ = [("vk", w.WORD), ("scan", w.WORD), ("flags", w.DWORD),
+                        ("time", w.DWORD), ("extra", ctypes.c_size_t)]
+        class Payload(ctypes.Union):
+            _fields_ = [("mouse", Mouse), ("keyboard", Keyboard)]
+        class Input(ctypes.Structure):
+            _fields_ = [("type", w.DWORD), ("payload", Payload)]
+        user = ctypes.WinDLL("user32", use_last_error=True)
+        user.SendInput.argtypes = [w.UINT, ctypes.POINTER(Input), ctypes.c_int]
+        item = Input(0, Payload(mouse=Mouse(x, y, data & 0xffffffff, flags, 0, 0)))
+        if user.SendInput(1, ctypes.byref(item), ctypes.sizeof(Input)) != 1:
+            raise RuntimeError("系统拒绝鼠标输入，请检查桌面是否解锁及目标窗口权限")
+
+    def release_mouse(self, button):
+        self._mouse_event({"left": 0x0004, "right": 0x0010, "middle": 0x0040}[button])
+
+    def pointer(self, action, x, y, button, delta, allowed):
+        if not allowed():
+            raise RuntimeError("鼠标控制已结束")
+        # Capture includes the entire virtual desktop. ABSOLUTE + VIRTUALDESK
+        # maps the normalized image coordinates across monitors, including those
+        # left/above the primary display, independently of JPEG downscaling.
+        self._mouse_event(0x0001 | 0x8000 | 0x4000, round(x * 65535), round(y * 65535))
+        down = {"left": 0x0002, "right": 0x0008, "middle": 0x0020}[button]
+        if action == "move":
+            return
+        if action == "scroll":
+            self._mouse_event(0x0800, data=delta * 120)
+        elif action == "up":
+            self.release_mouse(button)
+        elif action == "down":
+            if not allowed():
+                raise RuntimeError("鼠标控制已结束")
+            self._mouse_event(down)
+        else:
+            for _ in range(2 if action == "double_click" else 1):
+                try:
+                    if not allowed():
+                        raise RuntimeError("鼠标控制已结束")
+                    self._mouse_event(down)
+                finally:
+                    self.release_mouse(button)
 
     def keys(self, keys, text, allowed=lambda: True):
         from ctypes import wintypes as w
@@ -135,6 +188,8 @@ class RemoteFeatures:
         self.backend = backend or WindowsBackend(capture_exe)
         self.supported = os.name == "nt" or backend is not None
         self.pending_consents = threading.BoundedSemaphore(3)
+        self.pointer_lock = threading.RLock()
+        self.pointer_owners = {}
 
     def _check(self, state):
         if not self.supported:
@@ -166,6 +221,7 @@ class RemoteFeatures:
         # 不再询问本机，也不再限制同时进行的共享数量
         session = ConsentSession(scope, "%s · %s" % (state.peer, state.client_id[-8:]))
         session.client_id = state.client_id
+        session.on_close = lambda: self._release_pointer(session)
         session.approved_at = time.time()
         state.remote_sessions[session.sid] = session
         self.log.info("开始共享 %s peer=%s client=%s", scope, state.peer, state.client_id)
@@ -211,6 +267,53 @@ class RemoteFeatures:
         if bool(text) == bool(keys) or any(k not in KEY_CODES for k in keys) or len(set(keys)) != len(keys):
             raise self.error("请发送文字或有效按键组合")
         self.backend.keys(keys, text, allowed=session.alive)
+        return {"sent": True}
+
+    def _release_pointer(self, session):
+        with self.pointer_lock:
+            for button, owner in list(self.pointer_owners.items()):
+                if owner == session.sid:
+                    try:
+                        self.backend.release_mouse(button)
+                    except Exception:
+                        self.log.exception("释放远程鼠标按键失败: %s", button)
+                    finally:
+                        self.pointer_owners.pop(button, None)
+
+    def pointer(self, q, state):
+        session = self.active(q, state, "input")
+        action = q.get("action", "click")
+        if action not in ("move", "click", "double_click", "down", "up", "scroll"):
+            raise self.error("无效的鼠标操作")
+        x, y = q.get("x"), q.get("y")
+        if any(isinstance(v, bool) or not isinstance(v, (int, float)) or
+               not 0 <= v <= 1 or not math.isfinite(v) for v in (x, y)):
+            raise self.error("鼠标坐标必须为 0 到 1 的有限数值")
+        button = q.get("button", "left")
+        if button not in ("left", "right", "middle"):
+            raise self.error("无效的鼠标按键")
+        delta = q.get("delta", 0)
+        if action == "scroll" and (isinstance(delta, bool) or not isinstance(delta, int) or
+                                   delta == 0 or abs(delta) > 10):
+            raise self.error("滚动步数需为 -10 到 10 的非零整数")
+        with self.pointer_lock:
+            if any(owner != session.sid for owner in self.pointer_owners.values()):
+                raise self.error("其他连接正在拖动，请稍后再试")
+            if action in ("click", "double_click") and self.pointer_owners:
+                raise self.error("请先结束正在进行的拖动")
+            if action == "up" and self.pointer_owners.get(button) != session.sid:
+                return {"sent": True}
+            if action == "down":
+                if button in self.pointer_owners:
+                    return {"sent": True}
+                self.pointer_owners[button] = session.sid
+            try:
+                self.backend.pointer(action, float(x), float(y), button, delta, session.alive)
+            except Exception:
+                self._release_pointer(session)
+                raise
+            if action == "up":
+                self.pointer_owners.pop(button, None)
         return {"sent": True}
 
     def message(self, q, state):

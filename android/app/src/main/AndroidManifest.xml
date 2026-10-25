@@ -33,6 +33,7 @@
             android:foregroundServiceType="dataSync" />
 
         <activity android:name=".MediaActivity" android:exported="false" />
+        <activity android:name=".DesktopActivity" android:exported="false" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|screenSize|keyboardHidden" />
         <activity android:name=".ControlActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".StorageActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
     </application>

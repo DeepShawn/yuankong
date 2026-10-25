@@ -95,7 +95,9 @@ class FeatureUiTest {
             activity.onEvent("连接已就绪。选择上方功能，或在下方输入命令。", ConnectionManager.LogKind.INFO)
             val rows = listOf(activity.findViewById<LinearLayout>(R.id.rowActions1), activity.findViewById(R.id.rowActions2))
             val tiles = rows.flatMap { row -> (0 until row.childCount).map { row.getChildAt(it) } }
-            val expected = mapOf("屏幕" to MediaActivity::class.java, "摄像头" to MediaActivity::class.java,
+            activity.findViewById<View>(R.id.cardDesktop).performClick()
+            assertEquals(DesktopActivity::class.java.name, shadowOf(activity).nextStartedActivity.component!!.className)
+            val expected = mapOf("屏幕" to DesktopActivity::class.java, "摄像头" to MediaActivity::class.java,
                 "按键" to ControlActivity::class.java, "消息" to ControlActivity::class.java, "存储" to StorageActivity::class.java)
             expected.forEach { (label, type) ->
                 tiles.single { it.contentDescription == label }.performClick()

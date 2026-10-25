@@ -33,6 +33,8 @@ jobs:
         run: python -m unittest discover -s tools -p test_launcher.py -v
       - name: File transfer regression
         run: python -m unittest discover -s tools -p test_file_operations.py -v
+      - name: Pointer input and cleanup regression
+        run: python -m unittest discover -s tools -p test_pointer.py -v
       - name: Session isolation and revocation
         run: python -m unittest discover -s tools -p test_remote_features.py -v
       - name: Native Windows features
