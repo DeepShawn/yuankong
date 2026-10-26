@@ -29,12 +29,14 @@ class InputGuard:
             raise RuntimeError("本机输入控制线程已结束")
         future = Future()
         self.queue.put((callback, future))
-        return future.result(timeout=10)
+        return future.result(timeout=35)
 
     def _release(self):
-        if self.owner is not None:
-            self.native.block(False)
-        self.owner = None
+        try:
+            if self.owner is not None:
+                self.native.block(False)
+        finally:
+            self.owner = None
 
     def pause(self, owner, allowed):
         def start():
@@ -44,9 +46,13 @@ class InputGuard:
                 raise RuntimeError("本机输入已暂停，请先手动解除")
             if not self.native.block(True):
                 raise RuntimeError("Windows 拒绝暂停本机输入，请在电脑端以管理员身份启动接收端")
+            if not allowed():
+                self.native.block(False)
+                raise RuntimeError("启动暂停期间会话已失效，已恢复本机输入，请重试")
             self.owner = owner
             self.allowed = allowed
-            return {"paused": True, "remaining": None}
+            return {"paused": True, "remaining": None,
+                    "touch_devices": getattr(getattr(self.native, "touch", None), "count", 0)}
         return self.invoke(start)
 
     def release(self, owner):
@@ -58,7 +64,8 @@ class InputGuard:
 
     def status(self, owner):
         return self.invoke(lambda: {"paused": self.owner == owner,
-            "remaining": None if self.owner == owner else 0})
+            "remaining": None if self.owner == owner else 0,
+            "touch_devices": getattr(getattr(self.native, "touch", None), "count", 0) if self.owner == owner else 0})
 
     def _run(self):
         try:
@@ -93,7 +100,7 @@ class InputGuard:
     def close(self):
         future = Future()
         self.queue.put((None, future))
-        future.result(timeout=10)
+        future.result(timeout=35)
         self.thread.join(timeout=2)
 
 
@@ -114,6 +121,8 @@ class NativeInputGuard:
         self.escape = threading.Event()
         self.pressed = set()
         self.hooks = []
+        from touch_guard import TouchPause
+        self.touch = TouchPause()
         self.proc_type = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, w.WPARAM, w.LPARAM)
         self.user.SetWindowsHookExW.argtypes = [ctypes.c_int, self.proc_type, w.HINSTANCE, w.DWORD]
         self.user.SetWindowsHookExW.restype = w.HHOOK
@@ -161,11 +170,14 @@ class NativeInputGuard:
 
     def block(self, enabled):
         if not enabled:
-            for hook in self.hooks:
-                if not self.user.UnhookWindowsHookEx(hook):
-                    raise RuntimeError("卸载本机输入钩子失败，控制线程将退出并恢复输入")
-            self.hooks.clear()
-            self.pressed.clear()
+            try:
+                self.touch.stop()
+            finally:
+                for hook in self.hooks:
+                    if not self.user.UnhookWindowsHookEx(hook):
+                        raise RuntimeError("卸载本机输入钩子失败，控制线程将退出并恢复输入")
+                self.hooks.clear()
+                self.pressed.clear()
             return True
         self.escape.clear()
         self.pressed = {key for key in list(map(ord, "ARTEX")) + [0x2E, 0x11, 0xA2, 0xA3, 0x12, 0xA4, 0xA5]
@@ -176,9 +188,15 @@ class NativeInputGuard:
                 self.block(False)
                 return False
             self.hooks.append(hook)
+        try:
+            self.touch.start()
+        except Exception:
+            self.block(False)
+            raise
         return True
 
     def pump(self):
+        self.touch.ping()
         msg = self.MSG()
         while self.user.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
             self.user.TranslateMessage(ctypes.byref(msg))

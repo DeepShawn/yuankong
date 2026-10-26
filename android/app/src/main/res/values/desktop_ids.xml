@@ -8,6 +8,7 @@
     <item name="desktopKeyboardTab" type="id" />
     <item name="desktopTerminalTab" type="id" />
     <item name="desktopFullscreen" type="id" />
+    <item name="desktopExitFullscreen" type="id" />
     <item name="desktopKeyboardText" type="id" />
     <item name="desktopKeyboardSend" type="id" />
     <item name="desktopVirtualKeyboard" type="id" />

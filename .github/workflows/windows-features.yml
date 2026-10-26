@@ -57,6 +57,8 @@ jobs:
         run: python -m unittest discover -s tools -p test_system_controls.py -v
       - name: Removable devices and reversible policies
         run: python -m unittest discover -s tools -p test_device_management.py -v
+      - name: Desktop apps, ZIP previews, ordered commands and touch recovery
+        run: python -m unittest discover -s tools -p test_workbench.py -v
   package-windows:
     runs-on: ubuntu-latest
     timeout-minutes: 15

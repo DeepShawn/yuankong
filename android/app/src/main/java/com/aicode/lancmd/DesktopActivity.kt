@@ -13,6 +13,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import android.widget.FrameLayout
+import android.content.Intent
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.WindowCompat
@@ -43,6 +45,10 @@ import kotlin.coroutines.coroutineContext
 class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
     private data class InputCommand(val command: String, val params: JSONObject)
     private lateinit var screen: RemoteScreenView
+    private lateinit var screenHost: FrameLayout
+    private lateinit var exitFullscreen: MaterialButton
+    private lateinit var toolbarView: View
+    private var touchPauseSupported = false
     private lateinit var start: MaterialButton
     private lateinit var stop: MaterialButton
     private lateinit var fullscreenButton: MaterialButton
@@ -80,6 +86,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setup("远程桌面", "屏幕、触控、键鼠与终端 · 点击开始共享连接电脑")
+        toolbarView = (body.parent as android.view.ViewGroup).getChildAt(0)
         statusText.id = R.id.desktopStatus
         sessionRow = LinearLayout(this)
         start = button("开始共享") { begin() }.apply { id = R.id.desktopStart }
@@ -100,7 +107,14 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
             if (virtualKeyboardExpanded && bottom - top != oldBottom - oldTop) configureWorkspace()
         }
         body.addView(workspace, LinearLayout.LayoutParams(-1, 0, 1f))
-        workspace.addView(screen)
+        screenHost = FrameLayout(this)
+        screenHost.addView(screen, FrameLayout.LayoutParams(-1, -1))
+        exitFullscreen = compactButton("退出全屏") { setFullscreen(false) }.apply {
+            id = R.id.desktopExitFullscreen; visibility = View.GONE
+        }
+        screenHost.addView(exitFullscreen, FrameLayout.LayoutParams(-2, dp(44), Gravity.TOP or Gravity.END)
+            .apply { setMargins(dp(8), dp(8), dp(8), dp(8)) })
+        workspace.addView(screenHost)
         controlDock = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         workspace.addView(controlDock)
         modeRow = LinearLayout(this)
@@ -169,12 +183,13 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
         panel.addView(row)
         val system = LinearLayout(this)
         system.addView(compactButton("电脑音量") { AudioDialog(this).show() }, LinearLayout.LayoutParams(0, -2, 1f))
-        localPause = compactButton("暂停本机键鼠") { changeLocalInput() }.apply {
+        localPause = compactButton("暂停本机输入") { changeLocalInput() }.apply {
             id = R.id.desktopLocalInput; isEnabled = false
         }
         system.addView(localPause, LinearLayout.LayoutParams(0, -2, 1f))
         panel.addView(system)
-        localStatus = label("本机输入暂停仅支持手动解除，需更新 Windows 1.7.2", 11f, R.color.dim)
+        panel.addView(compactButton("运行中的桌面程序") { startActivity(Intent(this, AppsActivity::class.java)) })
+        localStatus = label("本机输入暂停包含标准 HID 触屏，需 Windows 1.9.0", 11f, R.color.dim)
             .apply { id = R.id.desktopLocalStatus }
         panel.addView(localStatus)
         panels.add(panel); panelHost.addView(panel)
@@ -255,6 +270,10 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
                 commandText.setText(line); commandText.setSelection(line.length)
             }
         })
+        panel.addView(compactButton("命令列表 / 延迟执行") {
+            startActivity(Intent(this, CommandsActivity::class.java).putExtra("line", commandText.text.toString())
+                .putExtra("shell", if (shell.selectedItemPosition == 1) "powershell" else "cmd"))
+        })
         panels.add(panel); panelHost.addView(panel)
     }
 
@@ -267,6 +286,9 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
     private fun setFullscreen(value: Boolean) {
         screen.cancelGesture()
         fullscreen = value
+        toolbarView.visibility = if (value) View.GONE else View.VISIBLE
+        body.setPadding(if (value) 0 else dp(16), 0, if (value) 0 else dp(16), if (value) 0 else dp(12))
+        exitFullscreen.visibility = if (value) View.VISIBLE else View.GONE
         sessionRow.visibility = if (value) View.GONE else View.VISIBLE
         statusText.visibility = if (value) View.GONE else View.VISIBLE
         modeButtons.forEach { it.visibility = if (value) View.GONE else View.VISIBLE }
@@ -281,8 +303,9 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
     private fun configureWorkspace() {
         val sideBySide = landscape && !fullscreen
         workspace.orientation = if (sideBySide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
-        screen.layoutParams = LinearLayout.LayoutParams(if (sideBySide) 0 else -1, if (sideBySide) -1 else 0, 1f)
-            .apply { topMargin = dp(8); bottomMargin = dp(8) }
+        screenHost.layoutParams = LinearLayout.LayoutParams(if (sideBySide) 0 else -1, if (sideBySide) -1 else 0, 1f)
+            .apply { topMargin = if (fullscreen) 0 else dp(8); bottomMargin = if (fullscreen) 0 else dp(8) }
+        controlDock.visibility = if (fullscreen) View.GONE else View.VISIBLE
         controlDock.layoutParams = LinearLayout.LayoutParams(if (sideBySide) dp(300) else -1, if (sideBySide) -1 else -2)
         controlDock.setPadding(if (sideBySide) dp(8) else 0, 0, 0, 0)
         val keyboardHeight = if (mode == 1 && virtualKeyboardExpanded && !fullscreen)
@@ -341,8 +364,9 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
                 coroutineContext.ensureActive(); checkOrigin(source)
                 terminalClient = terminal; commands = queue
                 val hasLocalInput = (0 until capabilities.length()).any { capabilities.optString(it) == "local_input" }
+                touchPauseSupported = (0 until capabilities.length()).any { capabilities.optString(it) == "touch_pause" }
                 localLease = if (hasLocalInput) controls else null
-                localPause.isEnabled = hasLocalInput
+                localPause.isEnabled = hasLocalInput && touchPauseSupported
                 activeControls.forEach { it.isEnabled = true }
                 screen.touchEnabled = touchSwitch.isChecked
                 coroutineScope {
@@ -351,11 +375,11 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
                             checkOrigin(source)
                             val state = controls.call("local_input")
                             localPaused = state.optBoolean("paused")
-                            localPause.text = if (localPaused) "恢复本机键鼠" else "暂停本机键鼠"
+                            localPause.text = if (localPaused) "恢复本机输入" else "暂停本机输入"
                             localStatus.text = if (localPaused) {
-                                "已暂停 · 手动解除模式" +
+                                "已暂停键鼠 · ${state.optInt("touch_devices")} 个触屏" +
                                     "\n本机解除：A R T E X + Ctrl + Delete，或 Ctrl+Alt+Del"
-                            } else "本机键鼠可用 · 支持不限时长暂停，断线自动恢复"
+                            } else if (touchPauseSupported) "本机输入可用 · 包含标准 HID 触屏暂停，断线自动恢复" else "触屏暂停需完整更新 Windows 1.9.0"
                             delay(3000)
                         }
                     }
@@ -388,7 +412,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
                 commands = null; queue.cancel()
                 terminalJob?.cancel(); terminalClient = null; origin = null
                 localRequest?.cancel(); localLease = null; localPaused = false
-                localPause.isEnabled = false; localPause.text = "暂停本机键鼠"
+                localPause.isEnabled = false; localPause.text = "暂停本机输入"
                 localStatus.text = "共享已结束，本机输入将恢复"
                 if (!isDestroyed) {
                     screen.clearFrame()
@@ -410,16 +434,16 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
             localRequest = task {
                 try {
                     // Explicit zero keeps manual mode when connected to a 1.7.0/1.7.1 receiver.
-                    val state = lease.call("local_input", JSONObject().put("action", action).put("seconds", 0))
+                    val state = lease.call("local_input", JSONObject().put("action", action).put("seconds", 0), 45_000)
                     localPaused = state.optBoolean("paused")
-                    localPause.text = if (localPaused) "恢复本机键鼠" else "暂停本机键鼠"
-                    localStatus.text = if (localPaused) "已暂停 · 本机解除：A R T E X + Ctrl + Delete；断线自动恢复" else "本机输入已恢复"
-                } finally { localPause.isEnabled = localLease === lease }
+                    localPause.text = if (localPaused) "恢复本机输入" else "暂停本机输入"
+                    localStatus.text = if (localPaused) "已暂停键鼠与 ${state.optInt("touch_devices")} 个触屏 · 本机组合键或手机可恢复" else "本机输入已恢复"
+                } finally { localPause.isEnabled = localLease === lease && touchPauseSupported }
             }
         }
         if (localPaused) { apply("release"); return }
-        AlertDialog.Builder(this).setTitle("暂停电脑本机键鼠")
-            .setMessage("手机仍可控制，暂停状态显示在手机端。\n\n本机解除：同时按 A、R、T、E、X + Ctrl + Delete。键盘不支持七键同时按下时，使用 Ctrl+Alt+Del。\n\n退出共享或心跳中断 12 秒自动恢复。部分触屏驱动可能独立处理触摸，此开关不禁用硬件。")
+        AlertDialog.Builder(this).setTitle("暂停电脑本机输入")
+            .setMessage("暂停键盘、鼠标及标准 HID 触屏，手机仍可控制。触屏暂停需要管理员权限；无法暂停触屏时返回失败。\n\n本机解除：A、R、T、E、X + Ctrl + Delete；或 Ctrl+Alt+Del。\n\n退出共享或心跳中断 12 秒恢复。独立恢复进程会在接收端退出或失去心跳后重新启用触屏；驱动恢复可能稍有延迟。")
             .setPositiveButton("开始暂停（手动解除）") { _, _ -> apply("pause") }
             .setNegativeButton("取消", null).show()
     }

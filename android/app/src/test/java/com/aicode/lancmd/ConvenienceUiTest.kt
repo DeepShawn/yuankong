@@ -322,6 +322,74 @@ class ConvenienceUiTest {
         }
     }
 
+    @Test fun desktopAppsActionsUseListedIdentityAndCloseNeedsConfirmation() {
+        Stub().use { stub ->
+            stub.install()
+            val controller = Robolectric.buildActivity(AppsActivity::class.java).setup()
+            val root = controller.get().window.decorView
+            waitUntil { buttons(root).any { it.text == "切换到前台" && it.isEnabled } }
+            buttons(root).single { it.text == "切换到前台" }.performClick()
+            waitUntil { stub.requests.any { it.optString("cmd") == "apps" && it.optString("action") == "activate" } &&
+                buttons(root).any { it.text == "关闭" && it.isEnabled } }
+            val activation = stub.requests.single { it.optString("action") == "activate" }
+            assertEquals("123", activation.getString("handle")); assertEquals(44, activation.getInt("pid"))
+            buttons(root).single { it.text == "关闭" }.performClick()
+            assertFalse(stub.requests.any { it.optString("action") == "close" })
+            (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitUntil { stub.requests.any { it.optString("action") == "close" } }
+            render(root, "desktop-apps")
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test fun commandListsPersistDelayAndNeverSubmitBeforeConfirmation() {
+        RuntimeEnvironment.getApplication().getSharedPreferences("command_lists", 0).edit().clear().commit()
+        Stub().use { stub ->
+            stub.install()
+            val controller = Robolectric.buildActivity(CommandsActivity::class.java).setup()
+            val root = controller.get().window.decorView
+            buttons(root).single { it.text == "添加命令" }.performClick()
+            val edit = ShadowDialog.getLatestDialog() as AlertDialog
+            fun inputs(view: View): List<EditText> = when (view) {
+                is EditText -> listOf(view)
+                is ViewGroup -> (0 until view.childCount).flatMap { inputs(view.getChildAt(it)) }
+                else -> emptyList()
+            }
+            val fields = inputs(edit.window!!.decorView)
+            assertEquals(2, fields.size)
+            fields[0].setText("echo delayed"); fields[1].setText("2")
+            edit.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            buttons(root).single { it.text == "启动当前命令列表" }.performClick()
+            assertFalse(stub.requests.any { it.optString("cmd") == "commands" && it.optString("action") == "add" })
+            (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitUntil { stub.requests.any { it.optString("cmd") == "commands" && it.optString("action") == "add" } }
+            val item = stub.requests.single { it.optString("cmd") == "commands" && it.optString("action") == "add" }.getJSONArray("items").getJSONObject(0)
+            assertEquals("echo delayed", item.getString("line")); assertEquals(2, item.getInt("delay"))
+            render(root, "command-lists")
+            controller.pause().stop().destroy()
+            val reopened = Robolectric.buildActivity(CommandsActivity::class.java).setup()
+            fun hasText(view: View): Boolean = (view is android.widget.TextView && view.text.toString() == "echo delayed") ||
+                (view is ViewGroup && (0 until view.childCount).any { hasText(view.getChildAt(it)) })
+            assertTrue(hasText(reopened.get().window.decorView))
+            reopened.pause().stop().destroy()
+        }
+    }
+
+    @Test fun filePreviewShowsTextOnPhoneAndPinsSourceConnection() {
+        Stub().use { stub ->
+            stub.install()
+            val controller = page()
+            FilePreview.show(controller.get(), ConnectionManager.sessionClient(), "C:\\note.txt")
+            val dialog = ShadowDialog.getLatestDialog() as AlertDialog
+            fun hasText(view: View): Boolean = (view is android.widget.TextView && view.text.toString().contains("preview text")) ||
+                (view is ViewGroup && (0 until view.childCount).any { hasText(view.getChildAt(it)) })
+            waitUntil { hasText(dialog.window!!.decorView) }
+            assertEquals("C:\\note.txt", stub.requests.single { it.optString("cmd") == "files" }.getString("path"))
+            render(dialog.window!!.decorView, "file-preview")
+            dialog.dismiss(); controller.pause().stop().destroy()
+        }
+    }
+
     private class Stub : Closeable {
         private val server = ServerSocket(0)
         private val client = AgentClient("127.0.0.1", server.localPort)
@@ -340,6 +408,10 @@ class ConvenienceUiTest {
                         val request = JSONObject(reader.readLine() ?: break)
                         val result = JSONObject().put("id", request.getInt("id")).put("ok", true)
                         when (request.optString("cmd")) {
+                            "apps" -> result.put("items", JSONArray().put(JSONObject().put("handle", "123").put("pid", 44)
+                                .put("title", "Test document — Editor").put("name", "editor.exe").put("minimized", false)))
+                            "commands" -> result.put("batches", JSONArray()).put("batch", JSONObject().put("id", "plan-test"))
+                            "files" -> result.put("kind", "text").put("text", "preview text\n你好").put("truncated", false)
                             "devices" -> {
                                 if (request.optString("action") == "policy") {
                                     deviceMode = request.getString("mode")

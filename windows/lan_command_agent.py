@@ -38,7 +38,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "1.8.1"
+VERSION = "1.9.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1082,16 +1082,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from remote_features import RemoteFeatures
 from system_controls import audio_request
 from device_management import DeviceManager
+from file_actions import file_request
+from desktop_apps import apps_request
+from command_queue import CommandQueue
 
 _capture_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 _remote = RemoteFeatures(RpcError, log, os.path.join(_capture_dir, "LanCmdCapture.exe"))
 _devices = DeviceManager(os.path.join(APP_DIR, "device-policy.json"), is_admin)
+_commands = CommandQueue(lambda line, shell: run_exec(line, shell, None, 300))
 
 
 def remote_capabilities():
-    features = ["storage"]
+    features = ["storage", "file_preview", "zip_extract", "commands"]
     if IS_WIN:
-        features.extend(["message", "input", "pointer", "audio", "local_input", "devices"])
+        features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause"])
         if os.path.isfile(_remote.backend.capture_exe):
             features.extend(["screen", "camera"])
     # session_seconds 为 None 表示共享会话不设时长上限
@@ -1115,6 +1119,9 @@ HANDLERS = {
     "local_input": _remote.local_input,
     "audio": lambda q, st: cmd_audio(q),
     "devices": lambda q, st: _devices.request(q, RpcError),
+    "files": lambda q, st: file_request(q, RpcError),
+    "apps": lambda q, st: apps_request(q, RpcError),
+    "commands": lambda q, st: _commands.request(q, st, RpcError),
     "message": _remote.message,
     "info": lambda q, st: cmd_info(),
     "exec": lambda q, st: run_exec(
@@ -1734,6 +1741,9 @@ USAGE = r"""LanCmd Agent v%s
 
 def main(argv):
     global _cfg_cache
+    if "--touch-worker" in argv:
+        from touch_guard import worker_main
+        return worker_main()
     console = "--console" in argv or "-c" in argv
     ensure_dirs()
 

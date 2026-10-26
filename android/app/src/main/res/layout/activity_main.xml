@@ -175,6 +175,12 @@
             android:text="U盘锁 / 设备" android:textSize="12sp" android:paddingHorizontal="4dp" />
     </LinearLayout>
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnPlans"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="match_parent" android:layout_height="44dp"
+        android:text="命令列表 · 延迟执行" android:textSize="12sp" />
+
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"

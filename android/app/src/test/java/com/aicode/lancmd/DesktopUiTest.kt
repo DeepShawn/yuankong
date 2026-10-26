@@ -100,6 +100,10 @@ class DesktopUiTest {
             render(activity, "desktop-idle-$index")
         }
         activity.findViewById<View>(R.id.desktopFullscreen).performClick()
+        render(activity, "desktop-fullscreen-portrait")
+        assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.desktopExitFullscreen).visibility)
+        assertEquals(View.GONE, activity.findViewById<View>(R.id.desktopTouchTab).parent.let { (it as View).parent as View }.visibility)
+        assertTrue("Fullscreen image must use the full body height", activity.findViewById<RemoteScreenView>(R.id.desktopScreen).height > 750)
         assertEquals(View.GONE, activity.findViewById<View>(R.id.desktopStart).parent.let { it as View }.visibility)
         activity.onBackPressedDispatcher.onBackPressed()
         assertFalse(activity.isFinishing)
@@ -136,6 +140,26 @@ class DesktopUiTest {
         assertEquals("down", events.first().getString("action"))
         assertEquals("up", events.last().getString("action"))
         assertEquals(1, events.count { it.optString("action") == "up" })
+    }
+
+    @Test fun renderedFramesKeepAspectRatioIndependentOfBitmapDensity() {
+        val view = RemoteScreenView(RuntimeEnvironment.getApplication())
+        val source = Bitmap.createBitmap(200, 100, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(android.graphics.Color.GREEN); density = 480
+        }
+        view.showFrame(source)
+        for ((width, height) in listOf(400 to 400, 600 to 200)) {
+            view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+            view.layout(0, 0, width, height)
+            val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(output))
+            assertEquals(android.graphics.Color.GREEN, output.getPixel(width / 2, height / 2))
+            val letterbox = if (width == 400) output.getPixel(200, 40) else output.getPixel(40, 100)
+            assertEquals("Frame must be letterboxed instead of stretched", 0xff05080c.toInt(), letterbox)
+            output.recycle()
+        }
+        view.clearFrame(); source.recycle()
     }
 
     @Test fun twoFingerScrollDoesNotGenerateClicksOrLeaveDrag() {
@@ -293,7 +317,7 @@ class DesktopUiTest {
             assertEquals("开始暂停（手动解除）", confirmation.getButton(AlertDialog.BUTTON_POSITIVE).text.toString())
             assertEquals(View.GONE, confirmation.getButton(AlertDialog.BUTTON_NEUTRAL).visibility)
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitUntil { pause.text == "恢复本机键鼠" }
+            waitUntil { pause.text == "恢复本机输入" }
             val request = stub.requests.single { it.second.optString("action") == "pause" }.second
             assertEquals(0, request.getInt("seconds"))
             assertTrue(request.getString("sid").startsWith("session-"))
@@ -334,11 +358,11 @@ class DesktopUiTest {
                                     val result = JSONObject().put("ok", true).put("id", request.getInt("id"))
                                     when (request.optString("cmd")) {
                                         "hello" -> result.put("agent_id", "desktop-test").put("token", "test-token")
-                                        "capabilities" -> result.put("features", JSONArray(listOf("screen", "input") + (if (pointerSupported) listOf("pointer") else emptyList()) + (if (localSupported) listOf("local_input") else emptyList())))
+                                        "capabilities" -> result.put("features", JSONArray(listOf("screen", "input") + (if (pointerSupported) listOf("pointer") else emptyList()) + (if (localSupported) listOf("local_input", "touch_pause") else emptyList())))
                                         "local_input" -> {
                                             if (request.optString("action") == "pause") paused = true
                                             if (request.optString("action") == "release") paused = false
-                                            result.put("paused", paused).put("remaining", if (paused) JSONObject.NULL else 0)
+                                            result.put("paused", paused).put("remaining", if (paused) JSONObject.NULL else 0).put("touch_devices", if (paused) 1 else 0)
                                         }
                                         "session" -> result.put("sid", "session-$connection").put("stopped", true)
                                         "screen" -> result.put("data", android.util.Base64.encodeToString(frame, android.util.Base64.NO_WRAP))

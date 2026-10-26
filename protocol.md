@@ -272,3 +272,13 @@ Windows `capabilities.features` 新增 `devices`。完成握手后使用：
 `policy` 和 `eject` 要求管理员接收端，失败以正常 RPC 错误返回安卓，不弹出授权窗口。`mode=allow` 恢复 LanCmd 首次修改前的值，不清除预先存在的策略；无管理记录时不写入。修改按设备类别应用，断线及重启后保留。恢复记录 `device-policy.json` 需随原配置保留；外部策略冲突时拒绝继续写入。策略保存返回 `policies/notice`，需重新插拔设备，必要时重启。部分固定类型 USB 硬盘不受可移动磁盘策略限制。
 
 `eject` 重新枚举并验证 ID，仅允许当前列表中可弹出且非系统设备，调用 Windows 配置管理器并提供 veto 输出，设备忙时返回错误，不显示 PnP 拒绝弹窗、不强制卸载。成功返回 `ejected/notice`。安卓确认与操作绑定原连接，不随重新连接或切换电脑迁移。
+
+## 工作台扩展（1.9.0）
+
+`apps` 默认 `action=list` 返回 `items[{handle,pid,title,name,minimized}]`；`activate/minimize/close` 必须提供当前列表中的 `handle` 字符串与 `pid` 整数。关闭为 WM_CLOSE，非强制终止；前台切换受 Windows 限制。
+
+`files` 提供 `action=open/preview/extract` 与 `path`。打开使用 Windows 默认 open 动词；预览返回 `kind=text/image/archive`，对应 `text/encoding/truncated`、base64 `data`、或 `items/count/truncated`。解压仅 ZIP，`destination` 为新目录，成功返回 `path/count/bytes`；不覆盖已有目标，拒绝越界、链接、加密和不兼容 Windows 的路径，限制 2000 项、512 MB。
+
+`commands` 默认 `action=list` 返回当前 `client_id` 的 `batches`；`action=add` 提供 `name` 与 `items[{line,shell,delay}]`，每批 1–50 条、每条等待 0–86400 秒，shell 为 cmd/powershell。第一条从启动开始等待，后续从前一条结束后等待，失败继续下一条。每条最多执行 300 秒；批次含 id/created/finished/items，每项含 status、due、started、finished、result 或 error。状态为 pending/waiting/running/completed/failed/cancelled。`action=cancel,batch_id` 取消尚未开始的项，不撤销 running 项。最多同时运行 4 批，结果 stdout/stderr 各截断 8192 字；手机断线不取消，接收端退出不持久化。
+
+`local_input` 的 pause/status 新增 `touch_devices`。capabilities 的 `touch_pause` 表示接收端支持标准 HID 触屏临时暂停；触屏存在但无法识别或禁用时失败，不降级为仅键鼠暂停。触屏独立恢复进程监视原进程管道与心跳，在解除、管道结束或 6 秒无心跳时重新启用本次禁用的设备，不设持久禁用标记。输入会话原 12 秒心跳恢复与本机快捷键仍适用。

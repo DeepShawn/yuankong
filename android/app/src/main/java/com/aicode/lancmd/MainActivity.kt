@@ -144,6 +144,10 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         findViewById<View>(R.id.btnDevices).setOnClickListener {
             if (ConnectionManager.isConnected()) openFeature(DevicesActivity::class.java) else toast("请先连接电脑")
         }
+        findViewById<View>(R.id.btnPlans).setOnClickListener {
+            startActivity(Intent(this, CommandsActivity::class.java)
+                .putExtra("line", etCmd.text.toString()).putExtra("shell", prefsShell))
+        }
 
         uploadDir = Prefs.uploadDir(this)
 

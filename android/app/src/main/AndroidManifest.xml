@@ -37,5 +37,7 @@
         <activity android:name=".ControlActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".StorageActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".DevicesActivity" android:exported="false" />
+        <activity android:name=".AppsActivity" android:exported="false" />
+        <activity android:name=".CommandsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>

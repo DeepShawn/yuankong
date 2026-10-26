@@ -4,13 +4,13 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.RectF
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
 import androidx.appcompat.widget.AppCompatImageView
 import org.json.JSONObject
-import kotlin.math.min
 
 /** Touch gestures are translated to ordinary Windows mouse input. */
 class RemoteScreenView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : AppCompatImageView(context, attrs) {
@@ -19,6 +19,8 @@ class RemoteScreenView @JvmOverloads constructor(context: Context, attrs: Attrib
         set(value) { if (!value) cancelGesture(); field = value }
     private var imageWidth = 0
     private var imageHeight = 0
+    private var frameBitmap: Bitmap? = null
+    private val framePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private var accepted = false
     private var dragging = false
     private var multiple = false
@@ -66,12 +68,15 @@ class RemoteScreenView @JvmOverloads constructor(context: Context, attrs: Attrib
         if (imageWidth != bitmap.width || imageHeight != bitmap.height) cancelGesture()
         imageWidth = bitmap.width
         imageHeight = bitmap.height
+        bitmap.density = Bitmap.DENSITY_NONE
+        frameBitmap = bitmap
         setImageBitmap(bitmap)
     }
 
     fun clearFrame() {
         cancelGesture()
         imageWidth = 0; imageHeight = 0; cursor = null
+        frameBitmap = null
         setImageDrawable(null)
     }
 
@@ -146,14 +151,16 @@ class RemoteScreenView @JvmOverloads constructor(context: Context, attrs: Attrib
     override fun performClick(): Boolean { super.performClick(); return true }
 
     override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        val point = cursor ?: return
-        if (imageWidth == 0 || imageHeight == 0) return
+        val bitmap = frameBitmap ?: return
         val w = width - paddingLeft - paddingRight
         val h = height - paddingTop - paddingBottom
-        val scale = min(w.toFloat() / imageWidth, h.toFloat() / imageHeight)
-        val x = paddingLeft + (w - imageWidth * scale) / 2 + point.x * imageWidth * scale
-        val y = paddingTop + (h - imageHeight * scale) / 2 + point.y * imageHeight * scale
+        val frame = RemoteTouch.frame(w, h, imageWidth, imageHeight) ?: return
+        val rect = RectF(paddingLeft + frame.left, paddingTop + frame.top,
+            paddingLeft + frame.left + frame.width, paddingTop + frame.top + frame.height)
+        canvas.drawBitmap(bitmap, null, rect, framePaint)
+        val point = cursor ?: return
+        val x = rect.left + point.x * rect.width()
+        val y = rect.top + point.y * rect.height()
         canvas.drawCircle(x, y, 9 * resources.displayMetrics.density, cursorPaint)
     }
 }

@@ -53,6 +53,10 @@ python -m PyInstaller --noconfirm --clean --onefile --noconsole ^
     --hidden-import system_controls ^
     --hidden-import input_guard ^
     --hidden-import device_management ^
+    --hidden-import touch_guard ^
+    --hidden-import file_actions ^
+    --hidden-import desktop_apps ^
+    --hidden-import command_queue ^
     --hidden-import tkinter ^
     --hidden-import tkinter.messagebox ^
     lan_command_agent.py
@@ -72,6 +76,10 @@ python -m PyInstaller --noconfirm --clean --onefile --console ^
     --hidden-import system_controls ^
     --hidden-import input_guard ^
     --hidden-import device_management ^
+    --hidden-import touch_guard ^
+    --hidden-import file_actions ^
+    --hidden-import desktop_apps ^
+    --hidden-import command_queue ^
     lan_command_agent.py
 if errorlevel 1 (
     echo [!] Control exe failed, main agent is still usable.

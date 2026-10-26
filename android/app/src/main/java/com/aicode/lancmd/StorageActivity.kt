@@ -18,6 +18,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.aicode.lancmd.net.FileTransfer
+import com.aicode.lancmd.net.ConnectionManager
 import com.aicode.lancmd.net.joinPath
 import com.aicode.lancmd.net.parentOf
 import kotlinx.coroutines.CancellationException
@@ -214,12 +215,46 @@ class StorageActivity : FeatureActivity() {
 
     private fun fileActions(item: JSONObject, anchor: View) {
         val menu = PopupMenu(this, anchor)
+        val client = runCatching { ConnectionManager.sessionClient() }.getOrNull()
+        menu.menu.add("在电脑打开")
+        if (!item.optBoolean("dir")) menu.menu.add("预览")
+        if (!item.optBoolean("dir") && item.optString("name").endsWith(".zip", true)) menu.menu.add("解压 ZIP")
         if (!item.optBoolean("dir")) menu.menu.add("下载到手机")
         menu.menu.add("重命名")
         menu.menu.add("删除")
         val selected = joinPath(path, item.getString("name"))
         menu.setOnMenuItemClickListener {
             when (it.title.toString()) {
+                "在电脑打开" -> AlertDialog.Builder(this).setTitle("在电脑打开？")
+                    .setMessage("$selected\n\n应用程序会在电脑启动，文件将使用电脑默认应用打开。")
+                    .setNegativeButton("取消", null).setPositiveButton("打开") { _, _ -> task {
+                        pinnedCall(client, "files", JSONObject().put("action", "open").put("path", selected))
+                        status("已向电脑发送打开请求")
+                    } }.show()
+                "预览" -> FilePreview.show(this, client, selected)
+                "解压 ZIP" -> {
+                    val destination = EditText(this).apply {
+                        setSingleLine(); setText(joinPath(path, item.getString("name").dropLast(4) + "_extracted"))
+                    }
+                    val dialog = AlertDialog.Builder(this).setTitle("解压到新文件夹")
+                        .setMessage("支持 ZIP；最多 2000 项、512 MB。目标必须不存在，不覆盖已有文件。")
+                        .setView(destination).setNegativeButton("取消", null).setPositiveButton("解压", null).create()
+                    dialog.setOnShowListener {
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                            val target = destination.text.toString().trim()
+                            if (target.isEmpty()) { destination.error = "请输入目标路径"; return@setOnClickListener }
+                            dialog.dismiss()
+                            task {
+                                status("正在解压 ZIP…")
+                                val result = pinnedCall(client, "files", JSONObject().put("action", "extract")
+                                    .put("path", selected).put("destination", target), 120_000)
+                                status("已解压 ${result.optInt("count")} 项")
+                                load(result.getString("path"))
+                            }
+                        }
+                    }
+                    dialog.show()
+                }
                 "下载到手机" -> {
                     if (transfer?.isCompleted != false) { pendingDownload = selected; save.launch(item.getString("name")) }
                 }
