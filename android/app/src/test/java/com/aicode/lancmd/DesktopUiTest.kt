@@ -279,6 +279,8 @@ class DesktopUiTest {
             pause.performClick()
             val confirmation = ShadowDialog.getLatestDialog() as AlertDialog
             assertFalse(stub.requests.any { it.second.optString("action") == "pause" })
+            assertEquals("开始暂停（手动解除）", confirmation.getButton(AlertDialog.BUTTON_POSITIVE).text.toString())
+            assertEquals(View.GONE, confirmation.getButton(AlertDialog.BUTTON_NEUTRAL).visibility)
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             waitUntil { pause.text == "恢复本机键鼠" }
             val request = stub.requests.single { it.second.optString("action") == "pause" }.second

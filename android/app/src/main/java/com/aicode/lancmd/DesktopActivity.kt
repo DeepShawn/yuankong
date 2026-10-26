@@ -169,7 +169,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
         }
         system.addView(localPause, LinearLayout.LayoutParams(0, -2, 1f))
         panel.addView(system)
-        localStatus = label("本机输入暂停支持定时或手动解除，需更新 Windows 1.7.0", 11f, R.color.dim)
+        localStatus = label("本机输入暂停仅支持手动解除，需更新 Windows 1.7.2", 11f, R.color.dim)
             .apply { id = R.id.desktopLocalStatus }
         panel.addView(localStatus)
         panels.add(panel); panelHost.addView(panel)
@@ -337,7 +337,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
                             localPaused = state.optBoolean("paused")
                             localPause.text = if (localPaused) "恢复本机键鼠" else "暂停本机键鼠"
                             localStatus.text = if (localPaused) {
-                                (if (state.isNull("remaining")) "已暂停 · 手动解除模式" else "已暂停 · ${state.optInt("remaining")} 秒后恢复") +
+                                "已暂停 · 手动解除模式" +
                                     "\n本机解除：A R T E X + Ctrl + Delete，或 Ctrl+Alt+Del"
                             } else "本机键鼠可用 · 支持不限时长暂停，断线自动恢复"
                             delay(3000)
@@ -389,11 +389,12 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
     private fun changeLocalInput() {
         val lease = localLease ?: return
         if (localRequest?.isActive == true) return
-        fun apply(action: String, seconds: Int = 0) {
+        fun apply(action: String) {
             localPause.isEnabled = false
             localRequest = task {
                 try {
-                    val state = lease.call("local_input", JSONObject().put("action", action).put("seconds", seconds))
+                    // Explicit zero keeps manual mode when connected to a 1.7.0/1.7.1 receiver.
+                    val state = lease.call("local_input", JSONObject().put("action", action).put("seconds", 0))
                     localPaused = state.optBoolean("paused")
                     localPause.text = if (localPaused) "恢复本机键鼠" else "暂停本机键鼠"
                     localStatus.text = if (localPaused) "已暂停 · 本机解除：A R T E X + Ctrl + Delete；断线自动恢复" else "本机输入已恢复"
@@ -403,8 +404,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
         if (localPaused) { apply("release"); return }
         AlertDialog.Builder(this).setTitle("暂停电脑本机键鼠")
             .setMessage("手机仍可控制，暂停状态显示在手机端。\n\n本机解除：同时按 A、R、T、E、X + Ctrl + Delete。键盘不支持七键同时按下时，使用 Ctrl+Alt+Del。\n\n退出共享或心跳中断 12 秒自动恢复。部分触屏驱动可能独立处理触摸，此开关不禁用硬件。")
-            .setPositiveButton("手动解除（不限时长）") { _, _ -> apply("pause", 0) }
-            .setNeutralButton("暂停 30 秒") { _, _ -> apply("pause", 30) }
+            .setPositiveButton("开始暂停（手动解除）") { _, _ -> apply("pause") }
             .setNegativeButton("取消", null).show()
     }
 

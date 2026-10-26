@@ -62,13 +62,12 @@ class Native:
 class GuardTest(unittest.TestCase):
     def setUp(self):
         self.native = Native()
-        self.now = 100.0
         self.allowed = True
-        self.guard = InputGuard(self.native, lambda: self.now)
+        self.guard = InputGuard(self.native)
         self.addCleanup(self.guard.close)
 
-    def pause(self, seconds=0):
-        return self.guard.pause("phone", seconds, lambda: self.allowed)
+    def pause(self):
+        return self.guard.pause("phone", lambda: self.allowed)
 
     def wait_released(self):
         deadline = time.monotonic() + 2
@@ -80,17 +79,11 @@ class GuardTest(unittest.TestCase):
 
     def test_unlimited_pause_is_not_time_limited_and_owner_release_works(self):
         self.assertIsNone(self.pause()["remaining"])
-        self.now += 86400
         self.assertTrue(self.guard.status("phone")["paused"])
         self.assertFalse(self.guard.release("other")["paused"])
         self.assertTrue(self.guard.status("phone")["paused"])
         self.guard.release("phone")
         self.assertEqual(("block", False), self.native.events[-1])
-
-    def test_finite_pause_expires(self):
-        self.pause(30)
-        self.now += 31
-        self.wait_released()
 
     def test_disconnect_or_watchdog_releases_indefinite_pause(self):
         self.pause()
@@ -102,12 +95,11 @@ class GuardTest(unittest.TestCase):
         self.native.escape.set()
         self.wait_released()
 
-    def test_repeated_pause_cannot_extend_or_replace_owner(self):
-        self.pause(30)
-        with self.assertRaises(RuntimeError): self.pause(0)
-        with self.assertRaises(RuntimeError): self.guard.pause("other", 0, lambda: True)
-        self.now += 31
-        self.wait_released()
+    def test_repeated_pause_cannot_replace_owner(self):
+        self.pause()
+        with self.assertRaises(RuntimeError): self.pause()
+        with self.assertRaises(RuntimeError): self.guard.pause("other", lambda: True)
+        self.assertTrue(self.guard.status("phone")["paused"])
 
     def test_install_failure_does_not_claim_pause(self):
         self.native.fail = True
@@ -136,7 +128,7 @@ class SessionTest(unittest.TestCase):
         state = SimpleNamespace(peer="local", client_id="phone")
         sid = remote.session({"scope": "input"}, state)["sid"]
         remote.local_input({"sid": sid, "action": "pause", "seconds": 0}, state)
-        allowed = backend.local_input.call_args.args[3]
+        allowed = backend.local_input.call_args.args[2]
         self.assertTrue(allowed())
         state.remote_sessions[sid].last_active -= 13
         self.assertFalse(allowed())
@@ -145,13 +137,30 @@ class SessionTest(unittest.TestCase):
         remote.close(state)
         backend.release_local_input.assert_called_with(sid)
 
+    def test_pause_defaults_to_manual_and_rejects_legacy_timed_requests(self):
+        backend = SimpleNamespace(local_input=mock.Mock(return_value={"paused": True, "remaining": None}))
+        remote = RemoteFeatures(RpcError, logging.getLogger("manual-pause-test"), "unused", backend)
+        state = SimpleNamespace(peer="local", client_id="phone")
+        sid = remote.session({"scope": "input"}, state)["sid"]
+        result = remote.local_input({"sid": sid, "action": "pause"}, state)
+        self.assertIsNone(result["remaining"])
+        backend.local_input.assert_called_once()
+        backend.local_input.reset_mock()
+        for seconds in (1, 10, 30, -1, 31, True, "0", None):
+            with self.subTest(seconds=seconds), self.assertRaisesRegex(RpcError, "已取消定时恢复"):
+                remote.local_input({"sid": sid, "action": "pause", "seconds": seconds}, state)
+        backend.local_input.assert_not_called()
+        remote.local_input({"sid": sid, "action": "pause", "seconds": 0}, state)
+        backend.local_input.assert_called_once()
+        remote.close(state)
+
 
 @unittest.skipUnless(os.name == "nt", "Windows ABI")
 class WindowsNativeTest(unittest.TestCase):
     def test_native_hooks_install_without_notice_then_owner_release(self):
         guard = InputGuard()
         try:
-            self.assertTrue(guard.pause("ci-own-session", 30, lambda: True)["paused"])
+            self.assertTrue(guard.pause("ci-own-session", lambda: True)["paused"])
             self.assertTrue(guard.status("ci-own-session")["paused"])
             from ctypes import wintypes as w
             user = ctypes.WinDLL("user32")

@@ -56,14 +56,14 @@ class WindowsBackend:
         guard = self.guard
         return guard.invoke(callback) if guard is not None and guard.thread.is_alive() else callback()
 
-    def local_input(self, action, owner, seconds, allowed):
+    def local_input(self, action, owner, allowed):
         if action == "pause":
             # Initialize the worker that owns the input hooks and message pump.
             from input_guard import InputGuard
             with self.guard_lock:
                 if self.guard is None or not self.guard.thread.is_alive():
                     self.guard = InputGuard()
-            return self.guard.pause(owner, seconds, allowed)
+            return self.guard.pause(owner, allowed)
         if self.guard is None or not self.guard.thread.is_alive():
             return {"paused": False, "remaining": 0}
         return self.guard.release(owner) if action == "release" else self.guard.status(owner)
@@ -304,12 +304,12 @@ class RemoteFeatures:
     def local_input(self, q, state):
         session = self.active(q, state, "input")
         action = q.get("action", "status")
-        seconds = q.get("seconds", 30)
+        seconds = q.get("seconds", 0)
         if action not in ("pause", "release", "status"):
             raise self.error("无效的本机输入操作")
-        if isinstance(seconds, bool) or not isinstance(seconds, int) or not 0 <= seconds <= 30:
-            raise self.error("时长需为 0（手动解除）或 1 到 30 秒")
-        return self.backend.local_input(action, session.sid, seconds,
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds != 0:
+            raise self.error("已取消定时恢复，请使用手动解除模式（seconds=0）")
+        return self.backend.local_input(action, session.sid,
             lambda: session.alive() and time.monotonic() - session.last_active < 12)
 
     def _close_session(self, session):

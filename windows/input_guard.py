@@ -7,19 +7,16 @@ normal input. They never alter drivers, the secure desktop or Ctrl+Alt+Del.
 import ctypes
 import queue
 import threading
-import time
 from concurrent.futures import Future
 
 INPUT_TAG = 0x4C434D44
 
 
 class InputGuard:
-    def __init__(self, native=None, clock=time.monotonic):
+    def __init__(self, native=None):
         self.native = native
-        self.clock = clock
         self.queue = queue.Queue()
         self.owner = None
-        self.deadline = 0
         self.ready = Future()
         self.thread = threading.Thread(target=self._run, name="lancmd-local-input", daemon=True)
         self.thread.start()
@@ -38,20 +35,18 @@ class InputGuard:
         if self.owner is not None:
             self.native.block(False)
         self.owner = None
-        self.deadline = 0
 
-    def pause(self, owner, seconds, allowed):
+    def pause(self, owner, allowed):
         def start():
             if not allowed():
                 raise RuntimeError("控制会话已结束")
             if self.owner is not None:
-                raise RuntimeError("本机输入已暂停，请先解除或等待倒计时结束")
+                raise RuntimeError("本机输入已暂停，请先手动解除")
             if not self.native.block(True):
                 raise RuntimeError("Windows 拒绝暂停本机输入，请在电脑端以管理员身份启动接收端")
             self.owner = owner
-            self.deadline = self.clock() + seconds if seconds else None
             self.allowed = allowed
-            return {"paused": True, "remaining": seconds if seconds else None}
+            return {"paused": True, "remaining": None}
         return self.invoke(start)
 
     def release(self, owner):
@@ -63,7 +58,7 @@ class InputGuard:
 
     def status(self, owner):
         return self.invoke(lambda: {"paused": self.owner == owner,
-            "remaining": (max(0, int(self.deadline - self.clock() + 0.999)) if self.deadline is not None else None) if self.owner == owner else 0})
+            "remaining": None if self.owner == owner else 0})
 
     def _run(self):
         try:
@@ -75,7 +70,7 @@ class InputGuard:
         try:
             while True:
                 if self.owner is not None:
-                    if (self.deadline is not None and self.clock() >= self.deadline) or not self.allowed() or self.native.escape.is_set():
+                    if not self.allowed() or self.native.escape.is_set():
                         self._release()
                     else:
                         # Low-level hooks need a message pump even without a UI.

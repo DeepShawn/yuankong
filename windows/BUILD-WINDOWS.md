@@ -1,4 +1,4 @@
-# Windows 1.7.1 构建
+# Windows 1.7.2 构建
 
 发布 ZIP 为 Windows x64 解压包，适用于 Windows 10/11。目标电脑不需要安装 Python。升级时先执行 `LanCmdCtl.exe --stop`，替换完整目录，再启动；配置继续保存在 `%APPDATA%\LanCmd`。
 
@@ -60,3 +60,5 @@ Windows 实机仍需验证实际摄像头画面、设备隐私权限、显示器
 1.7.0 完整包还需包含 `system_controls.py` 和 `input_guard.py`（PyInstaller 已追加 hidden-import）。新增 `tools/test_system_controls.py` 验证音量参数、输入暂停定时/手动/断线恢复及物理解除回调。
 
 1.7.1 输入暂停仅运行钩子和消息循环，不创建桌面提示窗口；原生测试枚举工作线程的可见窗口，验证暂停时没有提示窗口，并检查解除和恢复。
+
+1.7.2 移除输入暂停的时长参数和到期恢复逻辑；协议层仅接受省略 seconds 或 seconds=0，测试验证拒绝旧版非零时长并保留会话中断恢复。
