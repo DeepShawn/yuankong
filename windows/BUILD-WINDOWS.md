@@ -37,6 +37,8 @@ PyInstaller 产物需连同 `LanCmdCapture.exe` 分发。它与主发布 ZIP 使
 
 源码方式需要 Python，并需要同目录 `remote_features.py`；屏幕和摄像头还需要已编译的 `LanCmdCapture.exe`。embeddable Python 的隔离模块路径由接收端显式补入脚本目录。
 
+1.8.0 还需在同目录保留 `system_controls.py`、`input_guard.py` 和 `device_management.py`。Windows ZIP 与 PyInstaller 均包含这些依赖。设备管理测试：`python -m unittest discover -s tools -p test_device_management.py -v`；原生检查只读取宿主设备与策略，不在 CI 机器上锁定真实设备。
+
 ## 验证
 
 ```bash
