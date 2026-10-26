@@ -8,7 +8,6 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import com.google.android.material.button.MaterialButton
 import java.util.Locale
@@ -25,7 +24,7 @@ class VirtualKeyboard(context: Context, private val send: (List<String>) -> Unit
     private lateinit var clear: MaterialButton
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
-    private fun color(id: Int) = ContextCompat.getColor(context, id)
+    private fun color(id: Int) = Themes.color(context, id)
     private fun states(disabled: Int, selected: Int, normal: Int) = ColorStateList(
         arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf(android.R.attr.state_selected), intArrayOf()),
         intArrayOf(color(disabled), color(selected), color(normal)))

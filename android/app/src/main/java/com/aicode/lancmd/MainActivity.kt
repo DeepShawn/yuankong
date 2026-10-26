@@ -22,7 +22,6 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -81,6 +80,9 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             askUploadTarget(uris)
         }
     private val REQ_NOTIFICATIONS = 100
+    private val STATE_LOG = "console_log"
+    private val STATE_HISTORY = "command_history"
+    private val STATE_SHELL = "command_shell"
     private var lastPath = ""
     private var status = Status()
     private var firewallChecked = false
@@ -88,6 +90,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        Themes.apply(this)
         super.onCreate(savedInstanceState)
         try {
             setContentView(R.layout.activity_main)
@@ -117,6 +120,12 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         toggleShell.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (isChecked) prefsShell = if (checkedId == R.id.btnShellPs) "powershell" else "cmd"
         }
+        // 切换外观主题会重建页面：保留控制台、历史命令与终端类型
+        savedInstanceState?.let { state ->
+            state.getCharSequence(STATE_LOG)?.let { tvLog.text = it; scroll.post { scroll.fullScroll(View.FOCUS_DOWN) } }
+            state.getStringArrayList(STATE_HISTORY)?.let { history.clear(); history.addAll(it) }
+            if (state.getString(STATE_SHELL) == "powershell") toggleShell.check(R.id.btnShellPs)
+        }
 
         try {
             buildActions()
@@ -126,6 +135,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         }
 
         findViewById<View>(R.id.btnMore).setOnClickListener { showMenu(it) }
+        findViewById<View>(R.id.btnTheme).setOnClickListener { ThemeDialog(this).show() }
         btnRetry.setOnClickListener {
             note("正在重连…")
             ConnectionManager.retryNow()
@@ -192,6 +202,15 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         if (snap.state != State.IDLE || status.state == State.IDLE) {
             render(snap)
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        if (!::tvLog.isInitialized) return
+        val log = tvLog.text
+        outState.putCharSequence(STATE_LOG, if (log.length > 60_000) log.subSequence(log.length - 60_000, log.length) else log)
+        outState.putStringArrayList(STATE_HISTORY, ArrayList(history))
+        outState.putString(STATE_SHELL, prefsShell)
     }
 
     override fun onStop() {
@@ -392,7 +411,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     ) {
         private val tvTitle = TextView(ctx).apply {
             text = initialTitle
-            setTextColor(ContextCompat.getColor(ctx, R.color.text))
+            setTextColor(Themes.color(ctx, R.color.text))
             textSize = 14.5f
             maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
@@ -401,12 +420,12 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             max = 100
             progress = 0
             progressTintList = android.content.res.ColorStateList.valueOf(
-                ContextCompat.getColor(ctx, R.color.accent)
+                Themes.color(ctx, R.color.accent)
             )
         }
         private val tvDetail = TextView(ctx).apply {
             text = "0%"
-            setTextColor(ContextCompat.getColor(ctx, R.color.dim))
+            setTextColor(Themes.color(ctx, R.color.dim))
             textSize = 12f
         }
         private val dialog: AlertDialog
@@ -833,6 +852,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         popup.menu.add(0, 4, 3, getString(R.string.menu_forget))
         popup.menu.add(0, 5, 4, getString(R.string.menu_clear))
         popup.menu.add(0, 6, 5, getString(R.string.menu_about))
+        popup.menu.add(0, 30, 5, "外观主题")
         popup.menu.add(0, 9, 6, "查看崩溃日志")
         popup.menu.add(0, 8, 7, getString(R.string.menu_send_file))
         popup.menu.add(0, 7, 7, if (LanCmdService.isRunning) "关闭后台常驻" else "开启后台常驻")
@@ -856,6 +876,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                 7 -> toggleResident()
                 8 -> startPickFiles()
                 9 -> showCrashLog()
+                30 -> ThemeDialog(this).show()
                 20 -> doLock()
                 21 -> confirmPower("restart", "重启")
                 22 -> confirmPower("shutdown", "关机")
@@ -997,7 +1018,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                 tvLatency.visibility = View.VISIBLE
                 tvLatency.text = if (s.latencyMs >= 0) "${s.latencyMs}ms" else "在线"
                 tvLatency.setTextColor(
-                    ContextCompat.getColor(this, if (s.latencyMs in 0..80) R.color.accent else R.color.text)
+                    Themes.color(this, if (s.latencyMs in 0..80) R.color.accent else R.color.text)
                 )
                 showOverlay(false)
                 if (!firewallChecked) {
@@ -1074,7 +1095,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         } else text
         val span = SpannableString(line)
         span.setSpan(
-            ForegroundColorSpan(ContextCompat.getColor(this, color)),
+            ForegroundColorSpan(Themes.color(this, color)),
             0, span.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
         )
         if (tvLog.length() > 0) tvLog.append("\n")

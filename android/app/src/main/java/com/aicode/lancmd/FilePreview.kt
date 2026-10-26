@@ -7,7 +7,6 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.aicode.lancmd.net.AgentClient
 import kotlinx.coroutines.CancellationException
@@ -19,7 +18,7 @@ import org.json.JSONObject
 object FilePreview {
     fun show(activity: AppCompatActivity, client: AgentClient?, path: String) {
         val text = TextView(activity).apply {
-            setPadding(24, 24, 24, 24); setTextColor(ContextCompat.getColor(activity, R.color.text))
+            setPadding(24, 24, 24, 24); setTextColor(Themes.color(activity, R.color.text))
             textSize = 13f; setTextIsSelectable(true); text = "正在读取预览…"
         }
         val scroll = ScrollView(activity).apply { addView(text) }

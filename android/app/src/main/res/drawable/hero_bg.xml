@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
-    android:color="@color/accent_glow">
+    android:color="?attr/lcAccentGlow">
     <item>
         <shape android:shape="rectangle">
             <gradient android:angle="0"
-                android:startColor="#1A5A4C"
-                android:centerColor="#14403F"
-                android:endColor="#172C4A" />
+                android:startColor="?attr/lcHeroStart"
+                android:centerColor="?attr/lcHeroCenter"
+                android:endColor="?attr/lcHeroEnd" />
             <corners android:radius="22dp" />
-            <stroke android:width="1dp" android:color="#3352E3BE" />
+            <stroke android:width="1dp" android:color="?attr/lcHeroStroke" />
         </shape>
     </item>
 </ripple>

@@ -1,11 +1,12 @@
 package com.aicode.lancmd
 
+import android.os.Bundle
 import android.view.View
+import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.ScrollView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -23,6 +24,11 @@ import java.io.IOException
 abstract class FeatureActivity : AppCompatActivity() {
     protected lateinit var body: LinearLayout
     protected lateinit var statusText: TextView
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        Themes.apply(this)
+        super.onCreate(savedInstanceState)
+    }
 
     protected fun setup(title: String, description: String, scrollable: Boolean = false) {
         val root = LinearLayout(this).apply {
@@ -69,7 +75,19 @@ abstract class FeatureActivity : AppCompatActivity() {
         setTextColor(color(tint))
     }
 
-    protected fun button(text: String, action: () -> Unit) = MaterialButton(this).apply {
+    /** 并排等分的按钮自动留出间距，避免相邻按钮贴在一起。 */
+    private class SpacedButton(context: android.content.Context) : MaterialButton(context) {
+        override fun setLayoutParams(params: ViewGroup.LayoutParams?) {
+            if (params is LinearLayout.LayoutParams && params.width == 0 && params.weight > 0f &&
+                params.leftMargin == 0 && params.rightMargin == 0) {
+                val gap = (3 * resources.displayMetrics.density).toInt()
+                params.leftMargin = gap; params.rightMargin = gap
+            }
+            super.setLayoutParams(params)
+        }
+    }
+
+    protected fun button(text: String, action: () -> Unit): MaterialButton = SpacedButton(this).apply {
         this.text = text
         isAllCaps = false
         minHeight = dp(48)
@@ -97,7 +115,7 @@ abstract class FeatureActivity : AppCompatActivity() {
     protected fun panel(): LinearLayout {
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(14))
+            setPadding(dp(18), dp(16), dp(18), dp(16))
         }
         val card = MaterialCardView(this).apply {
             radius = dp(20).toFloat()
@@ -107,7 +125,7 @@ abstract class FeatureActivity : AppCompatActivity() {
             setCardBackgroundColor(color(R.color.surface))
             addView(content)
         }
-        body.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+        body.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
         return content
     }
 
@@ -132,6 +150,6 @@ abstract class FeatureActivity : AppCompatActivity() {
         statusText.setTextColor(color(if (error) R.color.danger else R.color.dim))
     }
 
-    protected fun color(id: Int): Int = ContextCompat.getColor(this, id)
+    protected fun color(id: Int): Int = Themes.color(this, id)
     protected fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }

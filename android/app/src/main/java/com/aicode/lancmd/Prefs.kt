@@ -15,6 +15,8 @@ object Prefs {
     private const val KEY_NAME = "last_name"
     private const val KEY_AGENT_ID = "last_agent_id"
     private const val KEY_UPLOAD_DIR = "upload_dir"
+    private const val KEY_ACCENT = "theme_accent"
+    private const val KEY_TONE = "theme_tone"
 
     private fun sp(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -71,6 +73,13 @@ object Prefs {
 
     fun saveUploadDir(ctx: Context, dir: String) {
         sp(ctx).edit().putString(KEY_UPLOAD_DIR, dir).apply()
+    }
+
+    fun accent(ctx: Context): String = sp(ctx).getString(KEY_ACCENT, "") ?: ""
+    fun tone(ctx: Context): String = sp(ctx).getString(KEY_TONE, "") ?: ""
+
+    fun saveTheme(ctx: Context, accent: String, tone: String) {
+        sp(ctx).edit().putString(KEY_ACCENT, accent).putString(KEY_TONE, tone).apply()
     }
 
     fun forget(ctx: Context) {
