@@ -371,7 +371,7 @@ class AppLocks:
                         raise ValueError("未确认应用锁状态，请刷新检查；恢复备份已保留")
                     return {"items":states}
                 if action not in ("unlock","forget"): raise ValueError("无效的应用锁操作")
-                rid=str(q.get("id","")); entry=data.get(rid)
+                rid=str(q.get("lock_id","")); entry=data.get(rid)
                 if not entry: raise ValueError("应用锁记录不存在")
                 current=next(v for v in self._states(data) if v["id"]==rid)
                 if action=="forget":

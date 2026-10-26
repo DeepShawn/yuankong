@@ -52,8 +52,8 @@ class AppLocksActivity : FeatureActivity() {
                 entries.addView(label(item.getString("path"),12f,R.color.dim).apply { setTextIsSelectable(true) })
                 if(item.has("error"))entries.addView(label(item.getString("error"),12f,R.color.danger))
                 val row=LinearLayout(this@AppLocksActivity)
-                row.addView(button("解锁") { mutate(JSONObject().put("action","unlock").put("id",item.getString("id"))) }.apply { isEnabled=state=="locked" },LinearLayout.LayoutParams(0,-2,1f))
-                row.addView(button("移除记录") { mutate(JSONObject().put("action","forget").put("id",item.getString("id"))) }.apply { isEnabled=state in listOf("unlocked","missing","replaced") },LinearLayout.LayoutParams(0,-2,1f))
+                row.addView(button("解锁") { mutate(JSONObject().put("action","unlock").put("lock_id",item.getString("id"))) }.apply { isEnabled=state=="locked" },LinearLayout.LayoutParams(0,-2,1f))
+                row.addView(button("移除记录") { mutate(JSONObject().put("action","forget").put("lock_id",item.getString("id"))) }.apply { isEnabled=state in listOf("unlocked","missing","replaced") },LinearLayout.LayoutParams(0,-2,1f))
                 entries.addView(row)
             }
             entries.addView(label("恢复备份：${result.getString("backup")}\n锁定期间请保留此文件。权限被外部修改时会停止恢复。",11f,R.color.dim).apply { setTextIsSelectable(true) })

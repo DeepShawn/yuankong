@@ -130,7 +130,7 @@ class RegistryEditor:
                             except (OSError,ValueError,KeyError):continue
                     return {"items":records,"directory":str(self.backup)}
                 if action=="restore":
-                    rid=q.get("id","")
+                    rid=q.get("backup_id","")
                     if not isinstance(rid,str) or not re.fullmatch("[0-9a-f]{32}",rid):raise ValueError("备份编号无效")
                     record=json.loads((self.backup/(rid+".json")).read_text())
                     root,path,view=self._location(record);name=self._name(record)

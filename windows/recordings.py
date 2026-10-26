@@ -83,7 +83,7 @@ class Recordings:
                 if action == "start":
                     job = self._start(q, state.client_id)
                 elif action in ("stop", "delete"):
-                    job = self.jobs.get(str(q.get("id", "")))
+                    job = self.jobs.get(str(q.get("recording_id", "")))
                     if not job or job["data"]["owner"] != state.client_id:
                         raise ValueError("录制不存在或属于其他手机")
                     if action == "delete":

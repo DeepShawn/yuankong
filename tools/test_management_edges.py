@@ -13,7 +13,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"windows"))
 from browser_control import browser_request
 from registry_editor import NativeRegistry,RegistryEditor,unpack,version
-from script_runner import ScriptRunner,attach_process_job,script_command
+from script_runner import ScriptRunner,attach_process_job,script_command,check_vbscript
 from task_manager import TaskManager
 
 
@@ -28,13 +28,41 @@ class ScriptEdgeTest(unittest.TestCase):
             self.assertIsNone(attach_process_job(finished))
             with self.assertRaises(OSError):attach_process_job(SimpleNamespace(poll=lambda:None))
 
-    def test_vbs_console_host_retains_echo_and_errors(self):
+    def test_vbs_console_host_is_noninteractive_and_selects_engine(self):
         command,env=script_command(Path("script.vbs"))
         self.assertEqual("cscript.exe",Path(command[0]).name.lower())
-        self.assertNotIn("//B",command)
-        self.assertIn("//I",command)
+        self.assertIn("//B",command)
+        self.assertNotIn("//I",command)
+        self.assertIn("//E:VBScript",command)
         self.assertIn("//U",command)
         self.assertIn("//T:300",command)
+
+    def test_vbs_probe_rejects_silent_zero_exit_and_does_not_modify_policy(self):
+        def silent(command,**kwargs):
+            self.assertIn("//E:VBScript",command)
+            self.assertIn("//B",command)
+            self.assertIn("//T:5",command)
+            self.assertEqual(10,kwargs["timeout"])
+            self.assertIn(b"WScript.Quit 37",Path(command[-1]).read_bytes())
+            return SimpleNamespace(returncode=0,stdout=b"",stderr=b"")
+        with self.assertRaisesRegex(ValueError,"用户脚本未启动"):
+            check_vbscript(run=silent)
+        for code,output in ((37,b""),(0,"LanCmd-VBScript-check".encode("utf-16-le"))):
+            with self.assertRaises(ValueError):
+                check_vbscript(run=lambda *a,**kw:SimpleNamespace(returncode=code,stdout=output,stderr=b""))
+        check_vbscript(run=lambda *a,**kw:SimpleNamespace(returncode=37,stdout="LanCmd-VBScript-check\r\n".encode("utf-16-le"),stderr=b""))
+
+    def test_unavailable_vbs_host_never_starts_user_script_or_claims_completion(self):
+        launch=mock.Mock();manager=ScriptRunner(launch)
+        job={"cancel":threading.Event(),"data":{"status":"starting","out":"","err":""}}
+        with mock.patch("script_runner.check_vbscript",side_effect=ValueError("VBScript 运行组件未通过执行检查；用户脚本未启动")):
+            manager._run(job,Path("user.vbs"))
+        launch.assert_not_called()
+        self.assertEqual("failed",job["data"]["status"])
+        self.assertIn("用户脚本未启动",job["data"]["err"])
+        self.assertNotIn("code",job["data"])
+        self.assertIn("finished",job["data"])
+        manager.close()
 
     def test_cancelled_processes_still_finishing_consume_running_slots(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -88,7 +116,7 @@ class RegistryEdgeTest(unittest.TestCase):
                 record=journal(*args);native.value=(1,"external");return record
             with mock.patch.object(manager,"_journal",side_effect=external_change):
                 with self.assertRaisesRegex(Error,"备份期间"):
-                    manager.request(dict(action="restore",id=result["backup"]),Error)
+                    manager.request(dict(action="restore",backup_id=result["backup"]),Error)
             self.assertEqual((1,"external"),native.value)
             self.assertEqual([(1,"after")],native.writes)
 

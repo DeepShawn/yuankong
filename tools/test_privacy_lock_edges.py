@@ -61,14 +61,14 @@ class AppLockEdges(unittest.TestCase):
             return original(path,*args,**kwargs)
         with mock.patch.object(Path,"stat",autospec=True,side_effect=info):
             self.assertEqual("changed",self.call()["items"][0]["status"])
-            with self.assertRaises(Error):self.call(action="forget",id=rid)
+            with self.assertRaises(Error):self.call(action="forget",lock_id=rid)
         self.assertIn(rid,json.loads(self.manager.path.read_text()))
 
     def test_moved_file_keeps_its_original_acl_in_archived_backup(self):
         rid=self.call(action="lock",path=str(self.exe))["items"][0]["id"]
         entry=json.loads(self.manager.path.read_text())[rid]
         self.exe.rename(self.root/"moved.exe")
-        result=self.call(action="forget",id=rid)
+        result=self.call(action="forget",lock_id=rid)
         archived=json.loads(Path(result["archive"]).read_text(encoding="utf-8"))
         self.assertEqual(entry,archived["entry"])
         self.assertEqual([],self.call()["items"])
@@ -91,21 +91,27 @@ class PrivacyEdges(unittest.TestCase):
     def test_unknown_device_state_is_not_reported_as_already_disabled(self):
         manager=self.manager(dict(id="camera",kind="camera",enabled=False,problem=-1,error="read failure"))
         with self.assertRaisesRegex(Error,"状态异常|未知"):
-            manager.request(dict(action="set_enabled",id="camera",enabled=False),Error)
+            manager.request(dict(action="set_enabled",device_id="camera",enabled=False),Error)
         self.backend.set_enabled.assert_not_called()
+
+    def test_device_selector_does_not_consume_rpc_request_id(self):
+        manager=self.manager(dict(id="camera",kind="camera",enabled=True,problem=0))
+        result=manager.request(dict(id=103,action="set_enabled",device_id="camera",enabled=False),Error)
+        self.assertTrue(result["changed"])
+        self.backend.set_enabled.assert_called_once_with("camera",False)
 
     def test_missing_endpoint_never_falls_back_to_default_microphone(self):
         manager=self.manager(dict(id="mic",kind="microphone",enabled=True,problem=0,endpoint=None))
         listed=manager.request({},Error)["items"][0]
         self.assertIn("audio_error",listed)
         with self.assertRaisesRegex(Error,"端点编号"):
-            manager.request(dict(action="mute",id="mic",muted=True),Error)
+            manager.request(dict(action="mute",device_id="mic",muted=True),Error)
         self.audio.assert_not_called()
 
     def test_mute_result_must_match_requested_state(self):
         manager=self.manager(dict(id="mic",kind="microphone",enabled=True,problem=0,endpoint="capture-id"))
         with self.assertRaisesRegex(Error,"未确认"):
-            manager.request(dict(action="mute",id="mic",muted=True),Error)
+            manager.request(dict(action="mute",device_id="mic",muted=True),Error)
         self.audio.assert_called_once_with(muted=True,device_id="capture-id",flow=1)
 
     def test_native_inventory_excludes_render_and_malformed_capture_endpoints(self):
@@ -120,6 +126,18 @@ class PrivacyEdges(unittest.TestCase):
         response=SimpleNamespace(returncode=0,stdout=json.dumps(raw).encode(),stderr=b"")
         with mock.patch("privacy_devices.subprocess.run",return_value=response):items=hardware.inventory()
         self.assertEqual([capture],[i["id"] for i in items]);self.assertEqual("{0.0.1.00000000}."+guid,items[0]["endpoint"])
+
+    def test_native_device_disable_is_persistent_and_forbids_ui(self):
+        hardware=PrivacyHardware.__new__(PrivacyHardware)
+        hardware.node=mock.Mock(return_value=37)
+        hardware.cm=SimpleNamespace(CM_Disable_DevNode=mock.Mock(return_value=0),CM_Enable_DevNode=mock.Mock(return_value=0))
+        hardware.set_enabled("selected-camera",False)
+        # cfgmgr32.h: PERSIST=8, UI_NOT_OK=4; ABSOLUTE=1 is unrelated.
+        hardware.cm.CM_Disable_DevNode.assert_called_once_with(37,0xC)
+        hardware.cm.CM_Enable_DevNode.assert_not_called()
+        hardware.node.assert_called_once_with("selected-camera")
+        hardware.set_enabled("selected-camera",True)
+        hardware.cm.CM_Enable_DevNode.assert_called_once_with(37,0)
 
 
 class DaclComparison(unittest.TestCase):
@@ -181,7 +199,7 @@ class NativeAclEdges(unittest.TestCase):
                 manager=AppLocks(root/"app-locks.json")
                 item=manager.request(dict(action="lock",path=str(path)),Error)["items"][0]
                 self.assertEqual("locked",item["status"])
-                manager.request(dict(action="unlock",id=item["id"]),Error)
+                manager.request(dict(action="unlock",lock_id=item["id"]),Error)
                 self.assertTrue(same_dacl(protected,snapshot_file_dacl(path)["sddl"]))
             finally:restore_file_dacl(path,before["sddl"],before["identity"])
 

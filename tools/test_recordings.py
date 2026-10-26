@@ -56,20 +56,20 @@ class RecordingTest(unittest.TestCase):
         item = self.call(action="start", mode="audio", seconds=30)["recording"]
         self.assertEqual("recording", item["status"])
         self.assertEqual(["record", "audio", item["path"], "-1", "0", "30", "1"], self.argv[0][1:])
-        self.call(action="stop", id=item["id"])
+        self.call(action="stop", id=101, recording_id=item["id"])
         settle(lambda: self.call()["recordings"][0]["status"] == "completed")
         with wave.open(item["path"]) as wav: self.assertEqual(48000, wav.getframerate())
         self.assertNotIn("owner", self.call()["recordings"][0])
-        self.call(action="delete", id=item["id"])
+        self.call(action="delete", id=102, recording_id=item["id"])
         self.assertFalse(Path(item["path"]).exists())
 
     def test_mic_conflicts_and_ownership_never_stop_other_phone(self):
         item = self.call(action="start", mode="audio")["recording"]
         with self.assertRaises(Error): self.call(action="start", mode="screen", audio=True)
-        with self.assertRaises(Error): self.call(action="delete", id=item["id"])
+        with self.assertRaises(Error): self.call(action="delete", id=103, recording_id=item["id"])
         other = SimpleNamespace(client_id="other")
         self.assertEqual([], self.manager.request({}, other, Error)["recordings"])
-        with self.assertRaises(Error): self.manager.request({"action":"stop","id":item["id"]}, other, Error)
+        with self.assertRaises(Error): self.manager.request({"action":"stop","id":104,"recording_id":item["id"]}, other, Error)
 
     def test_invalid_parameters_do_not_launch_any_process(self):
         for q in ({"mode":"bad"}, {"mode":"audio","seconds":True}, {"mode":"screen","seconds":3601},

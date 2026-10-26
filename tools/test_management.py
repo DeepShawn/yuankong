@@ -99,14 +99,14 @@ class AppLockTest(unittest.TestCase):
         result=self.call(action="lock",path=str(self.exe));rid=result["items"][0]["id"]
         self.assertEqual("locked",result["items"][0]["status"])
         restarted=AppLocks(self.root/"locks.json",backend=self.acl)
-        restarted.request(dict(action="unlock",id=rid),Error)
+        restarted.request(dict(action="unlock",lock_id=rid),Error)
         self.assertEqual("D:original",self.acl.values[str(self.exe)])
-        self.call(action="forget",id=rid);self.assertEqual([],self.call()["items"])
+        self.call(action="forget",lock_id=rid);self.assertEqual([],self.call()["items"])
     def test_external_acl_change_never_overwritten_and_protected_paths_rejected(self):
         rid=self.call(action="lock",path=str(self.exe))["items"][0]["id"]
         self.acl.values[str(self.exe)]="D:external"
-        with self.assertRaises(Error):self.call(action="unlock",id=rid)
-        with self.assertRaises(Error):self.call(action="forget",id=rid)
+        with self.assertRaises(Error):self.call(action="unlock",lock_id=rid)
+        with self.assertRaises(Error):self.call(action="forget",lock_id=rid)
         protected=AppLocks(self.root/"other.json",protected=(self.root,),backend=self.acl)
         with self.assertRaises(Error):protected.request(dict(action="lock",path=str(self.exe)),Error)
         self.assertEqual("D:external",self.acl.values[str(self.exe)])
@@ -134,12 +134,12 @@ class RegistryTest(unittest.TestCase):
             loaded=self.call(action="get",name=name)
             self.assertEqual(kind,loaded["type"])
             with self.assertRaises(Error):self.call(action="set",name=name,revision="missing",value=dict(type="REG_SZ",data="bad"))
-            self.manager.request(dict(action="restore",id=result["backup"]),Error)
+            self.manager.request(dict(action="restore",backup_id=result["backup"]),Error)
             self.assertIsNone(self.native.read("HKCU","Software\\LanCmdTest",64,name))
     def test_external_changes_block_restore_and_invalid_payload_does_not_write(self):
         result=self.call(action="set",name="x",revision="missing",value=dict(type="REG_SZ",data="first"))
         self.native.write("HKCU","Software\\LanCmdTest",64,"x",(1,"external"))
-        with self.assertRaises(Error):self.manager.request(dict(action="restore",id=result["backup"]),Error)
+        with self.assertRaises(Error):self.manager.request(dict(action="restore",backup_id=result["backup"]),Error)
         for value in (dict(type="REG_DWORD",data="4294967296"),dict(type="REG_QWORD",data="-1"),dict(type="REG_BINARY",data="xyz"),dict(type="REG_SZ",data="a\0b")):
             with self.assertRaises(Error):self.call(action="set",name="bad",revision="missing",value=value)
         self.assertEqual((1,"external"),self.native.read("HKCU","Software\\LanCmdTest",64,"x"))
@@ -164,17 +164,17 @@ class PrivacyTest(unittest.TestCase):
         self.audio=mock.Mock(return_value=dict(volume=50,muted=True))
     def test_fresh_inventory_admin_checks_and_microphone_endpoint_mute(self):
         manager=PrivacyDevices(lambda:False,self.backend,self.audio)
-        with self.assertRaises(Error):manager.request(dict(action="set_enabled",id="camera",enabled=False),Error)
+        with self.assertRaises(Error):manager.request(dict(action="set_enabled",device_id="camera",enabled=False),Error)
         self.backend.set_enabled.assert_not_called()
-        with self.assertRaises(Error):manager.request(dict(action="mute",id="camera",muted=True),Error)
-        manager.request(dict(action="mute",id="mic",muted=True),Error)
+        with self.assertRaises(Error):manager.request(dict(action="mute",device_id="camera",muted=True),Error)
+        manager.request(dict(action="mute",device_id="mic",muted=True),Error)
         self.audio.assert_called_once_with(muted=True,device_id="capture-id",flow=1)
-        with self.assertRaises(Error):manager.request(dict(action="mute",id="other",muted=True),Error)
+        with self.assertRaises(Error):manager.request(dict(action="mute",device_id="other",muted=True),Error)
     def test_explicit_device_disable_and_unconfirmed_state_is_not_success(self):
         manager=PrivacyDevices(lambda:True,self.backend,self.audio)
-        self.assertTrue(manager.request(dict(action="set_enabled",id="camera",enabled=False),Error)["changed"])
+        self.assertTrue(manager.request(dict(action="set_enabled",device_id="camera",enabled=False),Error)["changed"])
         self.backend.status=lambda id:dict(enabled=True,problem=0)
-        with self.assertRaises(Error):manager.request(dict(action="set_enabled",id="camera",enabled=False),Error)
+        with self.assertRaises(Error):manager.request(dict(action="set_enabled",device_id="camera",enabled=False),Error)
 
 
 class TaskTest(unittest.TestCase):
@@ -208,8 +208,8 @@ class ScriptTest(unittest.TestCase):
         settle(lambda:self.call()["items"][0]["status"]=="running")
         other=SimpleNamespace(client_id="other")
         self.assertEqual([],self.manager.request({},other,Error)["items"])
-        with self.assertRaises(Error):self.manager.request(dict(action="cancel",id=item["id"]),other,Error)
-        self.call(action="cancel",id=item["id"])
+        with self.assertRaises(Error):self.manager.request(dict(action="cancel",job_id=item["id"]),other,Error)
+        self.call(action="cancel",job_id=item["id"])
         settle(lambda:self.call()["items"][0]["status"]=="cancelled")
     def test_output_is_bounded_and_arbitrary_executables_rejected(self):
         self.code="import sys; sys.stdout.write('x'*100000)"
@@ -240,7 +240,7 @@ class NativeManagementTest(unittest.TestCase):
             finally:
                 if (root/"backup.json").exists():
                     data=json.loads((root/"backup.json").read_text(encoding="utf-8"))
-                    if data:manager.request(dict(action="unlock",id=next(iter(data))),Error)
+                    if data:manager.request(dict(action="unlock",lock_id=next(iter(data))),Error)
             restored=backend.call(action="inspect",paths=[str(exe)])[0]["sddl"]
             self.assertTrue(same_dacl(original,restored),(original,restored))
     def test_native_registry_round_trip_under_isolated_hkcu_key(self):
@@ -254,7 +254,7 @@ class NativeManagementTest(unittest.TestCase):
                 manager=RegistryEditor(backup,native)
                 result=manager.request(dict(action="set",root="HKCU",path=path,view=64,name="中文",revision="missing",value=dict(type="REG_QWORD",data="18446744073709551615")),Error)
                 self.assertEqual((11,18446744073709551615),native.read("HKCU",path,64,"中文"))
-                manager.request(dict(action="restore",id=result["backup"]),Error)
+                manager.request(dict(action="restore",backup_id=result["backup"]),Error)
                 self.assertIsNone(native.read("HKCU",path,64,"中文"))
         finally:w.DeleteKeyEx(w.HKEY_CURRENT_USER,path,w.KEY_WOW64_64KEY,0)
     def test_native_text_replace_preserves_dacl_and_alternate_stream(self):
@@ -276,27 +276,49 @@ class NativeManagementTest(unittest.TestCase):
             self.assertIsNone(child.poll());backend.terminate(child.pid,info["created"]);child.wait(timeout=5)
         finally:
             if child.poll() is None:child.kill();child.wait()
-    def test_native_batch_special_path_and_vbs_outputs_are_hidden_host_jobs(self):
+    def test_native_batch_special_path_is_a_hidden_host_job(self):
         with tempfile.TemporaryDirectory(prefix="LanCmd & % ") as directory:
             root=Path(directory);batch=root/"测试 & (!)%USERPROFILE%.bat";batch.write_bytes(b"@echo off\r\necho batch-output\r\nexit /b 7\r\n")
-            vbs=root/"测试.vbs";vbs.write_text('WScript.Echo "script-output"\r\nWScript.Quit 0\r\n',encoding="utf-16")
             manager=ScriptRunner();owner=SimpleNamespace(client_id="phone")
             try:
                 manager.request(dict(action="run",path=str(batch)),owner,Error)
                 settle(lambda:manager.request({},owner,Error)["items"][0]["status"] not in ("starting","running"))
                 first=manager.request({},owner,Error)["items"][0]
                 self.assertEqual(7,first.get("code"),first);self.assertIn("batch-output",first["out"])
+            finally:manager.close()
+    def test_native_vbs_executes_or_reports_unavailable_before_user_code(self):
+        from script_runner import check_vbscript
+        try:
+            check_vbscript();unavailable=None
+            print("Native VBScript host passed execution check (exit 37 and UTF-16 sentinel)")
+        except ValueError as exc:
+            unavailable=str(exc)
+        with tempfile.TemporaryDirectory(prefix="LanCmd & % ") as directory:
+            root=Path(directory);vbs=root/"测试.vbs";marker=root/"executed.txt"
+            source=('Set f = CreateObject("Scripting.FileSystemObject").CreateTextFile("'+str(marker).replace('"','""')+'", True)\r\n'
+                'f.Write "executed"\r\nf.Close\r\nWScript.StdOut.WriteLine "script-output"\r\n'
+                'WScript.StdErr.WriteLine "script-error"\r\nWScript.Quit 7\r\n')
+            vbs.write_bytes(source.encode("utf-16"))
+            manager=ScriptRunner();owner=SimpleNamespace(client_id="phone")
+            try:
                 manager.request(dict(action="run",path=str(vbs)),owner,Error)
-                settle(lambda:manager.request({},owner,Error)["items"][0]["status"] not in ("starting","running"))
-                second=manager.request({},owner,Error)["items"][0]
-                self.assertEqual(0,second.get("code"),second)
-                if "script-output" not in second["out"]:
-                    from script_runner import script_command
-                    command,env=script_command(vbs)
-                    direct=subprocess.run(command,cwd=str(root),env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
-                        creationflags=0x08000000,timeout=10)
-                    self.fail("VBS output missing. job=%r direct_code=%r stdout_hex=%s stderr_hex=%s" %
-                        (second,direct.returncode,direct.stdout[:200].hex(),direct.stderr[:200].hex()))
+                settle(lambda:manager.request({},owner,Error)["items"][0].get("finished") is not None,seconds=15)
+                result=manager.request({},owner,Error)["items"][0]
+                if unavailable:
+                    # Removed/disabled Windows components are a user-visible
+                    # failure, never a silent successful run and never enabled.
+                    self.assertEqual("failed",result["status"],result)
+                    self.assertIn("VBScript 运行组件未通过执行检查",result["err"])
+                    self.assertIn("用户脚本未启动",result["err"])
+                    self.assertNotIn("code",result)
+                    self.assertFalse(marker.exists(),result)
+                    print("Native VBScript host unavailable; checked explicit failure:",unavailable)
+                else:
+                    self.assertEqual(7,result.get("code"),result)
+                    self.assertEqual("failed",result["status"],result)
+                    self.assertEqual("executed",marker.read_text())
+                    self.assertIn("script-output",result["out"])
+                    self.assertIn("script-error",result["err"])
             finally:manager.close()
     def test_privacy_inventory_read_only_and_default_audio_unchanged(self):
         items=PrivacyHardware().inventory()

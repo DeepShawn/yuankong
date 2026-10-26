@@ -139,8 +139,15 @@ class ManagementUiTest {
             shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="lock" })
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { stub.requests.any { it.optString("action")=="lock" } }
-            render(lock.get().window.decorView,"app-locks");lock.pause().stop().destroy()
+            waitFor { buttons(lock.get().window.decorView).any { it.text=="解锁" && it.isEnabled } }
+            render(lock.get().window.decorView,"app-locks")
+            buttons(lock.get().window.decorView).single { it.text=="解锁" }.performClick()
+            waitFor { buttons(lock.get().window.decorView).any { it.text=="移除记录" && it.isEnabled } }
+            assertEquals("lock-entry",stub.requests.single { it.optString("action")=="unlock" }.getString("lock_id"))
+            buttons(lock.get().window.decorView).single { it.text=="移除记录" }.performClick()
+            waitFor { stub.requests.any { it.optString("action")=="forget" } }
+            assertEquals("lock-entry",stub.requests.single { it.optString("action")=="forget" }.getString("lock_id"))
+            lock.pause().stop().destroy()
             val privacy=Robolectric.buildActivity(PrivacyDevicesActivity::class.java).setup();val root=privacy.get().window.decorView
             waitFor { buttons(root).any { it.text=="停用设备" && it.isEnabled } && buttons(root).any { it.text=="静音麦克风" && it.isEnabled } && all(root).filterIsInstance<TextView>().any { it.text.contains("已读取 1 个设备") } }
             buttons(root).single { it.text=="停用设备" }.performClick()
@@ -157,6 +164,12 @@ class ManagementUiTest {
                 val texts=all(root).filterIsInstance<TextView>().map { it.text.toString() }
                 throw AssertionError("Microphone mute not submitted. Buttons=$states; UI=$texts; RPC=${stub.requests}",error)
             }
+            assertEquals("mic",stub.requests.single { it.optString("action")=="mute" }.getString("device_id"))
+            waitFor { buttons(root).any { it.text=="停用设备" && it.isEnabled } }
+            buttons(root).single { it.text=="停用设备" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitFor { stub.requests.any { it.optString("action")=="set_enabled" } }
+            assertEquals("mic",stub.requests.single { it.optString("action")=="set_enabled" }.getString("device_id"))
             render(root,"privacy-devices");privacy.pause().stop().destroy()
         }
     }
@@ -181,6 +194,46 @@ class ManagementUiTest {
                 (ShadowDialog.getLatestDialog() as AlertDialog).dismiss();menu.dismiss()
             }
             controller.pause().stop().destroy()
+        }
+    }
+    @Test fun recordingStopAndDeleteKeepEntityIdSeparateFromRequestId() {
+        Stub().use { stub->
+            stub.install();val controller=Robolectric.buildActivity(RecordingsActivity::class.java).setup();val root=controller.get().window.decorView
+            waitFor { buttons(root).any { it.text=="停止录制" && it.isEnabled } }
+            buttons(root).single { it.text=="停止录制" }.performClick()
+            waitFor { buttons(root).any { it.text=="删除" && it.isEnabled } }
+            assertEquals("recording-entry",stub.requests.single { it.optString("action")=="stop" }.getString("recording_id"))
+            buttons(root).single { it.text=="删除" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            assertFalse(stub.requests.any { it.optString("action")=="delete" })
+            (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitFor { stub.requests.any { it.optString("action")=="delete" } }
+            assertEquals("recording-entry",stub.requests.single { it.optString("action")=="delete" }.getString("recording_id"))
+            controller.pause().stop().destroy()
+        }
+    }
+    @Test fun registryRestoreAndScriptCancelKeepEntityIdSeparateFromRequestId() {
+        Stub().use { stub->
+            stub.install();val controller=Robolectric.buildActivity(RegistryActivity::class.java).setup();val root=controller.get().window.decorView
+            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("1 个子项") } }
+            buttons(root).single { it.text=="修改备份" }.performClick()
+            waitFor { (ShadowDialog.getLatestDialog() as? AlertDialog)?.listView?.adapter?.count==1 }
+            val history=ShadowDialog.getLatestDialog() as AlertDialog
+            history.listView.performItemClick(null,0,0);shadowOf(Looper.getMainLooper()).idle()
+            assertFalse(stub.requests.any { it.optString("action")=="restore" })
+            (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitFor { stub.requests.any { it.optString("action")=="restore" } }
+            assertEquals("backup-entry",stub.requests.single { it.optString("action")=="restore" }.getString("backup_id"))
+            stub.showScriptJob=true
+            ScriptJobsDialog.show(controller.get(),ConnectionManager.sessionClient());shadowOf(Looper.getMainLooper()).idle()
+            val jobs=ShadowDialog.getLatestDialog() as AlertDialog
+            val list=all(jobs.window!!.decorView).filterIsInstance<android.widget.ListView>().single()
+            waitFor { list.adapter?.count==1 };list.performItemClick(null,0,0);shadowOf(Looper.getMainLooper()).idle()
+            val detail=ShadowDialog.getLatestDialog() as AlertDialog
+            waitFor { detail.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled }
+            detail.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitFor { stub.requests.any { it.optString("action")=="cancel" } }
+            assertEquals("script-entry",stub.requests.single { it.optString("action")=="cancel" }.getString("job_id"))
+            detail.dismiss();jobs.dismiss();controller.pause().stop().destroy()
         }
     }
     @Test fun registryTasksBrowserAndHomeCardsRenderWithReachableConsole() {
@@ -212,7 +265,8 @@ class ManagementUiTest {
 
     private class Stub:Closeable {
         private val server=ServerSocket(0);private val client=AgentClient("127.0.0.1",server.localPort)
-        val requests=CopyOnWriteArrayList<JSONObject>();var conflict=false;var failRead=false
+        val requests=CopyOnWriteArrayList<JSONObject>();var conflict=false;var failRead=false;var showScriptJob=false
+        private var lockState="";private var recordingState="recording"
         private val worker=Thread {
             try { server.accept().use { socket->
                 val reader=socket.getInputStream().bufferedReader();val writer=socket.getOutputStream().bufferedWriter()
@@ -224,14 +278,23 @@ class ManagementUiTest {
                             else result.put("text","initial\r\n").put("encoding","utf-8").put("newline","crlf").put("revision","r1").put("size",9)
                         }
                             else if(conflict)result.put("ok",false).put("error","文件已被外部修改，未覆盖") else result.put("revision","r2").put("size",20)
-                        "app_locks"->result.put("items",JSONArray()).put("backup","C:\\LanCmd\\app-locks.json")
+                        "app_locks"->{
+                            when(q.optString("action")){"lock"->lockState="locked";"unlock"->lockState="unlocked";"forget"->lockState=""}
+                            result.put("items",JSONArray().apply { if(lockState.isNotEmpty())put(JSONObject().put("id","lock-entry").put("path","C:\\Apps\\test.exe").put("status",lockState)) }).put("backup","C:\\LanCmd\\app-locks.json")
+                        }
                         "privacy_devices"->result.put("admin",true).put("items",JSONArray().put(JSONObject().put("id","mic").put("kind","microphone").put("name","Test microphone").put("enabled",true).put("problem",0).put("muted",false)))
-                        "registry"->result.put("root","HKCU").put("path",q.optString("path")).put("view",64).put("keys",JSONArray().put("Software")).put("values",JSONArray()).put("key_count",1).put("value_count",0).put("key_offset",0).put("value_offset",0)
+                        "registry"->if(q.optString("action")=="history")result.put("items",JSONArray().put(JSONObject().put("id","backup-entry").put("root","HKCU").put("path","Software").put("name","Test").put("view",64).put("created",1))) else result.put("root","HKCU").put("path",q.optString("path")).put("view",64).put("keys",JSONArray().put("Software")).put("values",JSONArray()).put("key_count",1).put("value_count",0).put("key_offset",0).put("value_offset",0)
                         "tasks"->result.put("items",JSONArray().put(JSONObject().put("pid",777).put("name","test.exe").put("path","C:\\Apps\\test.exe").put("created","100").put("memory",1048576).put("cpu",1.5).put("can_terminate",false)))
                         "browser"->result.put("items",JSONArray().put(JSONObject().put("id","edge").put("name","Microsoft Edge")))
                         "storage"->result.put("drives",JSONArray()).put("home","C:\\notes")
                         "ls"->result.put("path","C:\\notes").put("items",JSONArray().put(JSONObject().put("name","test.bat").put("dir",false)).put(JSONObject().put("name","test.vbs").put("dir",false)))
-                        "scripts"->result.put("items",JSONArray())
+                        "scripts"->result.put("items",JSONArray().apply { if(showScriptJob)put(JSONObject().put("id","script-entry").put("path","C:\\notes\\test.bat").put("status","running")) })
+                        "capabilities"->result.put("features",JSONArray().put("recordings"))
+                        "recordings"->{
+                            when(q.optString("action")){"stop"->recordingState="completed";"delete"->recordingState=""}
+                            result.put("directory","C:\\Recordings").put("microphones",JSONArray()).put("cameras",JSONArray())
+                                .put("recordings",JSONArray().apply { if(recordingState.isNotEmpty())put(JSONObject().put("id","recording-entry").put("mode","audio").put("status",recordingState).put("created",1).put("size",128).put("seconds",300)) })
+                        }
                     }
                     requests.add(q);writer.write(result.toString()+"\n");writer.flush()
                 }

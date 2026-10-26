@@ -41,7 +41,7 @@ object ScriptJobsDialog {
             detail.setOnShowListener {
                 detail.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                     activity.lifecycleScope.launch {
-                        runCatching { pinnedCall(client,"scripts",JSONObject().put("action","cancel").put("id",id)) }
+                        runCatching { pinnedCall(client,"scripts",JSONObject().put("action","cancel").put("job_id",id)) }
                             .onSuccess { actionError="" }.onFailure { actionError="停止失败：${it.message}";status.text=it.message }
                     }
                 }

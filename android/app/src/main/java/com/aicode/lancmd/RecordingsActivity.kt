@@ -182,7 +182,7 @@ class RecordingsActivity : FeatureActivity() {
         if (reason.isNotEmpty()) records.addView(label(reason, 12f, R.color.warn))
         if (record.has("error")) records.addView(label(record.getString("error"), 12f, R.color.danger))
         if (active) records.addView(button("停止录制") {
-            task { pinnedCall(origin, "recordings", JSONObject().put("action", "stop").put("id", record.getString("id"))); refresh() }
+            task { pinnedCall(origin, "recordings", JSONObject().put("action", "stop").put("recording_id", record.getString("id"))); refresh() }
         }.apply { isEnabled = state != "stopping" })
         else {
             val row = LinearLayout(this)
@@ -195,7 +195,7 @@ class RecordingsActivity : FeatureActivity() {
             row.addView(button("删除") {
                 AlertDialog.Builder(this).setTitle("删除电脑上的录制文件？").setMessage("删除后无法恢复。")
                     .setNegativeButton("取消", null).setPositiveButton("删除") { _, _ ->
-                        task { pinnedCall(origin, "recordings", JSONObject().put("action", "delete").put("id", record.getString("id"))); refresh() }
+                        task { pinnedCall(origin, "recordings", JSONObject().put("action", "delete").put("recording_id", record.getString("id"))); refresh() }
                     }.show()
             }, LinearLayout.LayoutParams(0, -2, 1f))
             records.addView(row)

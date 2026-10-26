@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import threading
+import tempfile
 import time
 import uuid
 
@@ -58,9 +59,35 @@ def script_command(path):
         prefix=[str(Path(os.environ.get("WINDIR",r"C:\Windows"))/"System32"/"cmd.exe"),"/d","/q","/v:off","/s","/c"]
         return subprocess.list2cmdline(prefix)+' ""%LANCMD_SCRIPT_FILE%""',env
     cscript=str(Path(os.environ.get("WINDIR",r"C:\Windows"))/"System32"/"cscript.exe")
-    # CScript is a console host, hidden by CREATE_NO_WINDOW. Its batch flag
-    # suppresses WScript.Echo as well as errors, so retain normal redirected I/O.
-    return [cscript,"//I","//Nologo","//U","//T:300",str(path)],env
+    # Batch mode prevents WSH alerts and input prompts. Scripts can return text
+    # with WScript.StdOut/StdErr; WScript.Echo is suppressed in batch mode.
+    # Select the engine explicitly instead of relying on .vbs file association.
+    return [cscript,"//B","//Nologo","//U","//E:VBScript","//T:300",str(path)],env
+
+
+def check_vbscript(run=None):
+    """Prove the installed host executes VBScript before starting user code.
+
+    New Windows builds may retain cscript.exe without a working VBScript engine.
+    In particular, an exit status of zero alone is not proof that code ran.
+    This fixed probe neither changes policies nor installs Windows components.
+    """
+    run=run or subprocess.run
+    token="LanCmd-VBScript-check"
+    try:
+        with tempfile.TemporaryDirectory(prefix="LanCmd-vbs-check-") as directory:
+            probe=Path(directory)/"check.vbs"
+            probe.write_bytes(('WScript.StdOut.WriteLine "'+token+'"\r\nWScript.Quit 37\r\n').encode("ascii"))
+            command,env=script_command(probe)
+            command=["//T:5" if option=="//T:300" else option for option in command]
+            result=run(command,cwd=directory,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                creationflags=0x08000000 if os.name=="nt" else 0,timeout=10)
+            if result.returncode==37 and token.encode("utf-16-le") in result.stdout:
+                return
+            detail="CScript 返回码 %s，输出 %s/%s 字节" % (result.returncode,len(result.stdout),len(result.stderr))
+    except (OSError,subprocess.SubprocessError) as exc:
+        detail=str(exc)[:300]
+    raise ValueError("VBScript 运行组件未通过执行检查（%s）；用户脚本未启动。请在电脑上检查 VBScript 可选功能和系统脚本策略。LanCmd 不会自动安装组件或更改策略。" % detail)
 
 
 def read_available(stream):
@@ -85,7 +112,7 @@ class ScriptRunner:
             with self.lock:
                 if action=="list":return {"items":[dict(j["data"]) for j in reversed(list(self.jobs.values())) if j["owner"]==state.client_id]}
                 if action=="cancel":
-                    job=self.jobs.get(q.get("id"))
+                    job=self.jobs.get(q.get("job_id"))
                     if not job or job["owner"]!=state.client_id:raise ValueError("脚本任务不存在或属于其他手机")
                     job["cancel"].set();return {"cancelled":True}
                 if action!="run":raise ValueError("无效的脚本任务操作")
@@ -105,6 +132,8 @@ class ScriptRunner:
     def _run(self,job,path):
         process=None;group=None;normal=False;data=job["data"]
         try:
+            if job["cancel"].is_set():data["status"]="cancelled";return
+            if path.suffix.lower()==".vbs":check_vbscript()
             command,env=script_command(path)
             if job["cancel"].is_set():data["status"]="cancelled";return
             process=self.popen(command,cwd=str(path.parent),env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,bufsize=0,
@@ -143,6 +172,8 @@ class ScriptRunner:
             with self.lock:
                 data.update(code=code,out=decode(output),err=decode(errors),out_bytes=len(output),err_bytes=len(errors))
                 if data["status"]=="running":data["status"]="completed" if code==0 else "failed"
+                if code and not data["err"] and path.suffix.lower()==".vbs":
+                    data["err"]="VBScript 退出码：%s。批处理模式不显示脚本提示框或交互式错误。" % code
         except Exception as exc:
             with self.lock:data.update(status="failed",err=str(exc)[:2000])
         finally:

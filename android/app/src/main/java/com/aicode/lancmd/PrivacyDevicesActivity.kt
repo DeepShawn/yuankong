@@ -41,10 +41,10 @@ class PrivacyDevicesActivity : FeatureActivity() {
                 row.addView(control(if(enabled)"停用设备" else "启用设备",admin && item.optInt("problem") in listOf(0,22)) {
                     AlertDialog.Builder(this@PrivacyDevicesActivity).setTitle(if(enabled)"停用此设备？" else "启用此设备？")
                         .setMessage("${item.getString("name")}\n\n${if(enabled)"将影响所有应用，正在使用设备的录制可能失败。" else "启用后仍需符合 Windows 隐私权限；不会自动授予应用访问权限。"}")
-                        .setNegativeButton("取消",null).setPositiveButton("确认") { _,_->operate(JSONObject().put("action","set_enabled").put("id",item.getString("id")).put("enabled",!enabled)) }.show()
+                        .setNegativeButton("取消",null).setPositiveButton("确认") { _,_->operate(JSONObject().put("action","set_enabled").put("device_id",item.getString("id")).put("enabled",!enabled)) }.show()
                 },LinearLayout.LayoutParams(0,-2,1f))
                 if(mic)row.addView(control(if(item.optBoolean("muted"))"取消静音" else "静音麦克风",enabled && item.has("muted")) {
-                    operate(JSONObject().put("action","mute").put("id",item.getString("id")).put("muted",!item.optBoolean("muted")))
+                    operate(JSONObject().put("action","mute").put("device_id",item.getString("id")).put("muted",!item.optBoolean("muted")))
                 },LinearLayout.LayoutParams(0,-2,1f))
                 items.addView(row)
                 if(item.has("audio_error"))items.addView(label(item.getString("audio_error"),12f,R.color.dim))

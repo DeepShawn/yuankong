@@ -144,7 +144,7 @@ class RegistryActivity : FeatureActivity() {
             val item=items.getJSONObject(index)
             AlertDialog.Builder(this@RegistryActivity).setTitle("恢复到该次修改前？").setMessage("${labels[index]}\n当前值必须仍与该次修改结果相同，外部变化时停止恢复。")
                 .setNegativeButton("取消",null).setPositiveButton("恢复") { _,_-> task {
-                    pinnedCall(origin,"registry",JSONObject().put("action","restore").put("id",item.getString("id")));browse(current)
+                    pinnedCall(origin,"registry",JSONObject().put("action","restore").put("backup_id",item.getString("id")));browse(current)
                 } }.show()
         }.show()
     }

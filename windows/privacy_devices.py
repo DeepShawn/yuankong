@@ -9,6 +9,9 @@ import time
 from touch_guard import TouchDevices
 from system_controls import endpoint_audio
 
+CM_DISABLE_UI_NOT_OK = 0x00000004
+CM_DISABLE_PERSIST = 0x00000008
+
 INVENTORY=r'''
 $ErrorActionPreference='Stop';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $items=@(foreach($d in @(Get-PnpDevice -PresentOnly)) {
@@ -65,7 +68,7 @@ class PrivacyHardware(TouchDevices):
     def set_enabled(self,instance,enabled):
         node=self.node(instance)
         # Explicit persistent device disable, unlike the temporary touch guard.
-        result=self.cm.CM_Enable_DevNode(node,0) if enabled else self.cm.CM_Disable_DevNode(node,5)
+        result=self.cm.CM_Enable_DevNode(node,0) if enabled else self.cm.CM_Disable_DevNode(node,CM_DISABLE_UI_NOT_OK|CM_DISABLE_PERSIST)
         if result:raise RuntimeError("设备启停失败，需要管理员权限或驱动支持 (0x%X)"%result)
 
 
@@ -94,7 +97,7 @@ class PrivacyDevices:
                                 item.update(response)
                             except (OSError,RuntimeError,ValueError) as exc:item["audio_error"]=str(exc)
                     return {"items":items,"admin":bool(self.admin())}
-                item=next((v for v in items if v["id"]==q.get("id")),None)
+                item=next((v for v in items if v["id"]==q.get("device_id")),None)
                 if not item:raise ValueError("设备已断开或不属于可管理的摄像头/麦克风，请刷新")
                 if item.get("kind") not in ("camera","microphone"):
                     raise ValueError("不支持控制此类设备")

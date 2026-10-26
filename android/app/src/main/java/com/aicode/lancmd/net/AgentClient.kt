@@ -120,6 +120,9 @@ class AgentClient(val host: String, val port: Int) {
         params: JSONObject = JSONObject(),
         timeoutMs: Long = 30_000
     ): JSONObject = withContext(Dispatchers.IO) {
+        // The envelope owns these fields. Object IDs must use a specific name
+        // (device_id, lock_id, etc.) so replies retain the numeric request ID.
+        require(!params.has("id") && !params.has("cmd")) { "请求参数不能覆盖协议字段 id 或 cmd" }
         if (closed) throw IOException("未连接")
         val id = serial.incrementAndGet()
         val req = JSONObject().put("id", id).put("cmd", cmd)
