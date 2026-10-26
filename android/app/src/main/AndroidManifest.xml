@@ -41,5 +41,11 @@
         <activity android:name=".CommandsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".RecordingsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".GesturesActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".TextEditorActivity" android:exported="false" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|screenSize|keyboardHidden" />
+        <activity android:name=".AppLocksActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".TaskManagerActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".RegistryActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".BrowserActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".PrivacyDevicesActivity" android:exported="false" />
     </application>
 </manifest>

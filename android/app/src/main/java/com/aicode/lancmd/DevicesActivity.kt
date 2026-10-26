@@ -23,6 +23,7 @@ class DevicesActivity : FeatureActivity() {
         origin = runCatching { ConnectionManager.sessionClient() }.getOrNull()
         refresh = button("刷新设备与策略") { load() }
         body.addView(refresh)
+        body.addView(button("隐私设备 · 摄像头 / 麦克风") { startActivity(android.content.Intent(this,PrivacyDevicesActivity::class.java)) })
         policies = panel()
         devices = panel()
         load()

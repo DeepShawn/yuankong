@@ -122,6 +122,9 @@ def file_request(q, error):
     try:
         path = checked_path(q.get("path"))
         action = q.get("action")
+        if action in ("text_read", "text_create", "text_write"):
+            from text_editor import text_request
+            return text_request(path, q)
         if action == "preview":
             return dict(preview(path), path=str(path))
         if action == "extract":

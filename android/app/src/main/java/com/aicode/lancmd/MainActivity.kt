@@ -174,6 +174,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            findViewById<View>(R.id.homeTools).visibility=if(insets.isVisible(WindowInsetsCompat.Type.ime()))View.GONE else View.VISIBLE
             view.setPadding(padding[0] + bars.left, padding[1] + bars.top, padding[2] + bars.right,
                 padding[3] + maxOf(bars.bottom, ime.bottom))
             insets
@@ -231,6 +232,20 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     // ------------------------------------------------------------ 快捷操作
 
     private fun buildActions() {
+        val management=findViewById<LinearLayout>(R.id.managementCards)
+        listOf(
+            Action(R.drawable.ic_process,"任务管理器") { openFeature(TaskManagerActivity::class.java) },
+            Action(R.drawable.ic_terminal,"注册表编辑器") { openFeature(RegistryActivity::class.java) },
+            Action(R.drawable.ic_browser,"浏览器") { openFeature(BrowserActivity::class.java) },
+            Action(R.drawable.ic_lock,"应用锁") { openFeature(AppLocksActivity::class.java) }
+        ).forEach { action->
+            val item=layoutInflater.inflate(R.layout.view_action,management,false)
+            item.findViewById<ImageView>(R.id.ivIcon).setImageResource(action.icon)
+            item.findViewById<TextView>(R.id.tvLabel).text=action.label
+            item.contentDescription=action.label
+            item.setOnClickListener { if(ConnectionManager.isConnected())action.body() else toast("请先连接电脑") }
+            management.addView(item)
+        }
         findViewById<View>(R.id.cardDesktop).setOnClickListener {
             if (!ConnectionManager.isConnected()) {
                 toast("未连接，正在重连…")
@@ -855,6 +870,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         popup.menu.add(0, 30, 5, "外观主题")
         popup.menu.add(0, 31, 5, "录音 / 录屏 / 摄像头录制")
         popup.menu.add(0, 32, 5, "手势记录 / 延迟播放")
+        popup.menu.add(0, 33, 5, "隐私设备 · 摄像头 / 麦克风")
         popup.menu.add(0, 9, 6, "查看崩溃日志")
         popup.menu.add(0, 8, 7, getString(R.string.menu_send_file))
         popup.menu.add(0, 7, 7, if (LanCmdService.isRunning) "关闭后台常驻" else "开启后台常驻")
@@ -881,6 +897,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                 30 -> ThemeDialog(this).show()
                 31 -> openFeature(RecordingsActivity::class.java)
                 32 -> openFeature(GesturesActivity::class.java)
+                33 -> openFeature(PrivacyDevicesActivity::class.java)
                 20 -> doLock()
                 21 -> confirmPower("restart", "重启")
                 22 -> confirmPower("shutdown", "关机")

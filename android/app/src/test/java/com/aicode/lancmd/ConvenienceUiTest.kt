@@ -120,7 +120,7 @@ class ConvenienceUiTest {
             val controller = Robolectric.buildActivity(DevicesActivity::class.java).setup()
             val root = controller.get().window.decorView
             waitUntil { buttons(root).any { it.text == "锁定" } }
-            assertTrue(buttons(root).filter { it.text != "刷新设备与策略" }.all { !it.isEnabled })
+            assertTrue(buttons(root).filter { it.text != "刷新设备与策略" && it.text != "隐私设备 · 摄像头 / 麦克风" }.all { !it.isEnabled })
             stub.admin = true
             buttons(root).single { it.text == "刷新设备与策略" }.performClick()
             waitUntil { buttons(root).any { it.text == "锁定" && it.isEnabled } }

@@ -12,7 +12,7 @@ suspend fun pinnedCall(client: AgentClient?, command: String, params: JSONObject
     val result = client.call(command, params, timeout)
     if (!result.optBoolean("ok")) {
         val error = result.optString("error", "操作失败")
-        throw IOException(if (error.contains("未知命令")) "请完整更新 Windows 接收端至 1.9.0" else error)
+        throw IOException(if (error.contains("未知命令")) "请完整更新 Windows 接收端至最新版" else error)
     }
     return result
 }

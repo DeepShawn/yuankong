@@ -33,6 +33,19 @@ import java.util.Date
 import kotlin.coroutines.coroutineContext
 
 class StorageActivity : FeatureActivity() {
+    private val origin by lazy { runCatching { ConnectionManager.sessionClient() }.getOrNull() }
+    private val sourceKey by lazy { Prefs.target(this)?.agentId?.takeIf { it.isNotBlank() } ?: "${origin?.host}:${origin?.port}" }
+    private var sourceChanged = false
+    private fun checkSource() {
+        if (sourceChanged || origin == null || origin?.closed == true || runCatching { ConnectionManager.sessionClient() }.getOrNull() !== origin)
+            throw java.io.IOException("电脑连接已改变，请重新打开文件管理；未向新电脑发送操作")
+    }
+    private suspend fun storageCall(command: String, params: JSONObject = JSONObject()): JSONObject {
+        checkSource()
+        return pinnedCall(origin, command, params)
+    }
+    private fun sourceReady(): Boolean = try { checkSource(); true } catch(e: Exception) { status(e.message ?: "连接已改变",true); false }
+
     private var path = ""
     private var pendingDownload = ""
     private var uploadTarget = ""
@@ -59,8 +72,9 @@ class StorageActivity : FeatureActivity() {
                     .setMessage("目标：$target\n\n${names.take(8).joinToString("\n")}${if (names.size > 8) "\n…" else ""}\n\n目标目录中同名文件会被替换。")
                     .setNegativeButton("取消", null).setPositiveButton("上传") { _, _ ->
                         startTransfer("上传 ${uris.size} 个文件") { progress ->
+                            checkSource()
                             uris.zip(names).forEach { (uri, name) ->
-                                FileTransfer.upload(this, uri, joinPath(target, name), progress)
+                                FileTransfer.uploadTo(this, uri, joinPath(target, name), origin, progress)
                             }
                         }
                     }.show()
@@ -74,7 +88,8 @@ class StorageActivity : FeatureActivity() {
         if (uri != null && source.isNotEmpty()) startTransfer("下载 ${source.substringAfterLast('\\').substringAfterLast('/')}") { progress ->
             val cached = File.createTempFile("lancmd-download-", ".tmp", cacheDir)
             try {
-                FileTransfer.download(source, cached, progress)
+                checkSource()
+                FileTransfer.downloadFrom(source, cached, origin, progress)
                 withContext(Dispatchers.IO) {
                     contentResolver.openOutputStream(uri)?.use { output ->
                         cached.inputStream().use { input ->
@@ -99,6 +114,8 @@ class StorageActivity : FeatureActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        origin; sourceKey
+        sourceChanged = savedInstanceState?.getString("sourceKey")?.let { it != sourceKey } ?: false
         path = savedInstanceState?.getString("path") ?: intent.getStringExtra("path") ?: ""
         pendingDownload = savedInstanceState?.getString("download") ?: ""
         uploadTarget = savedInstanceState?.getString("upload") ?: ""
@@ -108,7 +125,7 @@ class StorageActivity : FeatureActivity() {
         breadcrumbs = LinearLayout(this)
         body.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(breadcrumbs) })
         val actions = LinearLayout(this)
-        listOf("上一级" to { load(parentOf(path)) }, "刷新" to { load(path) }, "新建" to { renameOrCreate(null) },
+        listOf("上一级" to { load(parentOf(path)) }, "刷新" to { load(path) }, "新建" to { newItem() },
             "上传" to {
                 if (transfer?.isCompleted != false && path.isNotBlank()) {
                     uploadTarget = path
@@ -118,6 +135,7 @@ class StorageActivity : FeatureActivity() {
             actions.addView(button(name, callback).apply { minWidth = 0; textSize = 12f }, LinearLayout.LayoutParams(0, -2, 1f))
         }
         body.addView(actions)
+        body.addView(button("脚本任务 · 运行记录") { if(sourceReady())ScriptJobsDialog.show(this,origin) })
         search = EditText(this).apply {
             hint = "搜索当前目录"
             setSingleLine(true)
@@ -144,7 +162,7 @@ class StorageActivity : FeatureActivity() {
         }
         body.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
         task {
-            val storage = request("storage")
+            val storage = storageCall("storage")
             val drives = storage.getJSONArray("drives")
             for (i in 0 until drives.length()) disk(drives.getJSONObject(i))
             load(path.ifBlank { storage.optString("home") })
@@ -152,6 +170,7 @@ class StorageActivity : FeatureActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("sourceKey", sourceKey)
         outState.putString("path", path)
         outState.putString("download", pendingDownload)
         outState.putString("upload", uploadTarget)
@@ -180,7 +199,7 @@ class StorageActivity : FeatureActivity() {
         loading?.cancel()
         loading = task {
             status("正在读取目录…")
-            val result = request("ls", JSONObject().put("path", target))
+            val result = storageCall("ls", JSONObject().put("path", target))
             path = result.getString("path")
             val items = result.getJSONArray("items")
             entries = (0 until items.length()).map { items.getJSONObject(it) }
@@ -216,10 +235,15 @@ class StorageActivity : FeatureActivity() {
     }
 
     private fun fileActions(item: JSONObject, anchor: View) {
+        if (!sourceReady()) return
         val menu = PopupMenu(this, anchor)
-        val client = runCatching { ConnectionManager.sessionClient() }.getOrNull()
+        val client = origin
         menu.menu.add("在电脑打开")
         if (!item.optBoolean("dir")) menu.menu.add("预览")
+        if (!item.optBoolean("dir")) menu.menu.add("编辑文本")
+        val scriptType=item.optString("name").substringAfterLast('.',"").lowercase()
+        if (!item.optBoolean("dir") && scriptType in listOf("bat","cmd","vbs")) menu.menu.add("运行 ${scriptType.uppercase()}")
+        if (!item.optBoolean("dir") && item.optString("name").endsWith(".exe",true)) menu.menu.add("应用锁")
         if (!item.optBoolean("dir") && item.optString("name").endsWith(".zip", true)) menu.menu.add("解压 ZIP")
         if (!item.optBoolean("dir")) menu.menu.add("下载到手机")
         menu.menu.add("重命名")
@@ -234,6 +258,9 @@ class StorageActivity : FeatureActivity() {
                         status("已向电脑发送打开请求")
                     } }.show()
                 "预览" -> FilePreview.show(this, client, selected)
+                "编辑文本" -> task { checkSource(); startActivity(android.content.Intent(this@StorageActivity,TextEditorActivity::class.java).putExtra("path",selected)) }
+                "运行 BAT","运行 CMD","运行 VBS" -> ScriptJobsDialog.show(this,client,selected)
+                "应用锁" -> task { checkSource(); startActivity(android.content.Intent(this@StorageActivity,AppLocksActivity::class.java).putExtra("path",selected)) }
                 "解压 ZIP" -> {
                     val destination = EditText(this).apply {
                         setSingleLine(); setText(joinPath(path, item.getString("name").dropLast(4) + "_extracted"))
@@ -264,7 +291,7 @@ class StorageActivity : FeatureActivity() {
                 "删除" -> AlertDialog.Builder(this).setTitle("删除${if (item.optBoolean("dir")) "目录" else "文件"}？")
                     .setMessage("$selected\n\n${if (item.optBoolean("dir")) "目录中的全部内容也会删除。" else ""}此操作无法撤销。")
                     .setNegativeButton("取消", null).setPositiveButton("删除") { _, _ -> task {
-                        request("rm", JSONObject().put("path", selected)); load(path)
+                        storageCall("rm", JSONObject().put("path", selected)); load(path)
                     } }.show()
             }
             true
@@ -284,13 +311,47 @@ class StorageActivity : FeatureActivity() {
                 if (!validName(name)) { text.error = "文件名不能包含 \\ / : * ? \" < > | 或控制字符"; return@setOnClickListener }
                 dialog.dismiss()
                 task {
-                    if (item == null) request("mkdir", JSONObject().put("path", joinPath(base, name)))
-                    else request("rename", JSONObject().put("path", joinPath(base, original!!)).put("to", joinPath(base, name)))
+                    if (item == null) storageCall("mkdir", JSONObject().put("path", joinPath(base, name)))
+                    else storageCall("rename", JSONObject().put("path", joinPath(base, original!!)).put("to", joinPath(base, name)))
                     load(base)
                 }
             }
         }
         dialog.show()
+    }
+
+    private fun newItem() {
+        if (!sourceReady()) return
+        val names = listOf("文件夹","文本文档 (.txt)","批处理 (.bat)","VBScript (.vbs)","命令脚本 (.cmd)","PowerShell (.ps1)","Markdown (.md)","JSON (.json)","配置文件 (.ini)","其他文本文件")
+        val suffixes = listOf("","txt","bat","vbs","cmd","ps1","md","json","ini","")
+        AlertDialog.Builder(this).setTitle("新建").setItems(names.toTypedArray()) { _, index ->
+            if (index == 0) { renameOrCreate(null); return@setItems }
+            val client = origin
+            val base = path
+            val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18),0,dp(18),0) }
+            val name = EditText(this).apply { setSingleLine(); setText(if (suffixes[index].isEmpty()) "新文件.txt" else "新建文件.${suffixes[index]}"); contentDescription = "新文件名称" }
+            val format = android.widget.Spinner(this).apply {
+                adapter = android.widget.ArrayAdapter(this@StorageActivity,android.R.layout.simple_spinner_dropdown_item,TextEditorActivity.ENCODING_NAMES)
+                setSelection(when(suffixes[index]) { "bat","cmd" -> 2; "vbs" -> 4; else -> 0 })
+            }
+            content.addView(name); content.addView(label("编码（可在编辑页调整）",12f,R.color.dim)); content.addView(format)
+            val dialog = AlertDialog.Builder(this).setTitle("新建文本文件").setMessage("创建后直接进入编辑。BAT/CMD 中文通常使用 GBK，VBS 建议 UTF-16 LE；不会自动运行脚本。").setView(content)
+                .setNegativeButton("取消",null).setPositiveButton("创建并编辑",null).create()
+            dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val filename = name.text.toString().trim()
+                if (!validName(filename)) { name.error = "请输入兼容 Windows 的文件名"; return@setOnClickListener }
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+                task { try {
+                    checkSource()
+                    val result = pinnedCall(client,"files",JSONObject().put("action","text_create").put("path",joinPath(base,filename)).put("text","")
+                        .put("encoding",TextEditorActivity.ENCODINGS[format.selectedItemPosition]).put("newline","crlf"))
+                    checkSource()
+                    dialog.dismiss(); load(base)
+                    startActivity(android.content.Intent(this@StorageActivity,TextEditorActivity::class.java).putExtra("path",result.getString("path")).putExtra("encoding",TextEditorActivity.ENCODINGS[format.selectedItemPosition]))
+                } finally { dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true } }
+            } }
+            dialog.show()
+        }.show()
     }
 
     private fun validName(name: String) = name.isNotBlank() && name !in listOf(".", "..") &&

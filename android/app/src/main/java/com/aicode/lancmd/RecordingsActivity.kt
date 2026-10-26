@@ -99,6 +99,7 @@ class RecordingsActivity : FeatureActivity() {
         settings.addView(button("刷新麦克风 / 摄像头") { loadDevices() })
         start = primary(button("开始录制") { confirmStart() }).apply { isEnabled = false }
         settings.addView(start)
+        body.addView(button("管理摄像头 / 麦克风启停") { startActivity(Intent(this,PrivacyDevicesActivity::class.java)) })
         body.addView(label("到时自动停止，也可在下方手动停止。离开此页或手机断线仍录制，到所选时长结束；退出电脑接收端会停止录制。单文件上限约 1 GB，空间不足会提前停止。遵循 Windows 隐私权限和设备使用指示。", 12f, R.color.dim))
         val actions = LinearLayout(this)
         actions.addView(button("刷新列表") { refresh() }, LinearLayout.LayoutParams(0, -2, 1f))
@@ -181,7 +182,7 @@ class RecordingsActivity : FeatureActivity() {
         if (reason.isNotEmpty()) records.addView(label(reason, 12f, R.color.warn))
         if (record.has("error")) records.addView(label(record.getString("error"), 12f, R.color.danger))
         if (active) records.addView(button("停止录制") {
-            task { pinnedCall(origin, "recordings", JSONObject().put("action", "stop").put("id", record.getString("id"))); refresh() }
+            task { pinnedCall(origin, "recordings", JSONObject().put("action", "stop").put("recording_id", record.getString("id"))); refresh() }
         }.apply { isEnabled = state != "stopping" })
         else {
             val row = LinearLayout(this)
@@ -194,7 +195,7 @@ class RecordingsActivity : FeatureActivity() {
             row.addView(button("删除") {
                 AlertDialog.Builder(this).setTitle("删除电脑上的录制文件？").setMessage("删除后无法恢复。")
                     .setNegativeButton("取消", null).setPositiveButton("删除") { _, _ ->
-                        task { pinnedCall(origin, "recordings", JSONObject().put("action", "delete").put("id", record.getString("id"))); refresh() }
+                        task { pinnedCall(origin, "recordings", JSONObject().put("action", "delete").put("recording_id", record.getString("id"))); refresh() }
                     }.show()
             }, LinearLayout.LayoutParams(0, -2, 1f))
             records.addView(row)

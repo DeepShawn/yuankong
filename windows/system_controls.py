@@ -14,7 +14,7 @@ class GUID(ctypes.Structure):
 
 def _check(hr):
     if hr < 0:
-        raise RuntimeError("无法访问电脑音频设备 (0x%08X)，请检查默认输出设备" % (hr & 0xffffffff))
+        raise RuntimeError("无法访问电脑音频设备 (0x%08X)，请检查设备与系统权限" % (hr & 0xffffffff))
 
 
 def _method(pointer, index, *types):
@@ -22,7 +22,7 @@ def _method(pointer, index, *types):
     return ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, *types)(vtable[index])
 
 
-def endpoint_audio(volume=None, muted=None):
+def endpoint_audio(volume=None, muted=None, device_id=None, flow=0):
     """Initialize COM on this RPC thread and always release its endpoint objects."""
     ole = ctypes.WinDLL("ole32")
     ole.CoInitializeEx.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
@@ -42,8 +42,12 @@ def endpoint_audio(volume=None, muted=None):
                                    ctypes.byref(GUID("A95664D2-9614-4F35-A746-DE8DB63617E6")), ctypes.byref(enumerator)))
         objects.append(enumerator)
         device = ctypes.c_void_p()
-        _check(_method(enumerator, 4, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))(
-            enumerator, 0, 1, ctypes.byref(device)))
+        if device_id is None:
+            _check(_method(enumerator, 4, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))(
+                enumerator, flow, 1, ctypes.byref(device)))
+        else:
+            _check(_method(enumerator, 5, ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_void_p))(
+                enumerator, device_id, ctypes.byref(device)))
         objects.append(device)
         endpoint = ctypes.c_void_p()
         _check(_method(device, 3, ctypes.POINTER(GUID), ctypes.c_ulong, ctypes.c_void_p,

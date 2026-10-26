@@ -9,6 +9,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
+import java.net.ServerSocket
 import java.net.InetSocketAddress
 import java.net.Socket
 
@@ -29,6 +30,37 @@ class AgentClientIntegrationTest {
         val c = AgentClient("127.0.0.1", TCP_PORT)
         c.connect()
         return c
+    }
+
+    @Test
+    fun reservedEnvelopeFieldsAreRejectedBeforeSendingAndDoNotConsumeRequestIds() = runBlocking {
+        ServerSocket(0).use { server ->
+            val received = java.util.concurrent.CompletableFuture<JSONObject>()
+            val worker = Thread {
+                try { server.accept().use { socket ->
+                    val request = JSONObject(socket.getInputStream().bufferedReader().readLine())
+                    received.complete(request)
+                    socket.getOutputStream().bufferedWriter().apply {
+                        write(JSONObject().put("id",request.getInt("id")).put("ok",true).toString()+"\n");flush()
+                    }
+                } } catch(error:Exception) { received.completeExceptionally(error) }
+            }.apply { isDaemon=true;start() }
+            val client=AgentClient("127.0.0.1",server.localPort)
+            try {
+                client.connect()
+                for(field in listOf("id","cmd")) {
+                    try { client.call("privacy_devices",JSONObject().put(field,"wrong"));org.junit.Assert.fail("Reserved $field must be rejected") }
+                    catch(expected:IllegalArgumentException) { assertTrue(expected.message.orEmpty().contains("协议字段")) }
+                    assertEquals(0,client.pendingRequests())
+                    assertFalse(client.closed)
+                }
+                assertTrue(client.call("privacy_devices",JSONObject().put("device_id","microphone-endpoint")).getBoolean("ok"))
+                val request=received.get(2,java.util.concurrent.TimeUnit.SECONDS)
+                assertEquals(1,request.getInt("id"));assertEquals("privacy_devices",request.getString("cmd"))
+                assertEquals("microphone-endpoint",request.getString("device_id"))
+                assertEquals(0,client.pendingRequests())
+            } finally { client.close();worker.join(2000) }
+        }
     }
 
     @Test

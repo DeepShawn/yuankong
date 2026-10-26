@@ -76,6 +76,7 @@ class MediaActivity : FeatureActivity() {
         listOf(start, stop).forEach { buttons.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
         body.addView(buttons)
         body.addView(save)
+        if(camera)body.addView(button("摄像头 / 麦克风设备管理") { startActivity(android.content.Intent(this,PrivacyDevicesActivity::class.java)) })
         body.addView(button(if (camera) "录制摄像头视频" else "录制屏幕视频") {
             task {
                 stream?.cancelAndJoin()
