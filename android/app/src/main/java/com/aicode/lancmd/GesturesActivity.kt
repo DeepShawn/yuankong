@@ -32,7 +32,7 @@ class GesturesActivity : FeatureActivity() {
         super.onCreate(savedInstanceState)
         origin
         setup("手势记录板", "记录仅在手机本地进行；播放才会控制电脑鼠标，空白区域映射电脑整个桌面。", scrollable = true)
-        mode = CheckBox(this).apply { text = "记录左键点击 / 拖动（关闭后仅移动鼠标）"; isChecked = true; setTextColor(color(R.color.text)) }
+        mode = styleCheck(CheckBox(this).apply { text = "记录左键点击 / 拖动（关闭后仅移动鼠标）"; isChecked = true })
         body.addView(mode)
         board = GestureBoard(this)
         body.addView(board, LinearLayout.LayoutParams(-1, dp(300)))
@@ -48,7 +48,7 @@ class GesturesActivity : FeatureActivity() {
         saved.addView(button("手势列表") { chooseGesture() }, LinearLayout.LayoutParams(0, -2, 1f))
         body.addView(saved)
         body.addView(label("延迟播放（秒，0 为立即）", 12f, R.color.dim))
-        delaySeconds = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; hint = "延迟秒数（0 为立即）"; setText("0"); contentDescription = "手势延迟秒数" }
+        delaySeconds = styleInput(EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; hint = "延迟秒数（0 为立即）"; setText("0"); contentDescription = "手势延迟秒数" })
         body.addView(delaySeconds)
         val controls = LinearLayout(this)
         play = primary(button("在电脑播放") { confirmPlay() })
@@ -79,7 +79,7 @@ class GesturesActivity : FeatureActivity() {
         if (events.length() == 0) { status("请先记录手势", true); return }
         val data = saved()
         if (data.length() >= 20) { status("手势列表已满，请先删除旧手势", true); return }
-        val input = EditText(this).apply { setSingleLine(); setText("手势 ${DateFormat.getTimeInstance().format(Date())}") }
+        val input = styleInput(EditText(this).apply { setSingleLine(); setText("手势 ${DateFormat.getTimeInstance().format(Date())}") })
         AlertDialog.Builder(this).setTitle("保存本地手势").setView(input).setNegativeButton("取消", null)
             .setPositiveButton("保存") { _, _ ->
                 data.put(JSONObject().put("name", input.text.toString().trim().take(60).ifBlank { "未命名手势" }).put("events", events).put("aspect", board.aspect.toDouble()))

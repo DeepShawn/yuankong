@@ -29,10 +29,10 @@ class RegistryActivity : FeatureActivity() {
         super.onCreate(savedInstanceState);origin
         setup("注册表编辑器","直接管理电脑注册表；写入使用接收端已有权限，不自动提升权限。修改值前会备份到电脑。",scrollable=true)
         val controls=LinearLayout(this)
-        root=Spinner(this).apply { adapter=ArrayAdapter(this@RegistryActivity,android.R.layout.simple_spinner_dropdown_item,roots) }
-        view=Spinner(this).apply { adapter=ArrayAdapter(this@RegistryActivity,android.R.layout.simple_spinner_dropdown_item,listOf("64 位视图","32 位视图")) }
+        root=styleSpinner(Spinner(this).apply { adapter=ArrayAdapter(this@RegistryActivity,android.R.layout.simple_spinner_dropdown_item,roots) })
+        view=styleSpinner(Spinner(this).apply { adapter=ArrayAdapter(this@RegistryActivity,android.R.layout.simple_spinner_dropdown_item,listOf("64 位视图","32 位视图")) })
         controls.addView(root,LinearLayout.LayoutParams(0,-2,1f));controls.addView(view,LinearLayout.LayoutParams(0,-2,1f));body.addView(controls)
-        path=EditText(this).apply { hint="子项路径，如 Software";setSingleLine();contentDescription="注册表子项路径" };body.addView(path)
+        path=styleInput(EditText(this).apply { hint="子项路径，如 Software";setSingleLine();contentDescription="注册表子项路径" });body.addView(path,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(8) })
         row(body,listOf("打开" to { browse(JSONObject().put("root",roots[root.selectedItemPosition]).put("path",path.text.toString().trim().trim('\\')).put("view",if(view.selectedItemPosition==0)64 else 32)) },
             "上一级" to { browse(JSONObject(current.toString()).put("path",current.optString("path").substringBeforeLast('\\',""))) },"刷新" to { browse(current) }))
         currentLabel=label("",12f,R.color.accent).apply { setTextIsSelectable(true) };body.addView(currentLabel)
@@ -86,7 +86,7 @@ class RegistryActivity : FeatureActivity() {
     }
     private fun itRemoveLast(parent: LinearLayout) { if(parent.childCount>0)parent.removeViewAt(parent.childCount-1) }
     private fun createKey() {
-        val location=JSONObject(current.toString());val name=EditText(this).apply { setSingleLine();hint="子项名称" }
+        val location=JSONObject(current.toString());val name=styleInput(EditText(this).apply { setSingleLine();hint="子项名称" })
         AlertDialog.Builder(this).setTitle("新建注册表子项").setMessage("${location.getString("root")}\\${location.getString("path")}").setView(name)
             .setNegativeButton("取消",null).setPositiveButton("创建") { _,_-> task {
                 pinnedCall(origin,"registry",location.put("action","create_key").put("child",name.text.toString()));browse(current)
@@ -104,14 +104,14 @@ class RegistryActivity : FeatureActivity() {
         task {
             val loaded=if(existing!=null)pinnedCall(origin,"registry",JSONObject(location.toString()).put("action","get").put("name",existing)) else null
             val content=LinearLayout(this@RegistryActivity).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(16),0,dp(16),0) }
-            val name=EditText(this@RegistryActivity).apply { hint="值名称（留空为默认值）";setSingleLine();setText(existing.orEmpty());isEnabled=existing==null }
-            val type=Spinner(this@RegistryActivity).apply { adapter=ArrayAdapter(this@RegistryActivity,android.R.layout.simple_spinner_dropdown_item,types);setSelection(types.indexOf(loaded?.optString("type")).coerceAtLeast(0)) }
+            val name=styleInput(EditText(this@RegistryActivity).apply { hint="值名称（留空为默认值）";setSingleLine();setText(existing.orEmpty());isEnabled=existing==null })
+            val type=styleSpinner(Spinner(this@RegistryActivity).apply { adapter=ArrayAdapter(this@RegistryActivity,android.R.layout.simple_spinner_dropdown_item,types);setSelection(types.indexOf(loaded?.optString("type")).coerceAtLeast(0)) })
             if(loaded!=null && loaded.optString("type") !in types){status("不支持编辑 ${loaded.optString("type")} 类型",true);return@task}
-            val value=EditText(this@RegistryActivity).apply {
+            val value=styleInput(EditText(this@RegistryActivity).apply {
                 gravity=android.view.Gravity.TOP;minLines=3;maxLines=10;filters=arrayOf(InputFilter.LengthFilter(128*1024));contentDescription="注册表值数据"
                 hint="整数可用 0x；二进制用十六进制；多字符串每行一项"
                 setText(if(loaded?.optString("type")=="REG_MULTI_SZ")loaded.getJSONArray("data").let { a->(0 until a.length()).joinToString("\n") { a.getString(it) } } else loaded?.optString("data").orEmpty())
-            }
+            })
             content.addView(name);content.addView(type);content.addView(value)
             val dialog=AlertDialog.Builder(this@RegistryActivity).setTitle(if(existing==null)"新建注册表值" else "编辑注册表值")
                 .setMessage("${location.getString("root")}\\${location.getString("path")}\n请核对路径、类型和数据；修改会先保存恢复备份。").setView(content)

@@ -21,9 +21,9 @@ class BrowserActivity : FeatureActivity() {
         super.onCreate(savedInstanceState);origin
         setup("电脑浏览器","发送 HTTP / HTTPS 网址，由电脑浏览器打开。浏览器窗口会按打开网页的正常行为显示。",scrollable=true)
         val box=panel()
-        address=EditText(this).apply { hint="https://example.com";setSingleLine();inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI;contentDescription="电脑浏览器网址" }
-        browser=Spinner(this).apply { adapter=ArrayAdapter(this@BrowserActivity,android.R.layout.simple_spinner_dropdown_item,listOf("Windows 默认浏览器")) }
-        box.addView(address);box.addView(browser)
+        address=styleInput(EditText(this).apply { hint="https://example.com";setSingleLine();inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI;contentDescription="电脑浏览器网址" })
+        browser=styleSpinner(Spinner(this).apply { adapter=ArrayAdapter(this@BrowserActivity,android.R.layout.simple_spinner_dropdown_item,listOf("Windows 默认浏览器")) })
+        box.addView(address);box.addView(browser,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(8) })
         box.addView(primary(button("在电脑打开网址") { open(address.text.toString()) }))
         box.addView(button("刷新已安装浏览器") { discover() })
         box.addView(button("保存当前网址") { saveLink() })
@@ -49,7 +49,7 @@ class BrowserActivity : FeatureActivity() {
         val parsed=android.net.Uri.parse(value)
         if(parsed.scheme !in listOf("https","http") || parsed.host.isNullOrEmpty()) { address.error="请输入 HTTP / HTTPS 网址";return }
         val data=saved();if(data.length()>=50){status("最多保存 50 个网址",true);return}
-        val name=EditText(this).apply { setSingleLine();setText(parsed.host) }
+        val name=styleInput(EditText(this).apply { setSingleLine();setText(parsed.host) })
         AlertDialog.Builder(this).setTitle("网址名称").setView(name).setNegativeButton("取消",null).setPositiveButton("保存") { _,_->
             data.put(JSONObject().put("name",name.text.toString().take(80)).put("url",value));prefs.edit().putString("links",data.toString()).apply();render()
         }.show()

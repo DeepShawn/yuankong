@@ -83,18 +83,18 @@ class RecordingsActivity : FeatureActivity() {
         download = savedInstanceState?.getString("download")?.let { runCatching { JSONObject(it) }.getOrNull() }
         setup("录音 / 录屏 / 摄像头", "录制电脑上的麦克风、屏幕或摄像头，文件保存在电脑。", scrollable = true)
         val settings = panel()
-        fun spinner(names: List<String>) = Spinner(this).apply { adapter = ArrayAdapter(this@RecordingsActivity, android.R.layout.simple_spinner_dropdown_item, names) }
+        fun spinner(names: List<String>) = styleSpinner(Spinner(this).apply { adapter = ArrayAdapter(this@RecordingsActivity, android.R.layout.simple_spinner_dropdown_item, names) })
         mode = spinner(listOf("环境声音（WAV）", "屏幕视频（MP4）", "摄像头视频（MP4）"))
         mode.setSelection(when (intent.getStringExtra("kind")) { "screen" -> 1; "camera" -> 2; else -> 0 })
         settings.addView(mode)
-        audio = CheckBox(this).apply { text = "视频同时录制麦克风声音"; isChecked = true; setTextColor(color(R.color.text)) }
+        audio = styleCheck(CheckBox(this).apply { text = "视频同时录制麦克风声音"; isChecked = true })
         settings.addView(audio)
         settings.addView(label("麦克风", 12f, R.color.dim))
         microphone = spinner(listOf("Windows 默认录音设备")); settings.addView(microphone)
         settings.addView(label("摄像头（仅摄像头模式使用）", 12f, R.color.dim))
         camera = spinner(listOf("读取设备后选择")); settings.addView(camera)
         settings.addView(label("录制时长（秒，1–3600）", 12f, R.color.dim))
-        seconds = EditText(this).apply { hint = "录制时长，1–3600 秒"; inputType = InputType.TYPE_CLASS_NUMBER; setText("300"); contentDescription = "录制时长秒数" }
+        seconds = styleInput(EditText(this).apply { hint = "录制时长，1–3600 秒"; inputType = InputType.TYPE_CLASS_NUMBER; setText("300"); contentDescription = "录制时长秒数" })
         settings.addView(seconds)
         settings.addView(button("刷新麦克风 / 摄像头") { loadDevices() })
         start = primary(button("开始录制") { confirmStart() }).apply { isEnabled = false }

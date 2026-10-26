@@ -18,7 +18,7 @@ class AppLocksActivity : FeatureActivity() {
         super.onCreate(savedInstanceState);origin
         setup("应用锁","锁定所选 EXE，限制当前 Windows 用户启动；已运行的程序继续运行。",scrollable=true)
         val box=panel()
-        path=EditText(this).apply { hint="电脑上的 EXE 完整路径";setSingleLine();setText(intent.getStringExtra("path").orEmpty());contentDescription="应用锁 EXE 路径" }
+        path=styleInput(EditText(this).apply { hint="电脑上的 EXE 完整路径";setSingleLine();setText(intent.getStringExtra("path").orEmpty());contentDescription="应用锁 EXE 路径" })
         box.addView(path)
         lockButton=primary(button("锁定这个 EXE") {
             if(busy)return@button
