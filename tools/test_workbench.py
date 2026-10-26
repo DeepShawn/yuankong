@@ -20,6 +20,7 @@ from file_actions import file_request, extract_zip, preview
 from desktop_apps import apps_request, DesktopApps
 from command_queue import CommandQueue
 from touch_guard import recovery_worker, TouchDevices
+from input_guard import NativeInputGuard
 
 
 class FilesTest(unittest.TestCase):
@@ -153,6 +154,19 @@ class Pipe:
 
 
 class TouchRecoveryTest(unittest.TestCase):
+    def test_driver_wait_precedes_hook_install_and_hooks_release_before_driver_restore(self):
+        events=[]
+        native=NativeInputGuard.__new__(NativeInputGuard)
+        native.escape=threading.Event(); native.hooks=[]; native.pressed=set()
+        native.keyboard_proc=object(); native.mouse_proc=object()
+        native.touch=SimpleNamespace(start=lambda:events.append("touch-start"),stop=lambda:events.append("touch-stop"))
+        native.kernel=SimpleNamespace(GetModuleHandleW=lambda name:1)
+        native.user=SimpleNamespace(GetAsyncKeyState=lambda key:0,
+            SetWindowsHookExW=lambda kind,*args:events.append("hook-%d"%kind) or kind,
+            UnhookWindowsHookEx=lambda hook:events.append("unhook-%d"%hook) or True)
+        self.assertTrue(native.block(True)); self.assertTrue(native.block(False))
+        self.assertEqual(["touch-start","hook-13","hook-14","unhook-13","unhook-14","touch-stop"],events)
+
     def run_worker(self, failure=False, watchdog=.25):
         stream=Pipe(); output=io.StringIO(); restored=threading.Event()
         devices=SimpleNamespace(pause=mock.Mock(side_effect=RuntimeError("partial failure") if failure else lambda stop:1),

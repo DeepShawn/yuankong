@@ -170,16 +170,24 @@ class NativeInputGuard:
 
     def block(self, enabled):
         if not enabled:
+            errors = []
+            for hook in self.hooks:
+                if not self.user.UnhookWindowsHookEx(hook):
+                    errors.append("卸载本机输入钩子失败")
+            self.hooks.clear()
+            self.pressed.clear()
             try:
                 self.touch.stop()
-            finally:
-                for hook in self.hooks:
-                    if not self.user.UnhookWindowsHookEx(hook):
-                        raise RuntimeError("卸载本机输入钩子失败，控制线程将退出并恢复输入")
-                self.hooks.clear()
-                self.pressed.clear()
+            except Exception as exc:
+                errors.append(str(exc))
+            if errors:
+                raise RuntimeError("；".join(errors))
             return True
         self.escape.clear()
+        # Device state changes can take seconds. Install low-level hooks only
+        # afterwards, so Windows' LowLevelHooksTimeout cannot remove them while
+        # this thread waits for the recovery worker's startup response.
+        self.touch.start()
         self.pressed = {key for key in list(map(ord, "ARTEX")) + [0x2E, 0x11, 0xA2, 0xA3, 0x12, 0xA4, 0xA5]
                         if self.user.GetAsyncKeyState(key) & 0x8000}
         for kind, proc in ((13, self.keyboard_proc), (14, self.mouse_proc)):
@@ -188,11 +196,6 @@ class NativeInputGuard:
                 self.block(False)
                 return False
             self.hooks.append(hook)
-        try:
-            self.touch.start()
-        except Exception:
-            self.block(False)
-            raise
         return True
 
     def pump(self):
