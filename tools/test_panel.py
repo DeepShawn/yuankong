@@ -66,10 +66,12 @@ class PanelTest(unittest.TestCase):
         child = self.child()
         self.pidfile.write_text(str(child.pid))
         # Both cases use a fake ShellExecuteEx: no actual elevation dialog opens.
-        for approved in (0, 1):
-            self.assertEqual(1, self.panel.panel_request_admin(approved))
-            self.assertIsNone(child.poll())
-            self.assertEqual(str(child.pid), self.pidfile.read_text())
+        for profile in (self.directory.name, self.directory.name + "\\"):
+            self.panel.panel_appdata(profile)
+            for approved in (0, 1):
+                self.assertEqual(1, self.panel.panel_request_admin(approved))
+                self.assertIsNone(child.poll())
+                self.assertEqual(str(child.pid), self.pidfile.read_text())
 
 
 if __name__ == "__main__":

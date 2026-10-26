@@ -7,12 +7,12 @@
 #include <wchar.h>
 
 static int shell_succeeds = 0, shell_calls = 0, destroyed = 0;
-static wchar_t requested_verb[32], requested_args[128];
+static wchar_t requested_verb[32], requested_args[2048];
 static BOOL WINAPI fake_shell(SHELLEXECUTEINFOW *info)
 {
     ++shell_calls;
     wcsncpy(requested_verb, info->lpVerb, 31);
-    wcsncpy(requested_args, info->lpParameters, 127);
+    wcsncpy(requested_args, info->lpParameters, 2047);
     info->hProcess = NULL;
     if (!shell_succeeds) SetLastError(ERROR_CANCELLED);
     return shell_succeeds;
@@ -45,6 +45,10 @@ __declspec(dllexport) int panel_request_admin(int approve)
     shell_succeeds = approve; shell_calls = 0; destroyed = 0;
     requested_verb[0] = 0; requested_args[0] = 0;
     int result = open_admin_panel(NULL);
-    return result == approve && shell_calls == 1 && destroyed == approve &&
-        wcscmp(requested_verb, L"runas") == 0 && wcscmp(requested_args, L"--restart-admin") == 0;
+    int argc = 0;
+    wchar_t **argv = CommandLineToArgvW(requested_args, &argc);
+    int valid = argv && argc == 3 && wcscmp(argv[0], L"--restart-admin") == 0 &&
+        wcscmp(argv[1], L"--profile-appdata") == 0 && wcscmp(argv[2], _wgetenv(L"APPDATA")) == 0;
+    if (argv) LocalFree(argv);
+    return result == approve && shell_calls == 1 && destroyed == approve && valid && wcscmp(requested_verb, L"runas") == 0;
 }

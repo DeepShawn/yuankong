@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+#include "command_line.h"
 
 #define ID_STATUS   2001
 #define ID_IPINFO   2002
@@ -154,6 +155,13 @@ static int open_admin_panel(HWND hwnd)
     wchar_t self[MAX_PATH];
     DWORD length = GetModuleFileNameW(NULL, self, MAX_PATH);
     if (!length || length >= MAX_PATH) return 0;
+    wchar_t parameters[2048] = L"";
+    const wchar_t *profile = _wgetenv(L"APPDATA");
+    if (!profile || !*profile || !append_arg(parameters, 2048, L"--restart-admin") ||
+        !append_arg(parameters, 2048, L"--profile-appdata") || !append_arg(parameters, 2048, profile)) {
+        MessageBoxW(hwnd, L"无法确定当前配置目录，未申请管理员启动。原接收端未停止。", L"LanCmd", MB_ICONERROR);
+        return 0;
+    }
     SHELLEXECUTEINFOW request;
     ZeroMemory(&request, sizeof(request));
     request.cbSize = sizeof(request);
@@ -161,7 +169,7 @@ static int open_admin_panel(HWND hwnd)
     request.hwnd = hwnd;
     request.lpVerb = L"runas";
     request.lpFile = self;
-    request.lpParameters = L"--restart-admin";
+    request.lpParameters = parameters;
     request.lpDirectory = g_dir;
     request.nShow = SW_SHOWNORMAL;
     if (!ShellExecuteExW(&request)) {
@@ -660,11 +668,28 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdline, int show)
 {
     (void)hPrev; (void)cmdline;
     int restart_admin = 0, argc = 0;
+    wchar_t profile_appdata[MAX_PATH] = L"";
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv) {
-        for (int i = 1; i < argc; ++i)
+        for (int i = 1; i < argc; ++i) {
             if (wcscmp(argv[i], L"--restart-admin") == 0) restart_admin = 1;
+            else if (wcscmp(argv[i], L"--profile-appdata") == 0 && i + 1 < argc) {
+                if (wcslen(argv[++i]) >= MAX_PATH) { LocalFree(argv); return 1; }
+                wcscpy(profile_appdata, argv[i]);
+            }
+        }
         LocalFree(argv);
+    }
+    /* A credentials prompt may switch Windows accounts. Keep the original
+     * receiver's configuration and PID location, rather than starting a second
+     * instance under the administrator's different roaming profile. */
+    if (profile_appdata[0]) {
+        DWORD attributes = GetFileAttributesW(profile_appdata);
+        if (!restart_admin || attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY) ||
+            _wputenv_s(L"APPDATA", profile_appdata) != 0 || !SetEnvironmentVariableW(L"APPDATA", profile_appdata)) {
+            MessageBoxW(NULL, L"无法使用原接收端的配置目录，原接收端没有被停止。", L"LanCmd", MB_ICONERROR);
+            return 1;
+        }
     }
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
