@@ -75,8 +75,7 @@ class ControlActivity : FeatureActivity() {
         session.addView(start)
         session.addView(stop)
         val keys = panel()
-        listOf(listOf("Esc", "Tab", "Enter", "退格"), listOf("←", "↑", "↓", "→"),
-            listOf("Ctrl+C", "Ctrl+V", "Ctrl+A", "Alt+Tab"), listOf("Win+D", "F5", "Space", "Delete")).forEach { row ->
+        listOf(listOf("Ctrl+C", "Ctrl+V", "Ctrl+A", "Alt+Tab")).forEach { row ->
             val line = LinearLayout(this)
             row.forEach { name ->
                 val key = button(name) { sendKeys(name) }.apply {
@@ -89,6 +88,12 @@ class ControlActivity : FeatureActivity() {
             }
             keys.addView(line)
         }
+        val virtual = VirtualKeyboard(this) { names ->
+            task { (lease ?: error("请先开始键盘控制")).call("input", JSONObject().put("keys", JSONArray(names))) }
+        }.apply { isEnabled = false }
+        controlled.add(virtual)
+        keys.addView(label("虚拟键盘", 14f, R.color.text).apply { setPadding(0, dp(12), 0, dp(8)) })
+        keys.addView(virtual)
         val text = input(keys, "输入文字到电脑", 2, 1000)
         val send = button("发送文字") {
             if (text.text.isNotEmpty()) task {
@@ -98,12 +103,6 @@ class ControlActivity : FeatureActivity() {
         }.apply { isEnabled = false }
         controlled.add(send)
         keys.addView(send)
-        val virtual = VirtualKeyboard(this) { names ->
-            task { (lease ?: error("请先开始键盘控制")).call("input", JSONObject().put("keys", JSONArray(names))) }
-        }.apply { isEnabled = false }
-        controlled.add(virtual)
-        keys.addView(label("虚拟键盘 · 修饰键作用于下一个按键，横滑可查看更多键", 12f, R.color.dim))
-        keys.addView(virtual)
     }
 
     private fun sendKeys(label: String) {

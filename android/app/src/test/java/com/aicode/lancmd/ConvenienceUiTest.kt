@@ -65,10 +65,13 @@ class ConvenienceUiTest {
         is ViewGroup -> (0 until view.childCount).flatMap { buttons(view.getChildAt(it)) }
         else -> emptyList()
     }
-    private fun render(view: View, name: String) {
-        view.measure(View.MeasureSpec.makeMeasureSpec(411, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(700, View.MeasureSpec.EXACTLY))
-        view.layout(0, 0, 411, 700)
-        val bitmap = Bitmap.createBitmap(411, 700, Bitmap.Config.ARGB_8888)
+    private fun render(view: View, name: String, width: Int = 411) {
+        val wrap = view is VirtualKeyboard
+        view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(700, if (wrap) View.MeasureSpec.AT_MOST else View.MeasureSpec.EXACTLY))
+        val height = if (wrap) view.measuredHeight else 700
+        view.layout(0, 0, width, height)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         view.draw(Canvas(bitmap))
         val file = File("build/ui-previews/$name.png").apply { parentFile!!.mkdirs() }
         file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -214,9 +217,81 @@ class ConvenienceUiTest {
         key("B").performClick()
         assertEquals(listOf(listOf("CTRL", "SHIFT", "A"), listOf("B")), sent)
         key("Alt").performClick(); keyboard.isEnabled = false; keyboard.isEnabled = true
-        key("F12").performClick(); key(";").performClick()
+        key("功能").performClick(); key("F12").performClick()
+        key("符号").performClick(); key(";").performClick()
         assertEquals(listOf("F12"), sent[2]); assertEquals(listOf("OEM_1"), sent[3])
+        key("字母").performClick()
         render(keyboard, "virtual-keyboard")
+        controller.pause().stop().destroy()
+    }
+
+    @Test fun virtualKeyboardHighlightsClearsAndResetsModifiersWhenHidden() {
+        val controller = page()
+        val sent = ArrayList<List<String>>()
+        val keyboard = VirtualKeyboard(controller.get()) { sent.add(it) }
+        fun key(name: String) = buttons(keyboard).single { it.text == name }
+        val host = android.widget.LinearLayout(controller.get()).apply { addView(keyboard) }
+        controller.get().setContentView(host)
+        key("Ctrl").performClick(); key("Shift").performClick()
+        assertTrue(key("Ctrl").isSelected); assertTrue(key("Shift").isSelected)
+        assertEquals(1f, key("Shift").alpha)
+        assertTrue(key("清除").isEnabled)
+        render(keyboard, "virtual-keyboard-combination")
+        key("功能").performClick()
+        assertTrue("Switching pages must preserve the pending chord", key("Ctrl").isSelected)
+        assertTrue(sent.isEmpty())
+        key("清除").performClick()
+        assertFalse(key("Ctrl").isSelected); assertFalse(key("清除").isEnabled)
+        key("Alt").performClick()
+        keyboard.visibility = View.GONE
+        keyboard.visibility = View.VISIBLE
+        assertFalse(key("Alt").isSelected)
+        key("F1").performClick()
+        assertEquals(listOf("F1"), sent.single())
+        keyboard.isEnabled = false
+        key("F2").performClick()
+        assertEquals("Disabled keyboards cannot send input", 1, sent.size)
+        controller.pause().stop().destroy()
+    }
+
+    @Test fun virtualKeyboardSymbolsDeduplicateShiftAndKeepOemProtocol() {
+        val controller = page()
+        val sent = ArrayList<List<String>>()
+        val keyboard = VirtualKeyboard(controller.get()) { sent.add(it) }
+        fun key(name: String) = buttons(keyboard).single { it.text == name }
+        key("符号").performClick()
+        key("Ctrl").performClick(); key("Shift").performClick(); key("@").performClick()
+        key("?").performClick(); key("\\").performClick(); key("空格").performClick()
+        assertEquals(listOf(listOf("CTRL", "SHIFT", "2"), listOf("SHIFT", "OEM_2"), listOf("OEM_5"), listOf("SPACE")), sent)
+        assertFalse(key("Shift").isSelected)
+        controller.pause().stop().destroy()
+    }
+
+    @Test fun virtualKeyboardPagesFitNarrowAndWideLayoutsWithoutHorizontalScrolling() {
+        val controller = page()
+        val keyboard = VirtualKeyboard(controller.get()) {}
+        fun visible(view: View): List<MaterialButton> = when {
+            view.visibility != View.VISIBLE -> emptyList()
+            view is MaterialButton -> listOf(view)
+            view is ViewGroup -> (0 until view.childCount).flatMap { visible(view.getChildAt(it)) }
+            else -> emptyList()
+        }
+        for (width in listOf(280, 360, 600)) for (section in listOf("字母", "符号", "功能")) {
+            buttons(keyboard).single { it.text == section }.performClick()
+            keyboard.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(700, View.MeasureSpec.AT_MOST))
+            keyboard.layout(0, 0, width, keyboard.measuredHeight)
+            val shown = visible(keyboard)
+            assertTrue(shown.isNotEmpty())
+            shown.forEach { key ->
+                val bounds = android.graphics.Rect(0, 0, key.width, key.height)
+                keyboard.offsetDescendantRectToMyCoords(key, bounds)
+                assertTrue("$section / $width / ${key.text} must fit horizontally", bounds.left >= 0 && bounds.right <= width)
+                assertTrue("Key must have a usable height", key.height >= 32)
+                assertEquals("Labels must fit the key", 0, key.layout.getEllipsisCount(0))
+            }
+            if (width == 360) render(keyboard, "virtual-keyboard-${section}", width)
+        }
         controller.pause().stop().destroy()
     }
 

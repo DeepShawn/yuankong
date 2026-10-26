@@ -16,6 +16,7 @@ import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.WindowCompat
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
@@ -177,8 +178,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
 
     private fun keyboardPanel() {
         val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        listOf(listOf("Esc", "Tab", "Enter", "退格"), listOf("←", "↑", "↓", "→"),
-            listOf("Ctrl+C", "Ctrl+V", "Ctrl+A", "Alt+Tab"), listOf("Win+D", "F5", "Space", "Delete")).forEach { labels ->
+        listOf(listOf("Ctrl+C", "Ctrl+V", "Ctrl+A", "Alt+Tab")).forEach { labels ->
             val row = LinearLayout(this)
             labels.forEach { name ->
                 val item = compactButton(name) {
@@ -198,17 +198,23 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
             if (text.text.isNotEmpty()) enqueue("input", JSONObject().put("text", text.text.toString()))
         }.apply { id = R.id.desktopKeyboardSend }
         activeControls.add(send); row.addView(send)
-        panel.addView(row)
         val virtual = VirtualKeyboard(this) { names -> enqueue("input", JSONObject().put("keys", JSONArray(names))) }
-            .apply { visibility = View.GONE }
+            .apply { id = R.id.desktopVirtualKeyboard; visibility = View.GONE }
         activeControls.add(virtual)
-        val expand = compactButton("展开虚拟键盘") {
-            virtual.resetModifiers()
-            virtual.visibility = if (virtual.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        val expand = compactButton("展开虚拟键盘") {}.apply {
+            id = R.id.desktopKeyboardExpand
+            setOnClickListener {
+                virtual.resetModifiers()
+                val expanded = virtual.visibility != View.VISIBLE
+                virtual.visibility = if (expanded) View.VISIBLE else View.GONE
+                text = if (expanded) "收起虚拟键盘" else "展开虚拟键盘"
+                ViewCompat.setStateDescription(this, if (expanded) "已展开" else "已收起")
+                if (expanded) controlScroll.post { controlScroll.smoothScrollTo(0, virtual.top) }
+            }
         }
         activeControls.add(expand); panel.addView(expand)
-        panel.addView(label("Ctrl / Alt / Shift / Win 作用于下一个按键；横滑查看更多键", 11f, R.color.dim))
         panel.addView(virtual)
+        panel.addView(row)
         panels.add(panel); panelHost.addView(panel)
     }
 

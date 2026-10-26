@@ -10,6 +10,8 @@
     <item name="desktopFullscreen" type="id" />
     <item name="desktopKeyboardText" type="id" />
     <item name="desktopKeyboardSend" type="id" />
+    <item name="desktopVirtualKeyboard" type="id" />
+    <item name="desktopKeyboardExpand" type="id" />
     <item name="desktopTerminalLog" type="id" />
     <item name="desktopCommand" type="id" />
     <item name="desktopExecute" type="id" />
