@@ -350,6 +350,7 @@ class ConvenienceUiTest {
             val root = controller.get().window.decorView
             buttons(root).single { it.text == "添加命令" }.performClick()
             val edit = ShadowDialog.getLatestDialog() as AlertDialog
+            shadowOf(Looper.getMainLooper()).idle() // Install the dialog's OnShow save handler before clicking.
             fun inputs(view: View): List<EditText> = when (view) {
                 is EditText -> listOf(view)
                 is ViewGroup -> (0 until view.childCount).flatMap { inputs(view.getChildAt(it)) }
