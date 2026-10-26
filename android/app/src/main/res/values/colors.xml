@@ -1,16 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg">#0A0E13</color>
-    <color name="surface">#111823</color>
-    <color name="surface_variant">#18222F</color>
-    <color name="outline">#22303F</color>
-    <color name="text">#E2EAF2</color>
-    <color name="dim">#8CA0B3</color>
-    <color name="accent">#35D0A5</color>
-    <color name="accent_dim">#1B5F4F</color>
-    <color name="on_accent">#04221A</color>
-    <color name="danger">#EF6B68</color>
-    <color name="warn">#E0B15D</color>
-    <color name="ok">#4ED8A0</color>
-    <color name="overlay">#F20A0E13</color>
+    <color name="bg">#080C12</color>
+    <color name="surface">#101722</color>
+    <color name="surface_variant">#172131</color>
+    <color name="surface_high">#1E2A3D</color>
+    <color name="outline">#24324A</color>
+    <color name="outline_soft">#1A2537</color>
+    <color name="text">#EAF1F8</color>
+    <color name="dim">#8B9AB0</color>
+    <color name="accent">#3EE0B5</color>
+    <color name="accent_dim">#123F37</color>
+    <color name="accent_2">#5AA9FF</color>
+    <color name="accent_glow">#333EE0B5</color>
+    <color name="on_accent">#022B21</color>
+    <color name="danger">#FF6B6B</color>
+    <color name="warn">#F2B860</color>
+    <color name="ok">#4ADE9B</color>
+    <color name="overlay">#F0080C12</color>
 </resources>

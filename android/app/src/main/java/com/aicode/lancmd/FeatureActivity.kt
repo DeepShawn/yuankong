@@ -31,6 +31,7 @@ abstract class FeatureActivity : AppCompatActivity() {
         }
         val toolbar = MaterialToolbar(this).apply {
             this.title = title
+            setTitleTextAppearance(this@FeatureActivity, R.style.TextAppearance_LanCmd_ToolbarTitle)
             setTitleTextColor(color(R.color.text))
             setNavigationIcon(R.drawable.ic_back)
             setNavigationIconTint(color(R.color.text))
@@ -46,10 +47,12 @@ abstract class FeatureActivity : AppCompatActivity() {
             root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         } else root.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         statusText = label(description, 13f, R.color.dim).apply {
-            setPadding(0, dp(4), 0, dp(12))
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setBackgroundResource(R.drawable.status_bg)
+            setLineSpacing(dp(2).toFloat(), 1f)
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
-        body.addView(statusText)
+        body.addView(statusText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2); bottomMargin = dp(12) })
         WindowCompat.setDecorFitsSystemWindows(window, false)
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
@@ -71,11 +74,14 @@ abstract class FeatureActivity : AppCompatActivity() {
         isAllCaps = false
         minHeight = dp(48)
         cornerRadius = dp(14)
-        backgroundTintList = android.content.res.ColorStateList.valueOf(color(R.color.surface))
+        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+        rippleColor = android.content.res.ColorStateList.valueOf(color(R.color.accent_glow))
+        backgroundTintList = android.content.res.ColorStateList(arrayOf(intArrayOf(android.R.attr.state_enabled), intArrayOf()),
+            intArrayOf(color(R.color.surface_variant), color(R.color.surface)))
         setTextColor(android.content.res.ColorStateList(arrayOf(intArrayOf(android.R.attr.state_enabled), intArrayOf()),
             intArrayOf(color(R.color.text), color(R.color.dim))))
         strokeWidth = dp(1)
-        strokeColor = android.content.res.ColorStateList.valueOf(color(R.color.outline))
+        strokeColor = android.content.res.ColorStateList.valueOf(color(R.color.outline_soft))
         setOnClickListener { action() }
     }
 
@@ -83,7 +89,8 @@ abstract class FeatureActivity : AppCompatActivity() {
         backgroundTintList = android.content.res.ColorStateList(arrayOf(intArrayOf(android.R.attr.state_enabled), intArrayOf()),
             intArrayOf(color(R.color.accent), color(R.color.surface)))
         setTextColor(android.content.res.ColorStateList(arrayOf(intArrayOf(android.R.attr.state_enabled), intArrayOf()),
-            intArrayOf(color(R.color.bg), color(R.color.dim))))
+            intArrayOf(color(R.color.on_accent), color(R.color.dim))))
+        rippleColor = android.content.res.ColorStateList.valueOf(0x55FFFFFF)
         strokeWidth = 0
     }
 
@@ -96,7 +103,7 @@ abstract class FeatureActivity : AppCompatActivity() {
             radius = dp(20).toFloat()
             cardElevation = 0f
             strokeWidth = dp(1)
-            strokeColor = color(R.color.outline)
+            strokeColor = color(R.color.outline_soft)
             setCardBackgroundColor(color(R.color.surface))
             addView(content)
         }

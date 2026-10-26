@@ -149,7 +149,8 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
     private fun field(hint: String, multiline: Boolean = false, limit: Int = 1000) = EditText(this).apply {
         this.hint = hint
         setTextColor(color(R.color.text)); setHintTextColor(color(R.color.dim))
-        setPadding(dp(10), dp(6), dp(10), dp(6))
+        setBackgroundResource(R.drawable.input_bg)
+        setPadding(dp(12), dp(6), dp(12), dp(6))
         filters = arrayOf(InputFilter.LengthFilter(limit))
         inputType = android.text.InputType.TYPE_CLASS_TEXT or
             (if (multiline) android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE else android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
@@ -247,7 +248,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
             setTextIsSelectable(true); setPadding(dp(8), dp(6), dp(8), dp(6))
         }
         terminalScroll = ScrollView(this).apply {
-            setBackgroundColor(color(R.color.surface)); addView(terminalLog)
+            setBackgroundResource(R.drawable.status_bg); addView(terminalLog)
         }
         panel.addView(terminalScroll, LinearLayout.LayoutParams(-1, dp(92)))
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -279,7 +280,12 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
 
     private fun showMode() {
         panels.forEachIndexed { index, panel -> panel.visibility = if (!fullscreen && index == mode) View.VISIBLE else View.GONE }
-        modeButtons.forEachIndexed { index, button -> button.setTextColor(color(if (index == mode) R.color.accent else R.color.dim)) }
+        modeButtons.forEachIndexed { index, button ->
+            val selected = index == mode
+            button.setTextColor(color(if (selected) R.color.accent else R.color.dim))
+            button.backgroundTintList = android.content.res.ColorStateList.valueOf(color(if (selected) R.color.accent_dim else R.color.surface_variant))
+            button.strokeColor = android.content.res.ColorStateList.valueOf(color(if (selected) R.color.accent else R.color.outline_soft))
+        }
         configureWorkspace()
     }
 

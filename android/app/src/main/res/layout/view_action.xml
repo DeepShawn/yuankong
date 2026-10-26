@@ -9,14 +9,17 @@
     android:focusable="true"
     android:gravity="center"
     android:orientation="vertical"
-    android:minHeight="78dp"
-    android:paddingVertical="12dp">
+    android:minHeight="80dp"
+    android:paddingHorizontal="2dp"
+    android:paddingVertical="10dp">
 
     <ImageView
         android:id="@+id/ivIcon"
-        android:layout_width="26dp"
-        android:layout_height="26dp"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:background="@drawable/action_icon_bg"
         android:contentDescription="@null"
+        android:padding="9dp"
         android:tint="@color/accent" />
 
     <TextView
@@ -24,7 +27,6 @@
         style="@style/Widget.LanCmd.ActionLabel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
-        android:gravity="center"
-        android:textColor="@color/dim" />
+        android:layout_marginTop="6dp"
+        android:gravity="center" />
 </LinearLayout>

@@ -5,13 +5,19 @@
         <item name="colorOnPrimary">@color/on_accent</item>
         <item name="colorPrimaryContainer">@color/accent_dim</item>
         <item name="colorOnPrimaryContainer">@color/text</item>
-        <item name="colorSecondary">@color/accent</item>
-        <item name="colorOnSecondary">@color/on_accent</item>
+        <item name="colorSecondary">@color/accent_2</item>
+        <item name="colorOnSecondary">@color/bg</item>
+        <item name="colorSecondaryContainer">@color/accent_dim</item>
+        <item name="colorOnSecondaryContainer">@color/accent</item>
         <item name="colorSurface">@color/surface</item>
         <item name="colorOnSurface">@color/text</item>
         <item name="colorSurfaceVariant">@color/surface_variant</item>
         <item name="colorOnSurfaceVariant">@color/dim</item>
+        <item name="colorSurfaceContainer">@color/surface</item>
+        <item name="colorSurfaceContainerHigh">@color/surface_variant</item>
+        <item name="colorSurfaceContainerHighest">@color/surface_high</item>
         <item name="colorOutline">@color/outline</item>
+        <item name="colorOutlineVariant">@color/outline_soft</item>
         <item name="colorError">@color/danger</item>
         <item name="android:colorBackground">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
@@ -19,18 +25,95 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:textColorPrimary">@color/text</item>
         <item name="android:textColorSecondary">@color/dim</item>
+        <item name="android:textColorHighlight">@color/accent_dim</item>
+        <item name="shapeAppearanceSmallComponent">@style/ShapeAppearance.LanCmd.Small</item>
+        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.LanCmd.Medium</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.LanCmd.Dialog</item>
+        <item name="alertDialogTheme">@style/ThemeOverlay.LanCmd.AlertDialog</item>
+    </style>
+
+    <style name="ShapeAppearance.LanCmd.Small" parent="ShapeAppearance.Material3.SmallComponent">
+        <item name="cornerSize">12dp</item>
+    </style>
+
+    <style name="ShapeAppearance.LanCmd.Medium" parent="ShapeAppearance.Material3.MediumComponent">
+        <item name="cornerSize">18dp</item>
+    </style>
+
+    <style name="ShapeAppearance.LanCmd.Dialog" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">24dp</item>
+    </style>
+
+    <style name="ThemeOverlay.LanCmd.Dialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorSurfaceContainerHigh">@color/surface</item>
+        <item name="shapeAppearanceCornerExtraLarge">@style/ShapeAppearance.LanCmd.Dialog</item>
+        <item name="android:backgroundDimAmount">0.7</item>
+    </style>
+
+    <style name="ThemeOverlay.LanCmd.AlertDialog" parent="ThemeOverlay.Material3.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/dialog_bg</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="android:backgroundDimAmount">0.7</item>
+        <item name="buttonBarPositiveButtonStyle">@style/Widget.LanCmd.DialogButton</item>
+        <item name="buttonBarNegativeButtonStyle">@style/Widget.LanCmd.DialogButton.Muted</item>
+        <item name="buttonBarNeutralButtonStyle">@style/Widget.LanCmd.DialogButton.Muted</item>
+    </style>
+
+    <style name="Widget.LanCmd.DialogButton" parent="Widget.Material3.Button.TextButton.Dialog">
+        <item name="android:textColor">@color/accent</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+
+    <style name="Widget.LanCmd.DialogButton.Muted">
+        <item name="android:textColor">@color/dim</item>
+    </style>
+
+    <style name="Widget.LanCmd.Button.Outlined" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:textColor">@color/text</item>
+        <item name="backgroundTint">@color/surface</item>
+        <item name="strokeColor">@color/outline</item>
+        <item name="rippleColor">@color/accent_glow</item>
+        <item name="cornerRadius">14dp</item>
+    </style>
+
+    <style name="Widget.LanCmd.Button.Tonal" parent="Widget.LanCmd.Button.Outlined">
+        <item name="backgroundTint">@color/surface_variant</item>
+        <item name="strokeColor">@color/outline_soft</item>
+        <item name="iconTint">@color/accent</item>
+        <item name="iconSize">16dp</item>
+        <item name="iconPadding">6dp</item>
+        <item name="iconGravity">textStart</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:insetTop">3dp</item>
+        <item name="android:insetBottom">3dp</item>
+    </style>
+
+    <style name="TextAppearance.LanCmd.ToolbarTitle" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:textSize">19sp</item>
+        <item name="android:textColor">@color/text</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+
+    <style name="Widget.LanCmd.SectionLabel" parent="">
+        <item name="android:textSize">11sp</item>
+        <item name="android:textColor">@color/dim</item>
+        <item name="android:letterSpacing">0.08</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
     </style>
 
     <style name="Widget.LanCmd.ActionLabel" parent="">
         <item name="android:textSize">12sp</item>
-        <item name="android:textColor">@color/dim</item>
+        <item name="android:textColor">@color/text</item>
         <item name="android:maxLines">1</item>
         <item name="android:ellipsize">end</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
     </style>
 
     <style name="Widget.LanCmd.IconButton" parent="">
-        <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
-        <item name="android:padding">8dp</item>
-        <item name="android:tint">@color/dim</item>
+        <item name="android:background">@drawable/icon_button_bg</item>
+        <item name="android:padding">11dp</item>
+        <item name="android:tint">@color/text</item>
     </style>
 </resources>
