@@ -152,6 +152,10 @@ class CommandsActivity : FeatureActivity() {
             if (delay == null || delay !in 0..86400) { seconds.error = "请输入 0 到 86400 秒"; return@setOnClickListener }
             val value = JSONObject().put("line", command).put("delay", delay).put("shell", if (shell.selectedItemPosition == 1) "powershell" else "cmd")
             if (index == null) items.put(value) else items.put(index, value)
+            target.put("items", items)
+            for (i in 0 until recipes.length()) {
+                if (recipes.getJSONObject(i).optString("id") == target.optString("id")) recipes.put(i, target)
+            }
             save(); renderEditor(); dialog.dismiss()
         } }
         dialog.show()

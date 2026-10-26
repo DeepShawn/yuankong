@@ -359,10 +359,23 @@ class ConvenienceUiTest {
             assertEquals(2, fields.size)
             fields[0].setText("echo delayed"); fields[1].setText("2")
             edit.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            assertFalse("Saved command editor must close: ${fields.map { it.error }}", edit.isShowing)
+            fun texts(view: View): List<String> = when (view) {
+                is ViewGroup -> (0 until view.childCount).flatMap { texts(view.getChildAt(it)) }
+                is android.widget.TextView -> listOf(view.text.toString())
+                else -> emptyList()
+            }
+            assertTrue("Saved command must appear in list: ${texts(root)}", texts(root).contains("echo delayed"))
             buttons(root).single { it.text == "启动当前命令列表" }.performClick()
             assertFalse(stub.requests.any { it.optString("cmd") == "commands" && it.optString("action") == "add" })
-            (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitUntil { stub.requests.any { it.optString("cmd") == "commands" && it.optString("action") == "add" } }
+            val confirmation = ShadowDialog.getLatestDialog() as AlertDialog
+            assertTrue("Start confirmation must describe the saved command", texts(confirmation.window!!.decorView).any { it.contains("共 1 条") })
+            confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            try {
+                waitUntil { stub.requests.any { it.optString("cmd") == "commands" && it.optString("action") == "add" } }
+            } catch (failure: AssertionError) {
+                throw AssertionError("Command submission failed. UI=${texts(root)}; RPC=${stub.requests}", failure)
+            }
             val item = stub.requests.single { it.optString("cmd") == "commands" && it.optString("action") == "add" }.getJSONArray("items").getJSONObject(0)
             assertEquals("echo delayed", item.getString("line")); assertEquals(2, item.getInt("delay"))
             render(root, "command-lists")
