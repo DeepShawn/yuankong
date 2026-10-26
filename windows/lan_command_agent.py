@@ -38,7 +38,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "1.7.2"
+VERSION = "1.8.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1081,15 +1081,17 @@ def cmd_kill(pid, force=True):
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from remote_features import RemoteFeatures
 from system_controls import audio_request
+from device_management import DeviceManager
 
 _capture_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 _remote = RemoteFeatures(RpcError, log, os.path.join(_capture_dir, "LanCmdCapture.exe"))
+_devices = DeviceManager(os.path.join(APP_DIR, "device-policy.json"), is_admin)
 
 
 def remote_capabilities():
     features = ["storage"]
     if IS_WIN:
-        features.extend(["message", "input", "pointer", "audio", "local_input"])
+        features.extend(["message", "input", "pointer", "audio", "local_input", "devices"])
         if os.path.isfile(_remote.backend.capture_exe):
             features.extend(["screen", "camera"])
     # session_seconds 为 None 表示共享会话不设时长上限
@@ -1112,6 +1114,7 @@ HANDLERS = {
     "pointer": _remote.pointer,
     "local_input": _remote.local_input,
     "audio": lambda q, st: cmd_audio(q),
+    "devices": lambda q, st: _devices.request(q, RpcError),
     "message": _remote.message,
     "info": lambda q, st: cmd_info(),
     "exec": lambda q, st: run_exec(

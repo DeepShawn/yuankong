@@ -141,6 +141,9 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                 etCmd.setText(line); etCmd.setSelection(line.length); etCmd.requestFocus()
             }
         }
+        findViewById<View>(R.id.btnDevices).setOnClickListener {
+            if (ConnectionManager.isConnected()) openFeature(DevicesActivity::class.java) else toast("请先连接电脑")
+        }
 
         uploadDir = Prefs.uploadDir(this)
 

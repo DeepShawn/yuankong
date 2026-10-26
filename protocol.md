@@ -251,3 +251,24 @@ Windows `capabilities.features` 新增 `audio`、`local_input`。
 停止输入会话、关闭连接或发送输入失败时，接收端释放该会话持有的鼠标按键。另一个会话不能移动或释放正在拖动的鼠标。`up` 可重复调用；停止和旋转页面也会结束当前手势。
 
 Android 工作台建立画面、键鼠和终端三条专属连接，各自重新握手，绑定原目标。`exec` 不占用键鼠或画面连接。停止等待终端结果不等于撤销已经执行的电脑命令；命令仍受客户端指定的执行超时约束。页面不自动开始共享，离开或切换电脑后需要重新开始。
+
+## 可移动设备管理（1.8.0）
+
+Windows `capabilities.features` 新增 `devices`。完成握手后使用：
+
+```json
+{"id":1,"cmd":"devices","action":"list"}
+{"id":2,"cmd":"devices","action":"policy","scope":"storage","mode":"blocked"}
+{"id":3,"cmd":"devices","action":"policy","scope":"storage","mode":"read_only"}
+{"id":4,"cmd":"devices","action":"policy","scope":"portable","mode":"blocked"}
+{"id":5,"cmd":"devices","action":"policy","scope":"storage","mode":"allow"}
+{"id":6,"cmd":"devices","action":"eject","device_id":"列表返回的完整 PnP ID"}
+```
+
+`list`（默认动作）返回 `admin`、`devices` 及 `policies`。设备字段：`id/name/kind/size/paths/protected/ejectable`；`kind` 为 `storage` 或 `portable`，`size` 为字节，`paths` 为挂载路径数组。仅列出 USB 存储和 USB 便携设备。系统磁盘可显示但禁止弹出。
+
+`policies.storage` / `policies.portable` 含 `mode`、`managed`、`conflict`；`mode` 为注册表配置的 `allow/read_only/blocked`，不代表当前驱动已生效。`managed` 表示存在 LanCmd 恢复记录；`conflict` 表示本机策略被其他程序改动。`policies.deny_all` 表示 HKLM/HKCU 的全局拒绝访问。HKCU 仅指接收端运行账户；其他驱动限制及域策略仍可能覆盖。`portable` 不接受 `read_only`。
+
+`policy` 和 `eject` 要求管理员接收端，失败以正常 RPC 错误返回安卓，不弹出授权窗口。`mode=allow` 恢复 LanCmd 首次修改前的值，不清除预先存在的策略；无管理记录时不写入。修改按设备类别应用，断线及重启后保留。恢复记录 `device-policy.json` 需随原配置保留；外部策略冲突时拒绝继续写入。策略保存返回 `policies/notice`，需重新插拔设备，必要时重启。部分固定类型 USB 硬盘不受可移动磁盘策略限制。
+
+`eject` 重新枚举并验证 ID，仅允许当前列表中可弹出且非系统设备，调用 Windows 配置管理器并提供 veto 输出，设备忙时返回错误，不显示 PnP 拒绝弹窗、不强制卸载。成功返回 `ejected/notice`。安卓确认与操作绑定原连接，不随重新连接或切换电脑迁移。

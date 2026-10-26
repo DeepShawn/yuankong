@@ -77,6 +77,71 @@ class ConvenienceUiTest {
     private fun page() = Robolectric.buildActivity(ControlActivity::class.java,
         Intent(RuntimeEnvironment.getApplication(), ControlActivity::class.java).putExtra("kind", "message")).setup()
 
+    @Test fun devicePolicyNeedsPhoneConfirmationAndCanRestoreOriginalSettings() {
+        Stub().use { stub ->
+            stub.install()
+            val controller = Robolectric.buildActivity(DevicesActivity::class.java).setup()
+            val root = controller.get().window.decorView
+            fun lock() = buttons(root).single { it.text == "锁定" }
+            waitUntil { buttons(root).any { it.text == "锁定" && it.isEnabled } }
+            lock().performClick()
+            var dialog = ShadowDialog.getLatestDialog() as AlertDialog
+            assertFalse(stub.requests.any { it.optString("action") == "policy" })
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+            assertFalse(stub.requests.any { it.optString("action") == "policy" })
+            lock().performClick()
+            dialog = ShadowDialog.getLatestDialog() as AlertDialog
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitUntil { buttons(root).any { it.text == "解锁 / 恢复原策略" && it.isEnabled } }
+            val change = stub.requests.single { it.optString("action") == "policy" }
+            assertEquals("storage", change.getString("scope"))
+            assertEquals("blocked", change.getString("mode"))
+            render(root, "removable-devices")
+            buttons(root).single { it.text == "解锁 / 恢复原策略" }.performClick()
+            (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitUntil { stub.requests.count { it.optString("action") == "policy" } == 2 &&
+                buttons(root).any { it.text == "锁定" && it.isEnabled } }
+            assertEquals("allow", stub.requests.last { it.optString("action") == "policy" }.getString("mode"))
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test fun devicePageDisablesChangesWithoutAdministratorPrivilegesAndProtectsSystemDisk() {
+        Stub().use { stub ->
+            stub.admin = false
+            stub.install()
+            val controller = Robolectric.buildActivity(DevicesActivity::class.java).setup()
+            val root = controller.get().window.decorView
+            waitUntil { buttons(root).any { it.text == "锁定" } }
+            assertTrue(buttons(root).filter { it.text != "刷新设备与策略" }.all { !it.isEnabled })
+            stub.admin = true
+            buttons(root).single { it.text == "刷新设备与策略" }.performClick()
+            waitUntil { buttons(root).any { it.text == "锁定" && it.isEnabled } }
+            assertFalse(buttons(root).single { it.text == "安全弹出 System USB" }.isEnabled)
+            assertTrue(buttons(root).single { it.text == "安全弹出 Test USB" }.isEnabled)
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test fun deviceConfirmationCannotFollowConnectionSwitchToAnotherComputer() {
+        Stub().use { first ->
+            first.install()
+            val controller = Robolectric.buildActivity(DevicesActivity::class.java).setup()
+            val root = controller.get().window.decorView
+            waitUntil { buttons(root).any { it.text == "锁定" && it.isEnabled } }
+            buttons(root).single { it.text == "锁定" }.performClick()
+            val dialog = ShadowDialog.getLatestDialog() as AlertDialog
+            Stub().use { second ->
+                second.install()
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                waitUntil { buttons(root).single { it.text == "刷新设备与策略" }.isEnabled }
+                assertFalse(first.requests.any { it.optString("action") == "policy" })
+                assertFalse(second.requests.any { it.optString("cmd") == "devices" })
+            }
+            controller.pause().stop().destroy()
+        }
+    }
+
     @Test fun audioReadsAuthoritativeVolumeAndControlsMuteSeparately() {
         Stub().use { stub ->
             stub.install()
@@ -177,6 +242,9 @@ class ConvenienceUiTest {
         val requests = CopyOnWriteArrayList<JSONObject>()
         private var volume = 40
         private var muted = false
+        var admin = true
+        private var deviceMode = "allow"
+        private var managed = false
         private val worker = Thread {
             try {
                 server.accept().use { socket ->
@@ -186,6 +254,22 @@ class ConvenienceUiTest {
                         val request = JSONObject(reader.readLine() ?: break)
                         val result = JSONObject().put("id", request.getInt("id")).put("ok", true)
                         when (request.optString("cmd")) {
+                            "devices" -> {
+                                if (request.optString("action") == "policy") {
+                                    deviceMode = request.getString("mode")
+                                    managed = deviceMode != "allow"
+                                    result.put("notice", "策略已保存")
+                                }
+                                result.put("admin", admin).put("policies", JSONObject()
+                                    .put("storage", JSONObject().put("mode", deviceMode).put("managed", managed))
+                                    .put("portable", JSONObject().put("mode", "allow").put("managed", false))
+                                    .put("deny_all", false))
+                                    .put("devices", JSONArray()
+                                        .put(JSONObject().put("name", "Test USB").put("kind", "storage").put("id", "USBSTOR\\TEST")
+                                            .put("ejectable", true).put("protected", false))
+                                        .put(JSONObject().put("name", "System USB").put("kind", "storage").put("id", "USBSTOR\\SYSTEM")
+                                            .put("ejectable", true).put("protected", true)))
+                            }
                             "audio" -> {
                                 if (request.has("volume")) volume = request.getInt("volume")
                                 if (request.has("muted")) muted = request.getBoolean("muted")
