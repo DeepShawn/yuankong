@@ -91,6 +91,16 @@ class RecordingTest(unittest.TestCase):
         self.manager.close()
         settle(lambda: self.call()["recordings"][0]["status"] == "completed")
 
+    def test_device_failure_is_reported_and_never_recorded_as_success(self):
+        def denied(args, **kw):
+            proc = subprocess.Popen([sys.executable,"-u","-c","import json; print(json.dumps({'error':'privacy permission denied'})); raise SystemExit(1)"], **kw)
+            self.procs.append(proc)
+            return proc
+        self.manager.popen = denied
+        with self.assertRaisesRegex(Error, "privacy permission denied"):
+            self.call(action="start", mode="audio")
+        self.assertEqual("failed",self.call()["recordings"][0]["status"])
+
 
 class PointerBackend:
     def __init__(self): self.events = []; self.released = []
@@ -131,6 +141,22 @@ class GestureTest(unittest.TestCase):
         settle(lambda: self.remote.playback_owner is None)
         self.assertIn("left", self.backend.released)
         self.assertEqual(["down"], [e[0] for e in self.backend.events])
+
+    def test_replayed_events_cannot_renew_the_phone_heartbeat(self):
+        session = self.state.remote_sessions[self.sid]
+        before = session.last_active = time.monotonic() - 1
+        self.remote.playback_owner = self.sid
+        self.remote.pointer(dict(action="move",x=.5,y=.5,sid=self.sid),self.state,playback=True)
+        self.assertEqual(before,session.last_active)
+        self.remote.playback_owner = None
+
+    def test_initial_delay_is_timed_on_the_receiver(self):
+        started = time.monotonic()
+        self.call(action="play", delay=1, events=[{"ms":0,"action":"move","x":.25,"y":.75}])
+        time.sleep(.05)
+        self.assertEqual([],self.backend.events)
+        settle(lambda:self.call()["job"]["status"] == "completed")
+        self.assertGreaterEqual(self.backend.events[0][1]-started,.95)
 
 
 @unittest.skipUnless(os.name == "nt", "native Media Foundation")

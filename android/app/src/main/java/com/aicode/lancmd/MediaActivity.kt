@@ -15,6 +15,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -76,8 +77,10 @@ class MediaActivity : FeatureActivity() {
         body.addView(buttons)
         body.addView(save)
         body.addView(button(if (camera) "录制摄像头视频" else "录制屏幕视频") {
-            stream?.cancel()
-            startActivity(android.content.Intent(this, RecordingsActivity::class.java).putExtra("kind", if (camera) "camera" else "screen"))
+            task {
+                stream?.cancelAndJoin()
+                startActivity(android.content.Intent(this@MediaActivity, RecordingsActivity::class.java).putExtra("kind", if (camera) "camera" else "screen"))
+            }
         })
     }
 

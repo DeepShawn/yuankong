@@ -264,12 +264,13 @@ class RemoteFeatures:
         self.log.info("开始共享 %s peer=%s client=%s", scope, state.peer, state.client_id)
         return {"sid": session.sid, "scope": scope, "expires_in": None}
 
-    def active(self, q, state, scope):
+    def active(self, q, state, scope, touch=True):
         self._check(state)
         session = state.remote_sessions.get(str(q.get("sid", "")))
         if not session or session.scope != scope or session.client_id != state.client_id or not session.alive():
             raise self.error("共享已停止，请重新开始", 403)
-        session.last_active = time.monotonic()
+        if touch:
+            session.last_active = time.monotonic()
         return session
 
     def frame(self, q, state, scope):
@@ -335,7 +336,7 @@ class RemoteFeatures:
                         self.pointer_owners.pop(button, None)
 
     def pointer(self, q, state, playback=False, allowed=None):
-        session = self.active(q, state, "input")
+        session = self.active(q, state, "input", touch=not playback)
         action = q.get("action", "click")
         if action not in ("move", "click", "double_click", "down", "up", "scroll"):
             raise self.error("无效的鼠标操作")

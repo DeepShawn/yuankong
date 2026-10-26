@@ -93,6 +93,7 @@ class RecordingsActivity : FeatureActivity() {
         microphone = spinner(listOf("Windows 默认录音设备")); settings.addView(microphone)
         settings.addView(label("摄像头（仅摄像头模式使用）", 12f, R.color.dim))
         camera = spinner(listOf("读取设备后选择")); settings.addView(camera)
+        settings.addView(label("录制时长（秒，1–3600）", 12f, R.color.dim))
         seconds = EditText(this).apply { hint = "录制时长，1–3600 秒"; inputType = InputType.TYPE_CLASS_NUMBER; setText("300"); contentDescription = "录制时长秒数" }
         settings.addView(seconds)
         settings.addView(button("刷新麦克风 / 摄像头") { loadDevices() })
@@ -102,7 +103,7 @@ class RecordingsActivity : FeatureActivity() {
         val actions = LinearLayout(this)
         actions.addView(button("刷新列表") { refresh() }, LinearLayout.LayoutParams(0, -2, 1f))
         actions.addView(button("电脑录制目录") {
-            if (directory.isNotEmpty()) startActivity(Intent(this, StorageActivity::class.java).putExtra("path", directory))
+            if (directory.isNotEmpty()) task { pinnedCall(origin, "capabilities"); startActivity(Intent(this@RecordingsActivity, StorageActivity::class.java).putExtra("path", directory)) }
         }, LinearLayout.LayoutParams(0, -2, 1f))
         body.addView(actions)
         body.addView(button("取消下载") { transferring?.cancel() })

@@ -47,6 +47,7 @@ class GesturesActivity : FeatureActivity() {
         saved.addView(button("保存手势") { saveGesture() }, LinearLayout.LayoutParams(0, -2, 1f))
         saved.addView(button("手势列表") { chooseGesture() }, LinearLayout.LayoutParams(0, -2, 1f))
         body.addView(saved)
+        body.addView(label("延迟播放（秒，0 为立即）", 12f, R.color.dim))
         delaySeconds = EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; hint = "延迟秒数（0 为立即）"; setText("0"); contentDescription = "手势延迟秒数" }
         body.addView(delaySeconds)
         val controls = LinearLayout(this)
@@ -59,7 +60,7 @@ class GesturesActivity : FeatureActivity() {
             record.text = if (board.recording) "结束记录" else "开始记录"
             mode.isEnabled = !board.recording && playback?.isActive != true
             play.isEnabled = !board.recording && playback?.isActive != true && board.eventCount > 0
-            if (board.recording) status("正在记录 · ${board.eventCount} 个事件")
+            status(if (board.recording) "正在记录 · ${board.eventCount} 个事件" else "已记录 · ${board.eventCount} 个事件")
         }
         savedInstanceState?.getString("events")?.let { runCatching { board.load(JSONArray(it)) } }
         play.isEnabled = board.snapshot().length() > 0
@@ -133,6 +134,7 @@ class GesturesActivity : FeatureActivity() {
                 }
             } finally {
                 current?.close(); lease = null
+                if (!coroutineContext.isActive) status("手势回放已取消")
                 record.isEnabled = true; board.isEnabled = true; mode.isEnabled = true; play.isEnabled = board.snapshot().length() > 0
             }
         }
