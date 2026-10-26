@@ -184,6 +184,11 @@ class WindowsNativeTest(unittest.TestCase):
             event = Key(key, 0, 0, 0, 0)
             self.assertEqual(1, native.keyboard_proc(0, 0x100, ctypes.addressof(event)))
         self.assertTrue(native.escape.is_set())
+        native.escape.clear(); native.pressed.clear()
+        for key in (0xA2, 0xA4):
+            event = Key(key, 0, 0, 0, 0)
+            native.keyboard_proc(0, 0x100, ctypes.addressof(event))
+        self.assertTrue(native.escape.is_set(), "Secure Delete may never reach the ordinary desktop hook")
 
 
 if __name__ == "__main__":

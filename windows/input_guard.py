@@ -164,9 +164,9 @@ class NativeInputGuard:
                     self.pressed.discard(event.vk)
                 if escape_pressed(self.pressed):
                     self.escape.set()
-                # Windows always retains its secure attention sequence. As soon as
-                # Ctrl+Alt+Del is observed, remove our hooks too.
-                if 0x2E in self.pressed and self.pressed.intersection((0x11, 0xA2, 0xA3)) and self.pressed.intersection((0x12, 0xA4, 0xA5)):
+                # Begin release on the Ctrl+Alt prefix: secure attention can move
+                # Delete to Winlogon before an ordinary desktop hook sees it.
+                if self.pressed.intersection((0x11, 0xA2, 0xA3)) and self.pressed.intersection((0x12, 0xA4, 0xA5)):
                     self.escape.set()
             return 1
 

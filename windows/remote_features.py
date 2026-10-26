@@ -53,22 +53,23 @@ class WindowsBackend:
         self.guard_lock = threading.Lock()
 
     def _input(self, callback):
-        return self.guard.invoke(callback) if self.guard is not None else callback()
+        guard = self.guard
+        return guard.invoke(callback) if guard is not None and guard.thread.is_alive() else callback()
 
     def local_input(self, action, owner, seconds, allowed):
         if action == "pause":
             # Initialize the worker that owns the visible input hooks.
             from input_guard import InputGuard
             with self.guard_lock:
-                if self.guard is None:
+                if self.guard is None or not self.guard.thread.is_alive():
                     self.guard = InputGuard()
             return self.guard.pause(owner, seconds, allowed)
-        if self.guard is None:
+        if self.guard is None or not self.guard.thread.is_alive():
             return {"paused": False, "remaining": 0}
         return self.guard.release(owner) if action == "release" else self.guard.status(owner)
 
     def release_local_input(self, owner):
-        if self.guard is not None:
+        if self.guard is not None and self.guard.thread.is_alive():
             self.guard.release(owner)
 
     def request_consent(self, session):
