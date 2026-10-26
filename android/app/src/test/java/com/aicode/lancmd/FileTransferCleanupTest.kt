@@ -151,4 +151,46 @@ class FileTransferCleanupTest {
             }
         }
     }
+
+    @Test
+    fun switchingComputerAfterBeginAbortsOriginalWithoutUploadingToReplacement() {
+        ServerSocket(0).use { originalServer ->
+            ServerSocket(0).use { replacementServer ->
+                val original = AgentClient("127.0.0.1", originalServer.localPort)
+                val replacement = AgentClient("127.0.0.1", replacementServer.localPort)
+                replacement.connect()
+                val replacementSocket = replacementServer.accept().apply { soTimeout = 100 }
+                val received = java.util.concurrent.CopyOnWriteArrayList<String>()
+                val clientField = ConnectionManager::class.java.getDeclaredField("client").apply { isAccessible = true }
+                val worker = Thread {
+                    originalServer.accept().use { socket ->
+                        val reader = socket.getInputStream().bufferedReader()
+                        val writer = socket.getOutputStream().bufferedWriter()
+                        repeat(2) { index ->
+                            val request = JSONObject(reader.readLine())
+                            received.add(request.getString("action"))
+                            if (index == 0) clientField.set(ConnectionManager, replacement)
+                            writer.write(JSONObject().put("id", request.getInt("id")).put("ok", true)
+                                .put("sid", "original-upload").put("chunk", 16384).toString() + "\n")
+                            writer.flush()
+                        }
+                    }
+                }.apply { isDaemon = true; start() }
+                original.connect(); clientField.set(ConnectionManager, original)
+                try {
+                    val error = assertThrows(IOException::class.java) {
+                        runBlocking { FileTransfer.uploadTo(app, uri, "original.bin", original) {} }
+                    }
+                    assertTrue(error.message.orEmpty().contains("连接已切换"))
+                    worker.join(2000)
+                    assertEquals(listOf("begin", "abort"), received)
+                    assertThrows(java.net.SocketTimeoutException::class.java) { replacementSocket.getInputStream().read() }
+                    assertNoCache()
+                } finally {
+                    original.close(); replacement.close(); replacementSocket.close()
+                    worker.join(2000)
+                }
+            }
+        }
+    }
 }
