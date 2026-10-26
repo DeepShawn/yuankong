@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
-        <shape android:shape="oval"><solid android:color="@color/accent_glow" /></shape>
+        <shape android:shape="oval"><solid android:color="?attr/lcAccentGlow" /></shape>
     </item>
     <item android:top="2.5dp" android:bottom="2.5dp" android:left="2.5dp" android:right="2.5dp">
-        <shape android:shape="oval"><solid android:color="@color/accent" /></shape>
+        <shape android:shape="oval"><solid android:color="?attr/lcAccent" /></shape>
     </item>
 </layer-list>

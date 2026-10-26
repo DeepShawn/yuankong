@@ -3,40 +3,62 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg"
+    android:background="?attr/lcBg"
     android:orientation="vertical"
     android:paddingHorizontal="12dp"
     android:paddingTop="10dp"
     android:paddingBottom="8dp">
 
-    <TextView
-        style="@style/Widget.LanCmd.SectionLabel"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginStart="2dp"
-        android:paddingTop="4dp"
-        android:text="LANCMD · 局域网控制"
-        android:textColor="@color/accent" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingBottom="8dp">
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="1dp"
-        android:paddingTop="2dp"
-        android:paddingBottom="10dp"
-        android:text="工作台"
-        android:textSize="26sp"
-        android:textStyle="bold"
-        android:letterSpacing="0.02"
-        android:textColor="@color/text" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                style="@style/Widget.LanCmd.SectionLabel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="2dp"
+                android:paddingTop="4dp"
+                android:text="LANCMD · 局域网控制"
+                android:textColor="?attr/lcAccent" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="1dp"
+                android:paddingTop="2dp"
+                android:text="工作台"
+                android:textSize="26sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.02"
+                android:textColor="?attr/lcText" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btnTheme"
+            style="@style/Widget.LanCmd.IconButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="外观主题"
+            android:src="@drawable/ic_palette" />
+    </LinearLayout>
 
     <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        app:cardBackgroundColor="@color/surface"
+        app:cardBackgroundColor="?attr/lcSurface"
         app:cardCornerRadius="20dp"
         app:cardElevation="0dp"
-        app:strokeColor="@color/outline_soft"
+        app:strokeColor="?attr/lcOutlineSoft"
         app:strokeWidth="1dp">
 
         <LinearLayout
@@ -68,7 +90,7 @@
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:text="@string/status_idle"
-                    android:textColor="@color/text"
+                    android:textColor="?attr/lcText"
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
@@ -81,7 +103,7 @@
                     android:paddingVertical="4dp"
                     android:fontFamily="monospace"
                     android:text="—"
-                    android:textColor="@color/dim"
+                    android:textColor="?attr/lcDim"
                     android:textSize="11sp" />
 
                 <ImageButton
@@ -112,7 +134,7 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:text="@string/sub_idle"
-                android:textColor="@color/dim"
+                android:textColor="?attr/lcDim"
                 android:textSize="11.5sp" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
@@ -128,7 +150,7 @@
         app:cardBackgroundColor="@android:color/transparent"
         app:cardCornerRadius="22dp"
         app:cardElevation="0dp"
-        app:rippleColor="@color/accent_glow"
+        app:rippleColor="?attr/lcAccentGlow"
         app:strokeWidth="0dp">
         <LinearLayout
             android:layout_width="match_parent"
@@ -141,21 +163,21 @@
             android:paddingVertical="14dp">
             <ImageView android:layout_width="46dp" android:layout_height="46dp"
                 android:background="@drawable/hero_icon_bg" android:padding="11dp"
-                android:src="@drawable/ic_desktop" android:tint="@color/accent" android:contentDescription="@null" />
+                android:src="@drawable/ic_desktop" android:tint="?attr/lcAccent" android:contentDescription="@null" />
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1" android:layout_marginStart="14dp" android:orientation="vertical">
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="远程桌面" android:textColor="@color/text" android:textSize="17sp" android:textStyle="bold" />
+                    android:text="远程桌面" android:textColor="?attr/lcText" android:textSize="17sp" android:textStyle="bold" />
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:layout_marginTop="3dp" android:text="屏幕 · 共享触控 · 键鼠 · 命令终端"
-                    android:textColor="#B8D4CF" android:textSize="11.5sp" />
+                    android:textColor="?attr/lcHeroSub" android:textSize="11.5sp" />
             </LinearLayout>
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:background="@drawable/hero_icon_bg"
                 android:paddingHorizontal="12dp" android:paddingVertical="6dp"
                 android:fontFamily="sans-serif-medium"
-                android:text="进入 ›" android:textColor="@color/accent" android:textSize="12.5sp" />
+                android:text="进入 ›" android:textColor="?attr/lcAccent" android:textSize="12.5sp" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
@@ -176,35 +198,52 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="8dp"
         android:paddingHorizontal="3dp"
         android:orientation="horizontal">
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnVolume"
             style="@style/Widget.LanCmd.Button.Tonal"
             android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
-            android:text="电脑音量" android:textSize="12sp" />
+            android:paddingHorizontal="10dp"
+            android:maxLines="1" android:ellipsize="end"
+            app:icon="@drawable/ic_volume"
+            android:text="电脑音量" android:textSize="12.5sp" />
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnCommands"
             style="@style/Widget.LanCmd.Button.Tonal"
             android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
             android:layout_marginStart="8dp"
-            android:text="常用命令" android:textSize="12sp" />
+            android:paddingHorizontal="10dp"
+            android:maxLines="1" android:ellipsize="end"
+            app:icon="@drawable/ic_terminal"
+            android:text="常用命令" android:textSize="12.5sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="0dp"
+        android:paddingHorizontal="3dp"
+        android:orientation="horizontal">
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnDevices"
             style="@style/Widget.LanCmd.Button.Tonal"
             android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+            android:paddingHorizontal="10dp"
+            android:maxLines="1" android:ellipsize="end"
+            app:icon="@drawable/ic_usb"
+            android:text="U盘锁 / 设备" android:textSize="12.5sp" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnPlans"
+            style="@style/Widget.LanCmd.Button.Tonal"
+            android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
             android:layout_marginStart="8dp"
-            android:text="U盘锁 / 设备" android:textSize="12sp" android:paddingHorizontal="4dp" />
+            android:paddingHorizontal="10dp"
+            android:maxLines="1" android:ellipsize="end"
+            app:icon="@drawable/ic_history"
+            android:text="延迟命令列表" android:textSize="12.5sp" />
     </LinearLayout>
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnPlans"
-        style="@style/Widget.LanCmd.Button.Tonal"
-        android:layout_width="match_parent" android:layout_height="48dp"
-        android:layout_marginHorizontal="3dp"
-        app:icon="@drawable/ic_history"
-        android:text="命令列表 · 延迟执行" android:textSize="12sp" />
 
     <FrameLayout
         android:layout_width="match_parent"
@@ -215,10 +254,10 @@
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            app:cardBackgroundColor="#0C121B"
+            app:cardBackgroundColor="?attr/lcConsole"
             app:cardCornerRadius="20dp"
             app:cardElevation="0dp"
-            app:strokeColor="@color/outline_soft"
+            app:strokeColor="?attr/lcOutlineSoft"
             app:strokeWidth="1dp">
 
             <ScrollView
@@ -236,7 +275,7 @@
                     android:layout_height="wrap_content"
                     android:fontFamily="monospace"
                     android:lineSpacingExtra="3dp"
-                    android:textColor="@color/text"
+                    android:textColor="?attr/lcText"
                     android:textIsSelectable="true"
                     android:textSize="12sp" />
             </ScrollView>
@@ -260,7 +299,7 @@
                 android:layout_width="34dp"
                 android:layout_height="34dp"
                 android:indeterminate="true"
-                android:indeterminateTint="@color/accent" />
+                android:indeterminateTint="?attr/lcAccent" />
 
             <TextView
                 android:id="@+id/tvOverlay"
@@ -269,7 +308,7 @@
                 android:layout_marginTop="14dp"
                 android:gravity="center"
                 android:text="@string/overlay_connecting"
-                android:textColor="@color/text"
+                android:textColor="?attr/lcText"
                 android:textSize="13.5sp" />
 
             <com.google.android.material.button.MaterialButton
@@ -279,8 +318,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
                 android:text="@string/retry_now"
-                android:textColor="@color/accent"
-                app:strokeColor="@color/accent" />
+                android:textColor="?attr/lcAccent"
+                app:strokeColor="?attr/lcAccent" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFwHelp"
@@ -298,10 +337,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
-        app:cardBackgroundColor="@color/surface"
+        app:cardBackgroundColor="?attr/lcSurface"
         app:cardCornerRadius="22dp"
         app:cardElevation="0dp"
-        app:strokeColor="@color/outline_soft"
+        app:strokeColor="?attr/lcOutlineSoft"
         app:strokeWidth="1dp">
 
         <LinearLayout
@@ -327,7 +366,7 @@
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnShellCmd"
                         style="@style/Widget.Material3.Button.OutlinedButton"
-                        app:strokeColor="@color/outline"
+                        app:strokeColor="?attr/lcOutline"
                         android:layout_width="wrap_content"
                         android:layout_height="36dp"
                         android:insetTop="0dp"
@@ -338,7 +377,7 @@
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnShellPs"
                         style="@style/Widget.Material3.Button.OutlinedButton"
-                        app:strokeColor="@color/outline"
+                        app:strokeColor="?attr/lcOutline"
                         android:layout_width="wrap_content"
                         android:layout_height="36dp"
                         android:insetTop="0dp"
@@ -387,8 +426,8 @@
                     android:inputType="textNoSuggestions"
                     android:maxLines="1"
                     android:paddingHorizontal="14dp"
-                    android:textColor="@color/text"
-                    android:textColorHint="@color/dim"
+                    android:textColor="?attr/lcText"
+                    android:textColorHint="?attr/lcDim"
                     android:textSize="13.5sp" />
 
                 <ImageButton
@@ -401,7 +440,7 @@
                     android:padding="13dp"
                     android:elevation="2dp"
                     android:src="@drawable/ic_send"
-                    android:tint="@color/on_accent" />
+                    android:tint="?attr/lcOnAccent" />
             </LinearLayout>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>

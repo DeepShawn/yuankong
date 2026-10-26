@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 背景色调：叠加在 Theme.LanCmd 上，Themes.kt 按用户选择应用 -->
+    <style name="Tone.Deep" parent="">
+        <item name="lcBg">#080C12</item>
+        <item name="lcSurface">#101722</item>
+        <item name="lcSurfaceVariant">#172131</item>
+        <item name="lcSurfaceHigh">#1E2A3D</item>
+        <item name="lcOutline">#24324A</item>
+        <item name="lcOutlineSoft">#1A2537</item>
+        <item name="lcText">#EAF1F8</item>
+        <item name="lcDim">#8B9AB0</item>
+        <item name="lcConsole">#0C121B</item>
+        <item name="lcOverlay">#F0080C12</item>
+    </style>
+
+    <style name="Tone.Black" parent="">
+        <item name="lcBg">#000000</item>
+        <item name="lcSurface">#0B0B0D</item>
+        <item name="lcSurfaceVariant">#141417</item>
+        <item name="lcSurfaceHigh">#1C1C21</item>
+        <item name="lcOutline">#2A2A31</item>
+        <item name="lcOutlineSoft">#1C1C22</item>
+        <item name="lcText">#F2F2F5</item>
+        <item name="lcDim">#9A9AA6</item>
+        <item name="lcConsole">#050506</item>
+        <item name="lcOverlay">#F2000000</item>
+    </style>
+
+    <style name="Tone.Graphite" parent="">
+        <item name="lcBg">#14161A</item>
+        <item name="lcSurface">#1C1F25</item>
+        <item name="lcSurfaceVariant">#252932</item>
+        <item name="lcSurfaceHigh">#2E333D</item>
+        <item name="lcOutline">#3A404C</item>
+        <item name="lcOutlineSoft">#2B3039</item>
+        <item name="lcText">#ECEEF2</item>
+        <item name="lcDim">#A0A6B2</item>
+        <item name="lcConsole">#171A1F</item>
+        <item name="lcOverlay">#F014161A</item>
+    </style>
+
+    <style name="Tone.Navy" parent="">
+        <item name="lcBg">#0A1022</item>
+        <item name="lcSurface">#111A33</item>
+        <item name="lcSurfaceVariant">#19244A</item>
+        <item name="lcSurfaceHigh">#212E59</item>
+        <item name="lcOutline">#2A3A6B</item>
+        <item name="lcOutlineSoft">#1E2A52</item>
+        <item name="lcText">#EAF0FF</item>
+        <item name="lcDim">#93A0C4</item>
+        <item name="lcConsole">#0D1429</item>
+        <item name="lcOverlay">#F00A1022</item>
+    </style>
+
+    <!-- 主题色 -->
+    <style name="Accent.Mint" parent="">
+        <item name="lcAccent">#3EE0B5</item>
+        <item name="lcAccentDim">#123F37</item>
+        <item name="lcAccentGlow">#333EE0B5</item>
+        <item name="lcAccent2">#5AA9FF</item>
+        <item name="lcAccentEnd">#2CC6C9</item>
+        <item name="lcOnAccent">#022B21</item>
+        <item name="lcHeroStart">#1A5A4C</item>
+        <item name="lcHeroCenter">#14403F</item>
+        <item name="lcHeroEnd">#172C4A</item>
+        <item name="lcHeroStroke">#3352E3BE</item>
+        <item name="lcHeroSub">#B8D4CF</item>
+    </style>
+
+    <style name="Accent.Ocean" parent="">
+        <item name="lcAccent">#4FA8FF</item>
+        <item name="lcAccentDim">#12304F</item>
+        <item name="lcAccentGlow">#334FA8FF</item>
+        <item name="lcAccent2">#6EE7F0</item>
+        <item name="lcAccentEnd">#3C7BFF</item>
+        <item name="lcOnAccent">#021A33</item>
+        <item name="lcHeroStart">#174A7A</item>
+        <item name="lcHeroCenter">#15335E</item>
+        <item name="lcHeroEnd">#1C2452</item>
+        <item name="lcHeroStroke">#334FA8FF</item>
+        <item name="lcHeroSub">#B9CEE6</item>
+    </style>
+
+    <style name="Accent.Violet" parent="">
+        <item name="lcAccent">#A98BFF</item>
+        <item name="lcAccentDim">#2C2252</item>
+        <item name="lcAccentGlow">#33A98BFF</item>
+        <item name="lcAccent2">#FF8BD1</item>
+        <item name="lcAccentEnd">#8A6CFF</item>
+        <item name="lcOnAccent">#1A0F3D</item>
+        <item name="lcHeroStart">#3D2C78</item>
+        <item name="lcHeroCenter">#2E2260</item>
+        <item name="lcHeroEnd">#3A1E4E</item>
+        <item name="lcHeroStroke">#33A98BFF</item>
+        <item name="lcHeroSub">#CFC4EC</item>
+    </style>
+
+    <style name="Accent.Amber" parent="">
+        <item name="lcAccent">#FFB547</item>
+        <item name="lcAccentDim">#47320F</item>
+        <item name="lcAccentGlow">#33FFB547</item>
+        <item name="lcAccent2">#FF7A59</item>
+        <item name="lcAccentEnd">#FF9142</item>
+        <item name="lcOnAccent">#331F00</item>
+        <item name="lcHeroStart">#5E4114</item>
+        <item name="lcHeroCenter">#47301A</item>
+        <item name="lcHeroEnd">#3A2320</item>
+        <item name="lcHeroStroke">#33FFB547</item>
+        <item name="lcHeroSub">#E6D3B5</item>
+    </style>
+
+    <style name="Accent.Rose" parent="">
+        <item name="lcAccent">#FF7096</item>
+        <item name="lcAccentDim">#4D1A2A</item>
+        <item name="lcAccentGlow">#33FF7096</item>
+        <item name="lcAccent2">#FFB86B</item>
+        <item name="lcAccentEnd">#FF5C7A</item>
+        <item name="lcOnAccent">#3A0414</item>
+        <item name="lcHeroStart">#62213A</item>
+        <item name="lcHeroCenter">#4A1C36</item>
+        <item name="lcHeroEnd">#33203F</item>
+        <item name="lcHeroStroke">#33FF7096</item>
+        <item name="lcHeroSub">#EAC3CF</item>
+    </style>
+
+    <style name="Accent.Lime" parent="">
+        <item name="lcAccent">#A3E635</item>
+        <item name="lcAccentDim">#2B3D10</item>
+        <item name="lcAccentGlow">#33A3E635</item>
+        <item name="lcAccent2">#34D399</item>
+        <item name="lcAccentEnd">#6BD04A</item>
+        <item name="lcOnAccent">#1A2600</item>
+        <item name="lcHeroStart">#36521A</item>
+        <item name="lcHeroCenter">#283F1C</item>
+        <item name="lcHeroEnd">#1C3330</item>
+        <item name="lcHeroStroke">#33A3E635</item>
+        <item name="lcHeroSub">#D0E2BA</item>
+    </style>
+</resources>

@@ -9,18 +9,18 @@
     android:focusable="true"
     android:gravity="center"
     android:orientation="vertical"
-    android:minHeight="80dp"
+    android:minHeight="74dp"
     android:paddingHorizontal="2dp"
-    android:paddingVertical="10dp">
+    android:paddingVertical="9dp">
 
     <ImageView
         android:id="@+id/ivIcon"
-        android:layout_width="38dp"
-        android:layout_height="38dp"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
         android:background="@drawable/action_icon_bg"
         android:contentDescription="@null"
-        android:padding="9dp"
-        android:tint="@color/accent" />
+        android:padding="8dp"
+        android:tint="?attr/lcAccent" />
 
     <TextView
         android:id="@+id/tvLabel"

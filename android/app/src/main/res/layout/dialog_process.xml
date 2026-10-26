@@ -13,7 +13,7 @@
         android:layout_marginHorizontal="18dp"
         android:layout_marginTop="6dp"
         android:hint="@string/search_process"
-        app:boxStrokeColor="@color/accent"
+        app:boxStrokeColor="?attr/lcAccent"
         app:boxCornerRadiusTopStart="14dp"
         app:boxCornerRadiusTopEnd="14dp"
         app:boxCornerRadiusBottomStart="14dp"
@@ -27,7 +27,7 @@
             android:imeOptions="actionSearch"
             android:inputType="text"
             android:maxLines="1"
-            android:textColor="@color/text"
+            android:textColor="?attr/lcText"
             android:textSize="13.5sp" />
     </com.google.android.material.textfield.TextInputLayout>
 
@@ -42,7 +42,7 @@
         android:focusable="true"
         android:foreground="?attr/selectableItemBackground"
         android:text="正在读取电脑权限…"
-        android:textColor="@color/dim"
+        android:textColor="?attr/lcDim"
         android:textSize="12sp" />
 
     <LinearLayout
@@ -59,7 +59,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/loading"
-            android:textColor="@color/dim"
+            android:textColor="?attr/lcDim"
             android:textSize="11.5sp" />
 
         <com.google.android.material.button.MaterialButton
@@ -70,7 +70,7 @@
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:text="@string/refresh"
-            android:textColor="@color/accent"
+            android:textColor="?attr/lcAccent"
             android:textSize="12sp" />
 
         <com.google.android.material.button.MaterialButton
@@ -81,7 +81,7 @@
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:text="@string/sort_memory"
-            android:textColor="@color/dim"
+            android:textColor="?attr/lcDim"
             android:textSize="12sp" />
     </LinearLayout>
 
@@ -105,7 +105,7 @@
             android:layout_width="32dp"
             android:layout_height="32dp"
             android:layout_gravity="center"
-            android:indeterminateTint="@color/accent" />
+            android:indeterminateTint="?attr/lcAccent" />
 
         <TextView
             android:id="@+id/tvEmpty"
@@ -115,7 +115,7 @@
             android:gravity="center"
             android:padding="24dp"
             android:text="@string/no_process"
-            android:textColor="@color/dim"
+            android:textColor="?attr/lcDim"
             android:textSize="13sp"
             android:visibility="gone" />
     </FrameLayout>

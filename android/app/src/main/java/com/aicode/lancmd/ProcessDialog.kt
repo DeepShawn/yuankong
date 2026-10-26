@@ -11,7 +11,6 @@ import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleCoroutineScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -105,7 +104,7 @@ class ProcessDialog(
 
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
-                setTextColor(ContextCompat.getColor(ctx, R.color.danger))
+                setTextColor(Themes.color(ctx, R.color.danger))
                 setOnClickListener { killSelected() }
             }
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { toggleSelectAll() }
@@ -337,13 +336,13 @@ class ProcessDialog(
             }
 
             holder.name.setTextColor(
-                ContextCompat.getColor(ctx, if (isSelf) R.color.warn else R.color.text)
+                Themes.color(ctx, if (isSelf) R.color.warn else R.color.text)
             )
             holder.name.setTypeface(null, if (isSelected) Typeface.BOLD else Typeface.NORMAL)
             holder.mark.visibility = if (isSelected) View.VISIBLE else View.INVISIBLE
             holder.kill.visibility = if (isProtected) View.INVISIBLE else View.VISIBLE
             holder.itemView.setBackgroundColor(
-                if (isSelected) ContextCompat.getColor(ctx, R.color.surface_variant)
+                if (isSelected) Themes.color(ctx, R.color.surface_variant)
                 else android.graphics.Color.TRANSPARENT
             )
 
