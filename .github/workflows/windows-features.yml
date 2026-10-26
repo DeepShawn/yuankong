@@ -4,11 +4,13 @@ on:
     paths:
       - windows/**
       - tools/test_*.py
+      - tools/start_panel_harness.c
       - .github/workflows/windows-features.yml
   pull_request:
     paths:
       - windows/**
       - tools/test_*.py
+      - tools/start_panel_harness.c
       - .github/workflows/windows-features.yml
   workflow_dispatch:
 permissions:
@@ -31,6 +33,18 @@ jobs:
         run: cl /nologo /O2 /W3 /DUNICODE /D_UNICODE /DLANCMD_CONSOLE /Fe:windows\LanCmdCtl.exe windows\launcher.c /link shell32.lib user32.lib
       - name: Launcher argument regression
         run: python -m unittest discover -s tools -p test_launcher.py -v
+      - name: Build visible panel and native regression harness
+        shell: cmd
+        run: |
+          cl /nologo /O2 /W3 /DUNICODE /D_UNICODE /Fe:windows\Start.exe windows\start_panel.c /link /SUBSYSTEM:WINDOWS advapi32.lib ws2_32.lib shell32.lib comctl32.lib user32.lib gdi32.lib
+          if errorlevel 1 exit /b 1
+          if not exist windows\build-win mkdir windows\build-win
+          cl /nologo /O2 /W3 /LD /DUNICODE /D_UNICODE /Fe:windows\build-win\StartPanelTest.dll tools\start_panel_harness.c /link advapi32.lib ws2_32.lib shell32.lib comctl32.lib user32.lib gdi32.lib
+          if errorlevel 1 exit /b 1
+      - name: Panel privilege and cancellation regression
+        run: python -m unittest discover -s tools -p test_panel.py -v
+      - name: Process privilege metadata regression
+        run: python -m unittest discover -s tools -p test_process_metadata.py -v
       - name: File transfer regression
         run: python -m unittest discover -s tools -p test_file_operations.py -v
       - name: Pointer input and cleanup regression

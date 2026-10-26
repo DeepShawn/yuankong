@@ -7,6 +7,9 @@
  * 编译：x86_64-w64-mingw32-gcc -O2 -s -municode -mwindows -o Start.exe start_panel.c res.o -ladvapi32 -lws2_32 -lshell32 -static
  */
 
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <commctrl.h>
@@ -14,6 +17,8 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <wchar.h>
 
 #define ID_STATUS   2001
@@ -24,20 +29,24 @@
 #define ID_OPEN_DIR 2006
 #define ID_QUIT     2007
 #define ID_FIREWALL 2008
+#define ID_ADMIN    2009
 #define TIMER_REFRESH 1
 #define WM_APP_FWCHECK  (WM_APP + 1)
+#define WM_APP_ADMINSTART (WM_APP + 2)
 
 static HWND g_status = NULL;
 static HWND g_ipinfo = NULL;
 static HWND g_btn_start = NULL;
 static HWND g_btn_stop = NULL;
 static HWND g_btn_auto = NULL;
+static HWND g_btn_admin = NULL;
 static HFONT g_font = NULL;
 static HFONT g_font_bold = NULL;
 static wchar_t g_dir[MAX_PATH];
 static HWND g_fw = NULL;
 static int g_fw_prompted = 0;
 static int g_lastRunning = -1;
+static int g_lastPid = 0;
 
 static void app_dir(wchar_t *out, size_t cap)
 {
@@ -95,6 +104,77 @@ static int running_pid(void)
     int pid = read_pid();
     if (pid > 0 && alive(pid)) return pid;
     return 0;
+}
+
+/* Query the receiver's token, not the panel's token. -1 means unknown. */
+static int process_elevated(int pid)
+{
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+    if (!process) return -1;
+    HANDLE token = NULL;
+    if (!OpenProcessToken(process, TOKEN_QUERY, &token)) { CloseHandle(process); return -1; }
+    TOKEN_ELEVATION elevation;
+    DWORD size = 0;
+    int result = GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size)
+        ? (elevation.TokenIsElevated ? 1 : 0) : -1;
+    CloseHandle(token);
+    CloseHandle(process);
+    return result;
+}
+
+/* Never remove the PID file after a failed stop, or remove a new instance's file. */
+static int stop_receiver_process(int pid)
+{
+    if (pid <= 4 || (DWORD)pid == GetCurrentProcessId()) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, (DWORD)pid);
+    if (!process) return 0;
+    if (!TerminateProcess(process, 0)) {
+        DWORD error = GetLastError(); CloseHandle(process); SetLastError(error); return 0;
+    }
+    DWORD wait = WaitForSingleObject(process, 5000);
+    if (wait != WAIT_OBJECT_0) {
+        DWORD error = wait == WAIT_TIMEOUT ? ERROR_TIMEOUT : GetLastError();
+        CloseHandle(process); SetLastError(error); return 0;
+    }
+    if (read_pid() == pid) {
+        wchar_t path[MAX_PATH];
+        if (pid_path(path, MAX_PATH)) DeleteFileW(path);
+    }
+    CloseHandle(process);
+    return 1;
+}
+
+/* The old receiver is left untouched until Windows has approved runas and the
+ * elevated panel has started. Cancelling UAC therefore preserves the connection. */
+static int open_admin_panel(HWND hwnd)
+{
+    wchar_t self[MAX_PATH];
+    DWORD length = GetModuleFileNameW(NULL, self, MAX_PATH);
+    if (!length || length >= MAX_PATH) return 0;
+    SHELLEXECUTEINFOW request;
+    ZeroMemory(&request, sizeof(request));
+    request.cbSize = sizeof(request);
+    request.fMask = SEE_MASK_NOCLOSEPROCESS;
+    request.hwnd = hwnd;
+    request.lpVerb = L"runas";
+    request.lpFile = self;
+    request.lpParameters = L"--restart-admin";
+    request.lpDirectory = g_dir;
+    request.nShow = SW_SHOWNORMAL;
+    if (!ShellExecuteExW(&request)) {
+        DWORD error = GetLastError();
+        MessageBoxW(hwnd, error == ERROR_CANCELLED
+            ? L"已取消管理员授权，原接收端继续运行，权限没有改变。"
+            : L"无法打开管理员面板。原接收端没有被停止，请检查 Windows 权限设置。",
+            L"LanCmd", MB_ICONWARNING);
+        return 0;
+    }
+    if (request.hProcess) CloseHandle(request.hProcess);
+    DestroyWindow(hwnd);
+    return 1;
 }
 
 static void auto_start_enabled(wchar_t *cmd, size_t cap)
@@ -240,7 +320,9 @@ static void refresh(void)
     int pid = running_pid();
     wchar_t text[512];
     if (pid > 0) {
-        _snwprintf(text, 511, L"● 接收端运行中    PID %d", pid);
+        int admin = process_elevated(pid);
+        _snwprintf(text, 511, L"● 运行中 PID %d · %s", pid,
+                   admin == 1 ? L"管理员" : admin == 0 ? L"标准用户" : L"权限未知");
     } else {
         _snwprintf(text, 511, L"○ 接收端未运行");
     }
@@ -248,8 +330,14 @@ static void refresh(void)
     SetWindowTextW(g_status, text);
     EnableWindow(g_btn_start, pid <= 0);
     EnableWindow(g_btn_stop, pid > 0);
+    int receiver_admin = pid > 0 ? process_elevated(pid) : -1;
+    int panel_admin = process_elevated((int)GetCurrentProcessId());
+    SetWindowTextW(g_btn_admin, receiver_admin == 1
+        ? (panel_admin == 1 ? L"接收端已使用管理员权限" : L"打开管理员面板")
+        : L"管理员启动 / 重启");
+    EnableWindow(g_btn_admin, receiver_admin != 1 || panel_admin != 1);
 
-    if (pid > 0 && g_lastRunning != 1) {
+    if (pid > 0 && (g_lastRunning != 1 || pid != g_lastPid)) {
         wchar_t ips[512];
         local_ips(ips, 512);
         wchar_t line[640];
@@ -262,6 +350,7 @@ static void refresh(void)
         SetWindowTextW(g_ipinfo, L"点下面「启动接收端」开始，之后手机打开 App 即可");
     }
     g_lastRunning = pid > 0 ? 1 : 0;
+    g_lastPid = pid;
 }
 
 /* 读 launcher.log 尾部，启动失败时给用户看 */
@@ -347,16 +436,53 @@ static void do_stop(void)
     if (MessageBoxW(NULL, L"确定停止接收端？\n停止后手机将无法连接。",
                     L"LanCmd", MB_YESNO | MB_ICONQUESTION) != IDYES) return;
 
-    HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, (DWORD)pid);
-    if (h) {
-        TerminateProcess(h, 0);
-        CloseHandle(h);
+    if (!stop_receiver_process(pid)) {
+        MessageBoxW(NULL, L"接收端未能停止，运行状态和 PID 文件已保留。\n请以管理员身份打开 Start.exe 后重试。",
+                    L"LanCmd", MB_ICONWARNING);
     }
-    // 不残留 pid 文件，下次启动才不会误判
-    wchar_t path[MAX_PATH];
-    if (pid_path(path, MAX_PATH)) DeleteFileW(path);
-    Sleep(300);
     refresh();
+}
+
+static void start_receiver(HWND hwnd)
+{
+    launch_agent();
+    int waited = 0;
+    while (waited < 10000 && running_pid() <= 0) { Sleep(300); waited += 300; }
+    if (running_pid() <= 0 && launch_via_pythonw()) {
+        waited = 0;
+        while (waited < 10000 && running_pid() <= 0) { Sleep(300); waited += 300; }
+    }
+    refresh();
+    if (running_pid() <= 0) {
+        wchar_t tail[1600], message[2200];
+        panel_log_tail(tail, 1600);
+        _snwprintf(message, 2199,
+            L"接收端没能启动。\n\n--- 启动日志 ---\n%s\n\n请运行文件夹中的「诊断.bat」检查。",
+            tail[0] ? tail : L"(没有日志)");
+        message[2199] = 0;
+        MessageBoxW(hwnd, message, L"LanCmd", MB_ICONERROR | MB_OK);
+    }
+}
+
+static void start_as_admin(HWND hwnd)
+{
+    if (process_elevated((int)GetCurrentProcessId()) != 1) {
+        MessageBoxW(hwnd, L"尚未获得 Windows 管理员授权。请点击「管理员启动 / 重启」并允许 UAC。",
+                    L"LanCmd", MB_ICONWARNING);
+        return;
+    }
+    int pid = running_pid();
+    if (pid > 0) {
+        int admin = process_elevated(pid);
+        if (admin == 1) { refresh(); return; }
+        if (admin < 0 || !stop_receiver_process(pid)) {
+            MessageBoxW(hwnd, L"无法安全停止现有接收端，未执行重启。请检查权限和 PID，原 PID 文件已保留。",
+                        L"LanCmd", MB_ICONERROR);
+            return;
+        }
+    }
+    /* CreateProcess inherits the UAC-approved token of this visible panel. */
+    start_receiver(hwnd);
 }
 
 static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -392,19 +518,23 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         g_btn_auto = CreateWindowW(L"BUTTON", L"开机自启",
                                    WS_CHILD | WS_VISIBLE | WS_TABSTOP,
                                    246, 124, 102, 36, hwnd, (HMENU)ID_AUTORUN, NULL, NULL);
+        g_btn_admin = CreateWindowW(L"BUTTON", L"管理员启动 / 重启",
+                                    WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+                                    18, 170, 350, 36, hwnd, (HMENU)ID_ADMIN, NULL, NULL);
+        SendMessageW(g_btn_admin, BCM_SETSHIELD, 0, TRUE);
         HWND btn_fw = CreateWindowW(L"BUTTON", L"修复防火墙",
                                     WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                                    18, 172, 130, 32, hwnd, (HMENU)ID_FIREWALL, NULL, NULL);
+                                    18, 218, 130, 32, hwnd, (HMENU)ID_FIREWALL, NULL, NULL);
         HWND btn_open = CreateWindowW(L"BUTTON", L"打开配置目录",
                                       WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                                      152, 172, 130, 32, hwnd, (HMENU)ID_OPEN_DIR, NULL, NULL);
+                                      152, 218, 130, 32, hwnd, (HMENU)ID_OPEN_DIR, NULL, NULL);
         HWND btn_quit = CreateWindowW(L"BUTTON", L"关闭",
                                       WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                                      286, 172, 82, 32, hwnd, (HMENU)ID_QUIT, NULL, NULL);
+                                      286, 218, 82, 32, hwnd, (HMENU)ID_QUIT, NULL, NULL);
         g_fw = btn_fw;
 
-        HWND all[] = {g_btn_start, g_btn_stop, g_btn_auto, btn_open, btn_quit, btn_fw};
-        for (int i = 0; i < 6; ++i)
+        HWND all[] = {g_btn_start, g_btn_stop, g_btn_auto, btn_open, btn_quit, btn_fw, g_btn_admin};
+        for (int i = 0; i < 7; ++i)
             SendMessageW(all[i], WM_SETFONT, (WPARAM)g_font, TRUE);
 
         // 防火墙状态异步查，不阻塞窗口显示
@@ -438,45 +568,23 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_TIMER:
         if (wp == TIMER_REFRESH) {
-            int pid = running_pid();
-            int now = pid > 0 ? 1 : 0;
-            if (now != g_lastRunning) refresh();
+            refresh();
         }
+        return 0;
+    case WM_APP_ADMINSTART:
+        start_as_admin(hwnd);
         return 0;
     case WM_COMMAND:
         switch (LOWORD(wp)) {
-        case ID_START: {
-            launch_agent();
-            /* 轮询等待，冷启动 + 安全检查可能要几秒 */
-            int waited = 0;
-            while (waited < 10000 && running_pid() <= 0) {
-                Sleep(300);
-                waited += 300;
-            }
-            /* exe 起不来就换一条路：直接用 pythonw 跑脚本 */
-            if (running_pid() <= 0) {
-                if (launch_via_pythonw()) {
-                    int w2 = 0;
-                    while (w2 < 10000 && running_pid() <= 0) {
-                        Sleep(300);
-                        w2 += 300;
-                    }
-                }
-            }
-            refresh();
-            if (running_pid() <= 0) {
-                wchar_t tail[1600], msg[2200];
-                panel_log_tail(tail, 1600);
-                _snwprintf(msg, 2199,
-                    L"接收端没能启动。\n\n--- 启动日志 ---\n%s\n\n"
-                    L"如果日志为空，请双击文件夹里的「诊断.bat」，\n"
-                    L"它会逐项检查文件完整性与 Python 运行时。",
-                    tail[0] ? tail : L"(没有日志)");
-                msg[2199] = 0;
-                MessageBoxW(hwnd, msg, L"LanCmd", MB_ICONERROR | MB_OK);
-            }
+        case ID_START:
+            start_receiver(hwnd);
             return 0;
-        }
+        case ID_ADMIN:
+            if (process_elevated((int)GetCurrentProcessId()) == 1)
+                PostMessageW(hwnd, WM_APP_ADMINSTART, 0, 0);
+            else
+                open_admin_panel(hwnd);
+            return 0;
         case ID_STOP:
             do_stop();
             return 0;
@@ -551,6 +659,13 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdline, int show)
 {
     (void)hPrev; (void)cmdline;
+    int restart_admin = 0, argc = 0;
+    wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (argv) {
+        for (int i = 1; i < argc; ++i)
+            if (wcscmp(argv[i], L"--restart-admin") == 0) restart_admin = 1;
+        LocalFree(argv);
+    }
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
     app_dir(g_dir, MAX_PATH);
@@ -568,7 +683,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdline, int show)
     wc.hIconSm = wc.hIcon;
     if (!RegisterClassExW(&wc)) return 1;
 
-    int w = 386, h = 258;
+    int w = 386, h = 306;
     int x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2;
     int y = (GetSystemMetrics(SM_CYSCREEN) - h) / 2;
 
@@ -579,6 +694,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, LPWSTR cmdline, int show)
 
     ShowWindow(hwnd, show);
     UpdateWindow(hwnd);
+    if (restart_admin) PostMessageW(hwnd, WM_APP_ADMINSTART, 0, 0);
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {

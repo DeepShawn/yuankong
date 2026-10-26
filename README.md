@@ -3,10 +3,10 @@
 手机在同一个局域网下直接控制电脑：执行命令、查看屏幕和摄像头、发送消息和按键、管理磁盘文件、锁屏与剪贴板。
 电脑端由本机启动、停止接收服务；手机端开机即自动发现、**不用输连接码**、**掉线自动重连**。
 
-**1.6.0：新增远程桌面卡片，将屏幕、触控、键鼠和命令终端整合到一页。手机与 Windows 接收端需要一起更新。**
+**1.6.1：修复进程全选与结束确认，新增经 UAC 授权的管理员启动/重启入口，并显示接收端实际权限。建议两端一起更新。**
 
-- [下载 Android 1.6.0 APK](https://github.com/DeepShawn/yuankong/releases/download/v1.6.0/LanCmd-1.6.0.apk)
-- [下载 Windows 1.6.0 接收端](https://github.com/DeepShawn/yuankong/releases/download/v1.6.0/LanCmd-Windows-1.6.0.zip)
+- [下载 Android 1.6.1 APK](https://github.com/DeepShawn/yuankong/releases/download/v1.6.1/LanCmd-1.6.1.apk)
+- [下载 Windows 1.6.1 接收端](https://github.com/DeepShawn/yuankong/releases/download/v1.6.1/LanCmd-Windows-1.6.1.zip)
 - 新增「远程桌面」卡片，点击画面控制电脑：单击、双击、长按右键、拖动、双指滚动。
 - 同页切换鼠标按钮、组合按键、文字输入和 CMD/PowerShell 终端；横屏并排显示，支持全屏。
 - 画面、输入与终端使用独立连接，执行长命令时仍可看屏幕和操作鼠标；退出页面释放会话及拖动中的按键。
@@ -15,7 +15,7 @@
 - 保留屏幕及摄像头 JPEG 预览、桌面消息、组合按键、文字输入和可视化文件管理。
 - 手机对外统一显示「LanCmd 手机」，保留原有配对 ID，不再发送手机型号或机名。
 - 接收端沿用 1.5.0 的连接行为：完成握手即可使用功能，不校验配对 token，也没有本机确认窗口或共享时长上限。停止接收服务可终止连接。
-- Android 1.6.0 沿用 1.4.10/1.5.0/1.5.1 签名，可覆盖安装这些版本；1.4.9 用户需要先卸载再安装。
+- Android 1.6.1 沿用 1.4.10/1.5.0/1.5.1/1.6.0 签名，可覆盖安装这些版本；1.4.9 用户需要先卸载再安装。
 
 ```
 ┌──────────────┐   UDP 47824 广播探测/应答   ┌──────────────────────┐
@@ -50,10 +50,10 @@ Windows 接收端完成握手后即可接收命令。旧参数 `--auto-accept` /
 
 ### 2. 手机端（Android 7.0+，arm64-v8a）
 
-从上方链接下载 `LanCmd-1.6.0.apk` 后安装：
+从上方链接下载 `LanCmd-1.6.1.apk` 后安装：
 
 ```bash
-adb install -r LanCmd-1.6.0.apk
+adb install -r LanCmd-1.6.1.apk
 ```
 
 打开 App 自动扫描并连上唯一的那台电脑；有多台时弹列表让你选。
@@ -265,6 +265,8 @@ LanCmd-UDP   UDP  47824
 
 ---
 
+进程列表上方显示电脑接收端的实际管理员状态。需要更高权限时，在电脑的新版 `Start.exe` 点击「管理员启动 / 重启」，并允许 Windows UAC；原普通权限实例会在批准后被替换。取消授权会保留旧接收端和连接。管理员仍受 Windows 受保护进程限制；普通开机自启不会自动保留管理员权限。
+
 ## 四、能干什么
 
 | 手机操作 | 电脑侧行为 |
@@ -288,7 +290,7 @@ LanCmd-UDP   UDP  47824
 
 ## 五、Windows 端 exe
 
-**Windows 1.6.0 完整包见发布页。升级前运行 `LanCmdCtl.exe --stop`，替换整个目录后重新启动。**
+**Windows 1.6.1 完整包见发布页。升级前运行 `LanCmdCtl.exe --stop`，替换整个目录后重新启动。**
 
 解压到任意目录，双击 `LanCmdAgent.exe` 就能跑。**目标电脑不用装 Python，也不用装编译器。**
 

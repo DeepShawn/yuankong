@@ -1,4 +1,4 @@
-# Windows 1.6.0 构建
+# Windows 1.6.1 构建
 
 发布 ZIP 为 Windows x64 解压包，适用于 Windows 10/11。目标电脑不需要安装 Python。升级时先执行 `LanCmdCtl.exe --stop`，替换完整目录，再启动；配置继续保存在 `%APPDATA%\LanCmd`。
 
