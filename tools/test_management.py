@@ -13,7 +13,7 @@ from unittest import mock
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"windows"))
 from text_editor import read_text,write_text,LIMIT
-from app_locks import AppLocks,FilePermissions
+from app_locks import AppLocks,FilePermissions,same_dacl
 from registry_editor import RegistryEditor,NativeRegistry,version
 from browser_control import browser_request
 from task_manager import TaskManager,NativeProcesses
@@ -222,7 +222,7 @@ class ScriptTest(unittest.TestCase):
 
 @unittest.skipUnless(os.name=="nt","Windows native management")
 class NativeManagementTest(unittest.TestCase):
-    def test_acl_deny_execute_then_restore_exact_original(self):
+    def test_acl_deny_execute_then_restore_original_aces_and_protection(self):
         with tempfile.TemporaryDirectory(prefix="LanCmd 权限 ") as directory:
             root=Path(directory).resolve();exe=root/"selected.exe";exe.write_bytes(b"MZtest")
             backend=FilePermissions();inspection=backend.call(action="inspect",paths=[str(exe)])[0]
@@ -239,9 +239,10 @@ class NativeManagementTest(unittest.TestCase):
                 self.assertEqual(5,ctypes.get_last_error())
             finally:
                 if (root/"backup.json").exists():
-                    data=json.loads((root/"backup.json").read_text())
+                    data=json.loads((root/"backup.json").read_text(encoding="utf-8"))
                     if data:manager.request(dict(action="unlock",id=next(iter(data))),Error)
-            self.assertEqual(original,backend.call(action="inspect",paths=[str(exe)])[0]["sddl"])
+            restored=backend.call(action="inspect",paths=[str(exe)])[0]["sddl"]
+            self.assertTrue(same_dacl(original,restored),(original,restored))
     def test_native_registry_round_trip_under_isolated_hkcu_key(self):
         import winreg as w
         import uuid
@@ -264,7 +265,8 @@ class NativeManagementTest(unittest.TestCase):
             self.assertIn("sddl",inspection,inspection);original=inspection["sddl"]
             read=read_text(path);write_text(path,dict(text="new",revision=read["revision"]))
             self.assertEqual("new",path.read_text());self.assertEqual("stream",Path(str(path)+":lancmd-test").read_text())
-            self.assertEqual(original,backend.call(action="inspect",paths=[str(path)])[0]["sddl"])
+            restored=backend.call(action="inspect",paths=[str(path)])[0]["sddl"]
+            self.assertTrue(same_dacl(original,restored),(original,restored))
     def test_native_process_identity_blocks_reused_pid_then_terminates_child(self):
         child=subprocess.Popen([sys.executable,"-c","import time; time.sleep(30)"])
         try:
@@ -287,7 +289,14 @@ class NativeManagementTest(unittest.TestCase):
                 manager.request(dict(action="run",path=str(vbs)),owner,Error)
                 settle(lambda:manager.request({},owner,Error)["items"][0]["status"] not in ("starting","running"))
                 second=manager.request({},owner,Error)["items"][0]
-                self.assertEqual(0,second.get("code"),second);self.assertIn("script-output",second["out"])
+                self.assertEqual(0,second.get("code"),second)
+                if "script-output" not in second["out"]:
+                    from script_runner import script_command
+                    command,env=script_command(vbs)
+                    direct=subprocess.run(command,cwd=str(root),env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                        creationflags=0x08000000,timeout=10)
+                    self.fail("VBS output missing. job=%r direct_code=%r stdout_hex=%s stderr_hex=%s" %
+                        (second,direct.returncode,direct.stdout[:200].hex(),direct.stderr[:200].hex()))
             finally:manager.close()
     def test_privacy_inventory_read_only_and_default_audio_unchanged(self):
         items=PrivacyHardware().inventory()

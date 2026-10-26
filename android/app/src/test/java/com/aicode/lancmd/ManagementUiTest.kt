@@ -142,14 +142,21 @@ class ManagementUiTest {
             waitFor { stub.requests.any { it.optString("action")=="lock" } }
             render(lock.get().window.decorView,"app-locks");lock.pause().stop().destroy()
             val privacy=Robolectric.buildActivity(PrivacyDevicesActivity::class.java).setup();val root=privacy.get().window.decorView
-            waitFor { buttons(root).any { it.text=="停用设备" } }
+            waitFor { buttons(root).any { it.text=="停用设备" && it.isEnabled } && buttons(root).any { it.text=="静音麦克风" && it.isEnabled } && all(root).filterIsInstance<TextView>().any { it.text.contains("已读取 1 个设备") } }
             buttons(root).single { it.text=="停用设备" }.performClick()
             shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="set_enabled" })
-            (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+            val confirmation=ShadowDialog.getLatestDialog() as AlertDialog
+            confirmation.getButton(AlertDialog.BUTTON_NEGATIVE).performClick();shadowOf(Looper.getMainLooper()).idle()
+            waitFor { !confirmation.isShowing && buttons(root).any { it.text=="静音麦克风" && it.isEnabled } }
             assertFalse(stub.requests.any { it.optString("action")=="set_enabled" })
             buttons(root).single { it.text=="静音麦克风" }.performClick()
-            waitFor { stub.requests.any { it.optString("action")=="mute" } }
+            try { waitFor { stub.requests.any { it.optString("action")=="mute" } } }
+            catch(error:AssertionError) {
+                val states=buttons(root).map { "${it.text}:enabled=${it.isEnabled}" }
+                val texts=all(root).filterIsInstance<TextView>().map { it.text.toString() }
+                throw AssertionError("Microphone mute not submitted. Buttons=$states; UI=$texts; RPC=${stub.requests}",error)
+            }
             render(root,"privacy-devices");privacy.pause().stop().destroy()
         }
     }

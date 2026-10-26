@@ -8,6 +8,20 @@ import threading
 import uuid
 import stat
 
+
+def same_dacl(left,right):
+    """Ignore only Windows' AUTO_INHERITED bookkeeping flag in DACL SDDL.
+
+    Protection, inheritance requests, ACE order, masks, identities and inherited
+    ACE flags still have to match exactly.
+    """
+    def normalized(value):
+        if not isinstance(value,str) or not value.startswith("D:"):return value
+        flags,separator,aces=value[2:].partition("(")
+        return "D:"+flags.replace("AI","")+separator+aces
+    return normalized(left)==normalized(right)
+
+
 class _FileSecurityApi:
     """Unicode Win32 ACL access; no shell or PowerShell console encoding."""
     def __init__(self):
@@ -51,6 +65,9 @@ class _FileSecurityApi:
         self.ExplicitAccess=ExplicitAccess;self.Descriptor=Descriptor
         a.SetEntriesInAclW.argtypes=[w.ULONG,ctypes.POINTER(ExplicitAccess),ctypes.c_void_p,ctypes.POINTER(ctypes.c_void_p)]
         a.SetEntriesInAclW.restype=w.DWORD
+        a.GetAce.argtypes=[ctypes.c_void_p,w.DWORD,ctypes.POINTER(ctypes.c_void_p)];a.GetAce.restype=w.BOOL
+        a.InitializeAcl.argtypes=[ctypes.c_void_p,w.DWORD,w.DWORD];a.InitializeAcl.restype=w.BOOL
+        a.AddAce.argtypes=[ctypes.c_void_p,w.DWORD,w.DWORD,ctypes.c_void_p,w.DWORD];a.AddAce.restype=w.BOOL
 
     def open(self,path,write=False,identity=None):
         import msvcrt
@@ -97,6 +114,61 @@ class _FileSecurityApi:
         if not present.value or not dacl.value:raise ValueError("不支持空 DACL，未修改权限")
         return dacl,defaulted
 
+    def _explicit_acl(self,dacl):
+        """Keep raw explicit ACEs; Windows will inherit the parent ACL once.
+
+        Passing inherited ACEs back to SetSecurityInfo can turn them into
+        explicit copies and add a second inherited set. Raw copying also keeps
+        object/callback ACE formats that a hand-written SDDL parser would lose.
+        """
+        class Header(ctypes.Structure):
+            _fields_=[("revision",ctypes.c_ubyte),("reserved",ctypes.c_ubyte),
+                      ("size",self.w.WORD),("count",self.w.WORD),("reserved2",self.w.WORD)]
+        class AceHeader(ctypes.Structure):
+            _fields_=[("type",ctypes.c_ubyte),("flags",ctypes.c_ubyte),("size",self.w.WORD)]
+        header=ctypes.cast(dacl,ctypes.POINTER(Header)).contents
+        entries=[]
+        for index in range(header.count):
+            pointer=ctypes.c_void_p()
+            if not self.advapi.GetAce(dacl,index,ctypes.byref(pointer)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            ace=ctypes.cast(pointer,ctypes.POINTER(AceHeader)).contents
+            if not ace.flags&0x10:entries.append(ctypes.string_at(pointer,ace.size))
+        size=ctypes.sizeof(Header)+sum(len(v) for v in entries)
+        buffer=ctypes.create_string_buffer(size)
+        if not self.advapi.InitializeAcl(buffer,size,header.revision):
+            raise ctypes.WinError(ctypes.get_last_error())
+        for entry in entries:
+            raw=ctypes.create_string_buffer(entry)
+            if not self.advapi.AddAce(buffer,header.revision,0xffffffff,raw,len(entry)):
+                raise ctypes.WinError(ctypes.get_last_error())
+        return buffer
+
+    def set_dacl(self,handle,target):
+        """Set only the DACL, preserving native inheritance semantics."""
+        desired=ctypes.c_void_p()
+        try:
+            if not self.advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(target,1,ctypes.byref(desired),None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            dacl,_=self.dacl(desired)
+            protected=bool(self.control(desired)&0x1000)
+            explicit=None
+            if not protected:
+                explicit=self._explicit_acl(dacl)
+                dacl=ctypes.cast(explicit,ctypes.c_void_p)
+            information=4|(0x80000000 if protected else 0x20000000)
+            result=self.advapi.SetSecurityInfo(handle,1,information,None,None,dacl,None)
+            if result:raise ctypes.WinError(result)
+            after=self.descriptor(handle)
+            try:
+                actual=self.sddl(after)
+                if not same_dacl(actual,target):
+                    raise ValueError("文件权限写入后未确认与原目标一致，请保留恢复备份并检查权限")
+                return {"sddl":actual}
+            finally:self.kernel.LocalFree(after)
+        finally:
+            if desired.value:self.kernel.LocalFree(desired)
+
     def plan(self,path):
         handle,fd=self.open(path)
         descriptor=ctypes.c_void_p();token=self.w.HANDLE();new_acl=ctypes.c_void_p();sid_text=ctypes.c_void_p()
@@ -137,25 +209,38 @@ class _FileSecurityApi:
     def apply(self,path,expected,target,identity):
         # No FILE_SHARE_DELETE: compare and modify one bound file object.
         handle,fd=self.open(path,True,identity)
-        current=ctypes.c_void_p();desired=ctypes.c_void_p()
+        current=ctypes.c_void_p()
         try:
             current=self.descriptor(handle)
-            if self.sddl(current)!=expected:raise ValueError("文件权限已被外部修改，未覆盖")
-            if not self.advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(target,1,ctypes.byref(desired),None):
-                raise ctypes.WinError(ctypes.get_last_error())
-            dacl,_=self.dacl(desired)
-            information=4
-            if bool(self.control(current)&0x1000)!=bool(self.control(desired)&0x1000):
-                information|=0x80000000 if self.control(desired)&0x1000 else 0x20000000
-            result=self.advapi.SetSecurityInfo(handle,1,information,None,None,dacl,None)
-            if result:raise ctypes.WinError(result)
-            after=self.descriptor(handle)
-            try:return {"sddl":self.sddl(after)}
-            finally:self.kernel.LocalFree(after)
+            if not same_dacl(self.sddl(current),expected):raise ValueError("文件权限已被外部修改，未覆盖")
+            return self.set_dacl(handle,target)
         finally:
-            if desired.value:self.kernel.LocalFree(desired)
             if current.value:self.kernel.LocalFree(current)
             os.close(fd)
+
+
+def snapshot_file_dacl(path,require_write=False):
+    """Read a file DACL and identity; optionally preflight WRITE_DAC access."""
+    api=_FileSecurityApi();handle,fd=api.open(path,write=require_write)
+    descriptor=ctypes.c_void_p()
+    try:
+        info=os.fstat(fd);descriptor=api.descriptor(handle)
+        return {"sddl":api.sddl(descriptor),"identity":[info.st_dev,info.st_ino]}
+    finally:
+        if descriptor.value:api.kernel.LocalFree(descriptor)
+        os.close(fd)
+
+
+def restore_file_dacl(path,sddl,identity):
+    """Restore DACL on the expected current file; never change owner or SACL.
+
+    `identity` belongs to the file currently at `path`, for example the new file
+    published by ReplaceFile. A replaced path, reparse point or hardlink alias is
+    refused before changing permissions.
+    """
+    api=_FileSecurityApi();handle,fd=api.open(path,write=True,identity=identity)
+    try:return api.set_dacl(handle,sddl)
+    finally:os.close(fd)
 
 
 class FilePermissions:
@@ -254,8 +339,8 @@ class AppLocks:
             try:
                 info=Path(entry["path"]).stat()
                 if [info.st_dev,info.st_ino]!=entry["identity"]: item["status"]="replaced"
-                elif current.get("sddl")==entry["applied"]: item["status"]="locked"
-                elif current.get("sddl")==entry["original"]: item["status"]="unlocked"
+                elif same_dacl(current.get("sddl"),entry["applied"]): item["status"]="locked"
+                elif same_dacl(current.get("sddl"),entry["original"]): item["status"]="unlocked"
                 else: item["status"]="changed";item["error"]=current.get("error","权限已被外部修改，未覆盖")
             except FileNotFoundError:item["status"]="missing"
             except OSError as exc:item.update(status="changed",error=str(exc))
@@ -274,7 +359,7 @@ class AppLocks:
                     if any(v["path"].casefold()==str(path).casefold() for v in data.values()): raise ValueError("此文件已有记录，请先解锁并移除旧记录")
                     plan=self.backend.call(action="plan",path=str(path))
                     self._identity(path,identity)
-                    if plan["original"]==plan["applied"]:raise ValueError("原权限已限制执行，未新增应用锁")
+                    if same_dacl(plan["original"],plan["applied"]):raise ValueError("原权限已限制执行，未新增应用锁")
                     rid=uuid.uuid4().hex
                     entry=dict(path=str(path),identity=identity,**plan)
                     data[rid]=entry

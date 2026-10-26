@@ -110,6 +110,14 @@ def write_text(path, q, create=False):
                 raise ValueError("文件已被外部修改，未覆盖；请先另存草稿或重新加载")
             if data == original:
                 return dict(path=str(path), revision=expected, size=len(data))
+            security=None
+            if os.name=="nt":
+                from app_locks import snapshot_file_dacl,restore_file_dacl,same_dacl
+                # Check restoration access before touching the original. Windows
+                # ReplaceFile may normalize inherited ACEs while merging ACLs.
+                security=snapshot_file_dacl(path,require_write=True)
+                if security["identity"]!=[info.st_dev,info.st_ino]:
+                    raise ValueError("文件在读取权限期间被替换，未保存")
             fd, temp = tempfile.mkstemp(prefix=".lancmd-edit-", dir=str(path.parent))
             try:
                 with os.fdopen(fd, "wb") as stream:
@@ -118,6 +126,9 @@ def write_text(path, q, create=False):
                 if revision(current) != expected or (now.st_dev, now.st_ino, now.st_mtime_ns) != (info.st_dev, info.st_ino, info.st_mtime_ns):
                     raise ValueError("文件在保存期间被修改，未覆盖")
                 if os.name == "nt":
+                    latest=snapshot_file_dacl(path,require_write=True)
+                    if latest["identity"]!=security["identity"] or not same_dacl(latest["sddl"],security["sddl"]):
+                        raise ValueError("文件权限在保存期间被修改，未覆盖")
                     from ctypes import wintypes as w
                     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
                     kernel.ReplaceFileW.argtypes = [w.LPCWSTR,w.LPCWSTR,w.LPCWSTR,w.DWORD,ctypes.c_void_p,ctypes.c_void_p]
@@ -125,6 +136,11 @@ def write_text(path, q, create=False):
                     # ReplaceFile retains the target's DACL, creation time and ADS.
                     if not kernel.ReplaceFileW(str(path), temp, None, 0, None, None):
                         raise ctypes.WinError(ctypes.get_last_error())
+                    replacement=path.stat()
+                    try:
+                        restore_file_dacl(path,security["sddl"],[replacement.st_dev,replacement.st_ino])
+                    except (OSError,ValueError) as exc:
+                        raise ValueError("文件内容已写入，但未确认原权限已恢复；请保留手机草稿并检查文件权限："+str(exc))
                 else:
                     os.chmod(temp, stat.S_IMODE(info.st_mode)); os.replace(temp, path)
             finally:

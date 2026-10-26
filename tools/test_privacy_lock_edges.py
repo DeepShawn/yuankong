@@ -10,7 +10,7 @@ from unittest import mock
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"windows"))
-from app_locks import AppLocks,_FileSecurityApi
+from app_locks import AppLocks,_FileSecurityApi,same_dacl,snapshot_file_dacl,restore_file_dacl
 from privacy_devices import PrivacyDevices,PrivacyHardware,capture_endpoint
 
 
@@ -122,6 +122,17 @@ class PrivacyEdges(unittest.TestCase):
         self.assertEqual([capture],[i["id"] for i in items]);self.assertEqual("{0.0.1.00000000}."+guid,items[0]["endpoint"])
 
 
+class DaclComparison(unittest.TestCase):
+    def test_only_auto_inherited_bookkeeping_is_ignored(self):
+        base="D:(A;ID;FA;;;SY)(A;ID;FR;;;BA)"
+        self.assertTrue(same_dacl(base,base.replace("D:","D:AI",1)))
+        self.assertFalse(same_dacl(base,base.replace("D:","D:P",1)))
+        self.assertFalse(same_dacl(base,base.replace("D:","D:AR",1)))
+        self.assertFalse(same_dacl(base,base.replace("A;ID;FA","A;;FA",1)))
+        self.assertFalse(same_dacl(base,base.replace("FA;;;SY","FR;;;SY",1)))
+        self.assertFalse(same_dacl(base,"D:(A;ID;FR;;;BA)(A;ID;FA;;;SY)"))
+
+
 @unittest.skipUnless(os.name=="nt","native file-handle sharing")
 class NativeAclEdges(unittest.TestCase):
     def test_bound_acl_handle_prevents_file_replacement(self):
@@ -135,6 +146,44 @@ class NativeAclEdges(unittest.TestCase):
                 self.assertEqual(b"selected",path.read_bytes())
             finally:os.close(fd)
             os.replace(replacement,path);self.assertEqual(b"replacement",path.read_bytes())
+
+    def test_restore_after_replace_keeps_only_original_inherited_aces(self):
+        with tempfile.TemporaryDirectory(prefix="LanCmd 继承 ") as directory:
+            root=Path(directory).resolve();path=root/"document.txt";replacement=root/"replacement.tmp"
+            path.write_text("original",encoding="utf-8");replacement.write_text("updated",encoding="utf-8")
+            before=snapshot_file_dacl(path,require_write=True)
+            from ctypes import wintypes as w
+            kernel=ctypes.WinDLL("kernel32",use_last_error=True)
+            kernel.ReplaceFileW.argtypes=[w.LPCWSTR,w.LPCWSTR,w.LPCWSTR,w.DWORD,ctypes.c_void_p,ctypes.c_void_p]
+            kernel.ReplaceFileW.restype=w.BOOL
+            if not kernel.ReplaceFileW(str(path),str(replacement),None,0,None,None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            changed=snapshot_file_dacl(path)
+            restore_file_dacl(path,before["sddl"],changed["identity"])
+            after=snapshot_file_dacl(path)
+            self.assertTrue(same_dacl(before["sddl"],after["sddl"]),(before,after))
+            self.assertEqual("updated",path.read_text(encoding="utf-8"))
+
+    def test_protected_acl_is_restored_without_inheriting_parent_entries(self):
+        with tempfile.TemporaryDirectory(prefix="LanCmd 保护 ") as directory:
+            root=Path(directory).resolve();path=root/"selected.exe";path.write_bytes(b"selected")
+            before=snapshot_file_dacl(path,require_write=True);api=_FileSecurityApi()
+            sid=api.plan(path)["sid"]
+            protected="D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;"+sid+")"
+            descriptor=ctypes.c_void_p()
+            if not api.advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(protected,1,ctypes.byref(descriptor),None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:protected=api.sddl(descriptor)
+            finally:api.kernel.LocalFree(descriptor)
+            try:
+                restore_file_dacl(path,protected,before["identity"])
+                self.assertTrue(same_dacl(protected,snapshot_file_dacl(path)["sddl"]))
+                manager=AppLocks(root/"app-locks.json")
+                item=manager.request(dict(action="lock",path=str(path)),Error)["items"][0]
+                self.assertEqual("locked",item["status"])
+                manager.request(dict(action="unlock",id=item["id"]),Error)
+                self.assertTrue(same_dacl(protected,snapshot_file_dacl(path)["sddl"]))
+            finally:restore_file_dacl(path,before["sddl"],before["identity"])
 
 
 if __name__=="__main__":unittest.main()

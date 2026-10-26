@@ -60,7 +60,7 @@ def script_command(path):
     cscript=str(Path(os.environ.get("WINDIR",r"C:\Windows"))/"System32"/"cscript.exe")
     # CScript is a console host, hidden by CREATE_NO_WINDOW. Its batch flag
     # suppresses WScript.Echo as well as errors, so retain normal redirected I/O.
-    return [cscript,"//Nologo","//U","//T:300",str(path)],env
+    return [cscript,"//I","//Nologo","//U","//T:300",str(path)],env
 
 
 def read_available(stream):
@@ -141,7 +141,7 @@ class ScriptRunner:
                     codec="cp"+str(ctypes.windll.kernel32.GetOEMCP()) if os.name=="nt" else "gb18030"
                     return bytes(raw).decode(codec,"replace")
             with self.lock:
-                data.update(code=code,out=decode(output),err=decode(errors))
+                data.update(code=code,out=decode(output),err=decode(errors),out_bytes=len(output),err_bytes=len(errors))
                 if data["status"]=="running":data["status"]="completed" if code==0 else "failed"
         except Exception as exc:
             with self.lock:data.update(status="failed",err=str(exc)[:2000])

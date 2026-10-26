@@ -32,6 +32,7 @@ class ScriptEdgeTest(unittest.TestCase):
         command,env=script_command(Path("script.vbs"))
         self.assertEqual("cscript.exe",Path(command[0]).name.lower())
         self.assertNotIn("//B",command)
+        self.assertIn("//I",command)
         self.assertIn("//U",command)
         self.assertIn("//T:300",command)
 
