@@ -86,12 +86,12 @@ class WindowsLauncherTest(unittest.TestCase):
         self.assertIn(b"LanCmd", result.stderr)
 
     def test_status_uses_real_agent_without_starting_service(self):
-        for name in ("lan_command_agent.py", "remote_features.py"):
+        for name in ("lan_command_agent.py", "remote_features.py", "system_controls.py", "input_guard.py"):
             shutil.copy2(ROOT / "windows" / name, self.package / name)
         result = self.run_launcher(["--status"])
         # An isolated APPDATA has no running receiver; --status returns 1.
         self.assertEqual(1, result.returncode, result.stderr.decode("utf-8", "replace"))
-        self.assertIn(b"LanCmd Agent v", result.stdout)
+        self.assertIn(b"LanCmd Agent v", result.stdout, result.stderr.decode("utf-8", "replace"))
         self.assertTrue((self.appdata / "LanCmd").is_dir())
         self.assertFalse((self.appdata / "LanCmd" / "agent.pid").exists())
 

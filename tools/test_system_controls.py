@@ -152,6 +152,15 @@ class SessionTest(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "nt", "Windows ABI")
 class WindowsNativeTest(unittest.TestCase):
+    def test_native_notice_and_hooks_install_then_owner_release(self):
+        guard = InputGuard()
+        try:
+            self.assertTrue(guard.pause("ci-own-session", 30, lambda: True)["paused"])
+            self.assertTrue(guard.status("ci-own-session")["paused"])
+            self.assertFalse(guard.release("ci-own-session")["paused"])
+        finally:
+            guard.close()
+
     def test_audio_device_read_or_specific_missing_endpoint_error(self):
         try:
             result = endpoint_audio()

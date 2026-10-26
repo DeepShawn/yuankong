@@ -39,7 +39,10 @@ class AudioDialog(private val activity: AppCompatActivity) {
                     check(ConnectionManager.sessionClient() === client) { "连接已切换，请重新打开音量面板" }
                     val result = client.call("audio", params)
                     check(ConnectionManager.sessionClient() === client) { "连接已切换，请重新打开音量面板" }
-                    check(result.optBoolean("ok")) { result.optString("error", "请更新 Windows 接收端至 1.7.0") }
+                    check(result.optBoolean("ok")) {
+                        val error = result.optString("error", "读取音量失败")
+                        if (error.contains("未知命令")) "$error，请更新 Windows 接收端至 1.7.0" else error
+                    }
                     volume = result.getInt("volume"); muted = result.getBoolean("muted"); loaded = true
                     slider.progress = volume
                     info.text = "$volume%${if (muted) " · 已静音" else ""}"
