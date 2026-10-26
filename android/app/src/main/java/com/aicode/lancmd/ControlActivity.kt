@@ -66,9 +66,9 @@ class ControlActivity : FeatureActivity() {
     }
 
     private fun keyboardUi() {
-        setup("远程按键", "控制电脑当前前台窗口 · 本机授权后有效 5 分钟", scrollable = true)
+        setup("远程按键", "快捷按键、虚拟键盘与文字输入 · 控制电脑当前前台窗口", scrollable = true)
         val session = panel()
-        session.addView(label("先在电脑端允许本次控制，再切换到目标窗口。电脑端可随时停止。", 13f, R.color.dim))
+        session.addView(label("开始控制后，按键和文字将发送至电脑当前前台窗口。", 13f, R.color.dim))
         start = button("请求键盘控制") { begin() }
         primary(start)
         stop = button("停止控制") { sessionJob?.cancel() }.apply { isEnabled = false }
@@ -98,6 +98,12 @@ class ControlActivity : FeatureActivity() {
         }.apply { isEnabled = false }
         controlled.add(send)
         keys.addView(send)
+        val virtual = VirtualKeyboard(this) { names ->
+            task { (lease ?: error("请先开始键盘控制")).call("input", JSONObject().put("keys", JSONArray(names))) }
+        }.apply { isEnabled = false }
+        controlled.add(virtual)
+        keys.addView(label("虚拟键盘 · 修饰键作用于下一个按键，横滑可查看更多键", 12f, R.color.dim))
+        keys.addView(virtual)
     }
 
     private fun sendKeys(label: String) {
@@ -119,12 +125,12 @@ class ControlActivity : FeatureActivity() {
                 val features = request("capabilities").getJSONArray("features")
                 if ((0 until features.length()).none { features.optString(it) == "input" }) error("请更新 Windows 接收端至 1.5.0")
                 current = RemoteLease("input")
-                status("等待电脑端允许本次键盘控制…")
+                status("正在开始键盘控制…")
                 current.open()
                 coroutineContext.ensureActive()
                 lease = current
                 controlled.forEach { it.isEnabled = true }
-                status("已获授权，请在电脑切换到目标窗口后发送按键")
+                status("控制已开始，按键将发送到电脑当前前台窗口")
                 while (isActive) { delay(8000); current.keepAlive() }
             } catch (e: CancellationException) { status("键盘控制已停止"); throw e }
             catch (e: Exception) { status(e.message ?: "无法开始控制", true) }

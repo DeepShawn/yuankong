@@ -38,7 +38,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "1.6.1"
+VERSION = "1.7.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1080,6 +1080,7 @@ def cmd_kill(pid, force=True):
 # The embeddable Python runtime uses an isolated module path.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from remote_features import RemoteFeatures
+from system_controls import audio_request
 
 _capture_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 _remote = RemoteFeatures(RpcError, log, os.path.join(_capture_dir, "LanCmdCapture.exe"))
@@ -1088,11 +1089,17 @@ _remote = RemoteFeatures(RpcError, log, os.path.join(_capture_dir, "LanCmdCaptur
 def remote_capabilities():
     features = ["storage"]
     if IS_WIN:
-        features.extend(["message", "input", "pointer"])
+        features.extend(["message", "input", "pointer", "audio", "local_input"])
         if os.path.isfile(_remote.backend.capture_exe):
             features.extend(["screen", "camera"])
     # session_seconds 为 None 表示共享会话不设时长上限
     return {"version": VERSION, "features": features, "session_seconds": None}
+
+
+def cmd_audio(q):
+    if not IS_WIN:
+        raise RpcError("音量调节仅支持 Windows")
+    return audio_request(q, RpcError)
 
 
 HANDLERS = {
@@ -1103,6 +1110,8 @@ HANDLERS = {
     "camera": lambda q, st: _remote.frame(q, st, "camera"),
     "input": _remote.keyboard,
     "pointer": _remote.pointer,
+    "local_input": _remote.local_input,
+    "audio": lambda q, st: cmd_audio(q),
     "message": _remote.message,
     "info": lambda q, st: cmd_info(),
     "exec": lambda q, st: run_exec(

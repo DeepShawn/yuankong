@@ -133,6 +133,14 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         btnFwHelp.setOnClickListener { showFirewallHelp() }
         tvLatency.setOnClickListener { pingOnce() }
         findViewById<View>(R.id.btnUpload).setOnClickListener { startPickFiles() }
+        findViewById<View>(R.id.btnVolume).setOnClickListener {
+            if (ConnectionManager.isConnected()) AudioDialog(this).show() else toast("请先连接电脑")
+        }
+        findViewById<View>(R.id.btnCommands).setOnClickListener {
+            CommandHints.show(this, prefsShell == "powershell") { line ->
+                etCmd.setText(line); etCmd.setSelection(line.length); etCmd.requestFocus()
+            }
+        }
 
         uploadDir = Prefs.uploadDir(this)
 
@@ -313,26 +321,25 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     }
 
     private fun askUploadTarget(uris: List<Uri>) {
-        val input = EditText(this)
-        input.setPadding(dp(20), dp(12), dp(20), dp(12))
-        input.setText(uploadDir.ifEmpty { lastPath })
         val preview = uris.take(3).joinToString("、") { FileTransfer.displayName(this, it) }
         val more = if (uris.size > 3) " 等 ${uris.size} 个文件" else ""
-        AlertDialog.Builder(this)
-            .setTitle("发送 ${uris.size} 个文件到电脑")
-            .setMessage("$preview$more\n\n目标目录（可修改）：")
-            .setView(input)
-            .setPositiveButton("发送") { _, _ ->
-                val dir = input.text.toString().trim().ifEmpty { "." }
-                uploadDir = dir
-                Prefs.saveUploadDir(this, dir)
-                startUpload(uris, dir)
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        val source = runCatching { ConnectionManager.sessionClient() }.getOrElse { return }
+        RemoteDirectoryPicker(this).show(uploadDir.ifEmpty { lastPath }) { dir ->
+            AlertDialog.Builder(this)
+                .setTitle("发送 ${uris.size} 个文件到电脑")
+                .setMessage("$preview$more\n\n目标：$dir\n同名文件会被替换。")
+                .setPositiveButton("发送") { _, _ ->
+                    if (runCatching { ConnectionManager.sessionClient() === source }.getOrDefault(false)) {
+                        uploadDir = dir
+                        Prefs.saveUploadDir(this, dir)
+                        startUpload(uris, dir, source)
+                    } else toast("连接已切换，请重新选择目标电脑")
+                }.setNeutralButton("重新选择") { _, _ -> askUploadTarget(uris) }
+                .setNegativeButton("取消", null).show()
+        }
     }
 
-    private fun startUpload(uris: List<Uri>, dir: String) {
+    private fun startUpload(uris: List<Uri>, dir: String, source: com.aicode.lancmd.net.AgentClient = ConnectionManager.sessionClient()) {
         transferBox?.dismiss()
         val box = TransferBox(this, "准备发送…") { transferJob?.cancel() }
         transferBox = box
@@ -345,7 +352,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                     val remote = joinPath(dir, name)
                     box.setTitle("[${i + 1}/${uris.size}] $name")
                     try {
-                        val r = FileTransfer.upload(this@MainActivity, uri, remote) { p ->
+                        val r = FileTransfer.uploadTo(this@MainActivity, uri, remote, source) { p ->
                             if (!isFinishing && !isDestroyed) runOnUiThread { box.update(p) }
                         }
                         succeeded++

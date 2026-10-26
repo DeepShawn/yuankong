@@ -11,6 +11,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.EditText
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
 import com.google.android.material.button.MaterialButton
@@ -32,6 +33,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.ConscryptMode
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowDialog
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.File
@@ -266,12 +268,38 @@ class DesktopUiTest {
         }
     }
 
-    private class Stub(private val pointerSupported: Boolean = true) : Closeable {
+    @Test fun unlimitedLocalPauseIsExplicitAndStopReleasesOwningSession() {
+        Stub(localSupported = true).use { stub ->
+            stub.install()
+            val controller = Robolectric.buildActivity(DesktopActivity::class.java).setup()
+            val activity = controller.get()
+            activity.findViewById<View>(R.id.desktopStart).performClick()
+            val pause = activity.findViewById<MaterialButton>(R.id.desktopLocalInput)
+            waitUntil { pause.isEnabled }
+            pause.performClick()
+            val confirmation = ShadowDialog.getLatestDialog() as AlertDialog
+            assertFalse(stub.requests.any { it.second.optString("action") == "pause" })
+            confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitUntil { pause.text == "恢复本机键鼠" }
+            val request = stub.requests.single { it.second.optString("action") == "pause" }.second
+            assertEquals(0, request.getInt("seconds"))
+            assertTrue(request.getString("sid").startsWith("session-"))
+            render(activity, "desktop-local-pause")
+            activity.findViewById<View>(R.id.desktopStop).performClick()
+            waitUntil { activity.findViewById<View>(R.id.desktopStart).isEnabled }
+            assertFalse(pause.isEnabled)
+            assertEquals(2, stub.requests.count { it.second.optString("action") == "end" })
+            controller.pause().stop().destroy()
+        }
+    }
+
+    private class Stub(private val pointerSupported: Boolean = true, private val localSupported: Boolean = false) : Closeable {
         private val server = ServerSocket(0)
         private val clients = CopyOnWriteArrayList<Socket>()
         private val workers = CopyOnWriteArrayList<Thread>()
         val requests = CopyOnWriteArrayList<Pair<Int, JSONObject>>()
         val commandGate = CountDownLatch(1)
+        @Volatile private var paused = false
         private val base = AgentClient("127.0.0.1", server.localPort)
         private val frame = ByteArrayOutputStream().also { output ->
             Bitmap.createBitmap(1280, 720, Bitmap.Config.ARGB_8888).apply { eraseColor(0xff23445e.toInt()) }
@@ -293,7 +321,12 @@ class DesktopUiTest {
                                     val result = JSONObject().put("ok", true).put("id", request.getInt("id"))
                                     when (request.optString("cmd")) {
                                         "hello" -> result.put("agent_id", "desktop-test").put("token", "test-token")
-                                        "capabilities" -> result.put("features", JSONArray(listOf("screen", "input") + if (pointerSupported) listOf("pointer") else emptyList()))
+                                        "capabilities" -> result.put("features", JSONArray(listOf("screen", "input") + (if (pointerSupported) listOf("pointer") else emptyList()) + (if (localSupported) listOf("local_input") else emptyList())))
+                                        "local_input" -> {
+                                            if (request.optString("action") == "pause") paused = true
+                                            if (request.optString("action") == "release") paused = false
+                                            result.put("paused", paused).put("remaining", if (paused) JSONObject.NULL else 0)
+                                        }
                                         "session" -> result.put("sid", "session-$connection").put("stopped", true)
                                         "screen" -> result.put("data", android.util.Base64.encodeToString(frame, android.util.Base64.NO_WRAP))
                                         "exec" -> { commandGate.await(7, TimeUnit.SECONDS); result.put("out", "terminal-output").put("code", 0) }

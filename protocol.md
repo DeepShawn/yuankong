@@ -130,6 +130,17 @@ VMware / VirtualBox / Hyper-V 网卡**不排除**，它们有时确实能到局�
 
 ## 3.1 分块传输
 
+### 1.7.0 音量与本机输入暂停
+
+Windows `capabilities.features` 新增 `audio`、`local_input`。
+
+- `audio`：`action=get` 返回 `volume`（0–100 整数）、`muted`（布尔）。`action=set` 至少提供一个 `volume` / `muted`，修改后返回实际设备状态；两个字段独立，不自动取消静音。没有默认音频设备时返回错误。
+- `local_input`：需要当前连接拥有的 `input` 会话 `sid`。`action=status/pause/release`；`pause.seconds=0` 为手动解除（不限时长），1–30 为定时秒数，默认 30。返回 `paused`、`remaining`（手动解除时为 null）。不可替换或自动延长正在使用的暂停会话。其他连接无法解除该会话。`status` 与普通会话 keepalive 更新活跃时间；暂停期间超过 12 秒没有会话活动即恢复。Android 每 3 秒查询状态，退出共享关闭会话立即恢复。
+- 本机解除：物理键盘同时按 A R T E X + Ctrl + Delete，或 Ctrl+Alt+Del。普通桌面显示可见提示。仅抑制键鼠事件，不能覆盖安全桌面或独立触屏原始输入，不修改硬件驱动。远程输入通过专用标记保留，远程合成的解除组合不会触发物理解除。
+- `input.keys` 新增 Windows `OEM_1/OEM_PLUS/OEM_COMMA/OEM_MINUS/OEM_PERIOD/OEM_2/OEM_3/OEM_4/OEM_5/OEM_6/OEM_7` 标点虚拟键，遵循电脑当前键盘布局。仍只发送完整的按下/释放组合，最多 5 键，不提供跨请求的持续按住状态。
+
+### 文件分块
+
 单帧上限 64MB、base64 后膨胀 4/3，所以大于几十 MB 的文件不能塞进一帧。
 大文件走三阶段会话，块大小由接收端下发（默认 512KB）：
 

@@ -112,7 +112,7 @@ jobs:
           with zipfile.ZipFile(archive) as package:
               if package.testzip() is not None:
                   raise SystemExit('Damaged Windows archive')
-              for name in ('lan_command_agent.py', 'remote_features.py', '使用说明.txt'):
+              for name in ('lan_command_agent.py', 'remote_features.py', 'system_controls.py', 'input_guard.py', '使用说明.txt'):
                   source = subprocess.check_output(['git', 'show', tag + ':windows/' + name])
                   if package.read('LanCmd-Windows/' + name) != source:
                       raise SystemExit('Windows package differs from tagged source: ' + name)

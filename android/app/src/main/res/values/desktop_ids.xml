@@ -13,4 +13,8 @@
     <item name="desktopTerminalLog" type="id" />
     <item name="desktopCommand" type="id" />
     <item name="desktopExecute" type="id" />
+    <item name="audioSlider" type="id" />
+    <item name="audioMute" type="id" />
+    <item name="desktopLocalInput" type="id" />
+    <item name="desktopLocalStatus" type="id" />
 </resources>

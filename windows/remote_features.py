@@ -49,6 +49,27 @@ class WindowsBackend:
     message_slots = threading.BoundedSemaphore(3)
     def __init__(self, capture_exe):
         self.capture_exe = capture_exe
+        self.guard = None
+        self.guard_lock = threading.Lock()
+
+    def _input(self, callback):
+        return self.guard.invoke(callback) if self.guard is not None else callback()
+
+    def local_input(self, action, owner, seconds, allowed):
+        if action == "pause":
+            # Initialize the worker that owns the visible input hooks.
+            from input_guard import InputGuard
+            with self.guard_lock:
+                if self.guard is None:
+                    self.guard = InputGuard()
+            return self.guard.pause(owner, seconds, allowed)
+        if self.guard is None:
+            return {"paused": False, "remaining": 0}
+        return self.guard.release(owner) if action == "release" else self.guard.status(owner)
+
+    def release_local_input(self, owner):
+        if self.guard is not None:
+            self.guard.release(owner)
 
     def request_consent(self, session):
         """不再征求本机同意，直接放行，也不启动任何可见窗口。"""
@@ -88,14 +109,17 @@ class WindowsBackend:
             _fields_ = [("type", w.DWORD), ("payload", Payload)]
         user = ctypes.WinDLL("user32", use_last_error=True)
         user.SendInput.argtypes = [w.UINT, ctypes.POINTER(Input), ctypes.c_int]
-        item = Input(0, Payload(mouse=Mouse(x, y, data & 0xffffffff, flags, 0, 0)))
+        item = Input(0, Payload(mouse=Mouse(x, y, data & 0xffffffff, flags, 0, 0x4C434D44)))
         if user.SendInput(1, ctypes.byref(item), ctypes.sizeof(Input)) != 1:
             raise RuntimeError("系统拒绝鼠标输入，请检查桌面是否解锁及目标窗口权限")
 
     def release_mouse(self, button):
-        self._mouse_event({"left": 0x0004, "right": 0x0010, "middle": 0x0040}[button])
+        self._input(lambda: self._mouse_event({"left": 0x0004, "right": 0x0010, "middle": 0x0040}[button]))
 
     def pointer(self, action, x, y, button, delta, allowed):
+        return self._input(lambda: self._pointer(action, x, y, button, delta, allowed))
+
+    def _pointer(self, action, x, y, button, delta, allowed):
         if not allowed():
             raise RuntimeError("鼠标控制已结束")
         # Capture includes the entire virtual desktop. ABSOLUTE + VIRTUALDESK
@@ -108,7 +132,7 @@ class WindowsBackend:
         if action == "scroll":
             self._mouse_event(0x0800, data=delta * 120)
         elif action == "up":
-            self.release_mouse(button)
+            self._mouse_event({"left": 0x0004, "right": 0x0010, "middle": 0x0040}[button])
         elif action == "down":
             if not allowed():
                 raise RuntimeError("鼠标控制已结束")
@@ -120,9 +144,12 @@ class WindowsBackend:
                         raise RuntimeError("鼠标控制已结束")
                     self._mouse_event(down)
                 finally:
-                    self.release_mouse(button)
+                    self._mouse_event({"left": 0x0004, "right": 0x0010, "middle": 0x0040}[button])
 
     def keys(self, keys, text, allowed=lambda: True):
+        return self._input(lambda: self._keys(keys, text, allowed))
+
+    def _keys(self, keys, text, allowed):
         from ctypes import wintypes as w
         class Keyboard(ctypes.Structure):
             _fields_ = [("vk", w.WORD), ("scan", w.WORD), ("flags", w.DWORD),
@@ -137,7 +164,7 @@ class WindowsBackend:
         user = ctypes.WinDLL("user32", use_last_error=True)
         user.SendInput.argtypes = [w.UINT, ctypes.POINTER(Input), ctypes.c_int]
         def send(vk=0, scan=0, flags=0):
-            item = Input(1, Payload(keyboard=Keyboard(vk, scan, flags, 0, 0)))
+            item = Input(1, Payload(keyboard=Keyboard(vk, scan, flags, 0, 0x4C434D44)))
             if user.SendInput(1, ctypes.byref(item), ctypes.sizeof(Input)) != 1:
                 raise RuntimeError("系统拒绝输入；请确认电脑已解锁且目标窗口权限不高于接收端")
         if text:
@@ -179,6 +206,10 @@ KEY_CODES = {"CTRL": 0x11, "ALT": 0x12, "SHIFT": 0x10, "WIN": 0x5B,
              "LEFT": 0x25, "UP": 0x26, "RIGHT": 0x27, "DOWN": 0x28}
 KEY_CODES.update({c: ord(c) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"})
 KEY_CODES.update({"F%d" % n: 0x6F + n for n in range(1, 13)})
+KEY_CODES.update({"OEM_1": 0xBA, "OEM_PLUS": 0xBB, "OEM_COMMA": 0xBC,
+                  "OEM_MINUS": 0xBD, "OEM_PERIOD": 0xBE, "OEM_2": 0xBF,
+                  "OEM_3": 0xC0, "OEM_4": 0xDB, "OEM_5": 0xDC,
+                  "OEM_6": 0xDD, "OEM_7": 0xDE})
 
 
 class RemoteFeatures:
@@ -221,7 +252,7 @@ class RemoteFeatures:
         # 不再询问本机，也不再限制同时进行的共享数量
         session = ConsentSession(scope, "%s · %s" % (state.peer, state.client_id[-8:]))
         session.client_id = state.client_id
-        session.on_close = lambda: self._release_pointer(session)
+        session.on_close = lambda: self._close_session(session)
         session.approved_at = time.time()
         state.remote_sessions[session.sid] = session
         self.log.info("开始共享 %s peer=%s client=%s", scope, state.peer, state.client_id)
@@ -268,6 +299,23 @@ class RemoteFeatures:
             raise self.error("请发送文字或有效按键组合")
         self.backend.keys(keys, text, allowed=session.alive)
         return {"sent": True}
+
+    def local_input(self, q, state):
+        session = self.active(q, state, "input")
+        action = q.get("action", "status")
+        seconds = q.get("seconds", 30)
+        if action not in ("pause", "release", "status"):
+            raise self.error("无效的本机输入操作")
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or not 0 <= seconds <= 30:
+            raise self.error("时长需为 0（手动解除）或 1 到 30 秒")
+        return self.backend.local_input(action, session.sid, seconds,
+            lambda: session.alive() and time.monotonic() - session.last_active < 12)
+
+    def _close_session(self, session):
+        self._release_pointer(session)
+        release = getattr(self.backend, "release_local_input", None)
+        if release:
+            release(session.sid)
 
     def _release_pointer(self, session):
         with self.pointer_lock:

@@ -41,11 +41,25 @@ object FileTransfer {
         uri: Uri,
         remotePath: String,
         onProgress: (Progress) -> Unit
+    ): JSONObject = uploadTo(ctx, uri, remotePath, null, onProgress)
+
+    suspend fun uploadTo(
+        ctx: Context,
+        uri: Uri,
+        remotePath: String,
+        expectedClient: AgentClient?,
+        onProgress: (Progress) -> Unit
     ): JSONObject = withContext(Dispatchers.IO) {
         val resolver = ctx.contentResolver
         val knownSize = querySize(ctx, uri)
         var temp: File? = null
         var activeSid: String? = null
+        var owner: AgentClient? = null
+        suspend fun call(params: JSONObject, timeout: Long): JSONObject {
+            val client = owner ?: throw IOException("未连接")
+            if (ConnectionManager.sessionClient() !== client) throw IOException("连接已切换，已停止向原电脑发送文件")
+            return client.call("upload", params, timeout)
+        }
         try {
             val source: () -> InputStream
             val size: Long
@@ -72,8 +86,8 @@ object FileTransfer {
             }
             coroutineContext.ensureActive()
 
-            val begin = ConnectionManager.send(
-                "upload",
+            owner = expectedClient ?: ConnectionManager.sessionClient()
+            val begin = call(
                 JSONObject()
                     .put("action", "begin")
                     .put("path", remotePath)
@@ -97,8 +111,7 @@ object FileTransfer {
                     val n = readChunk(input, buf)
                     if (n <= 0) break
                     val payload = Base64.encodeToString(buf, 0, n, NO_WRAP)
-                    val r = ConnectionManager.send(
-                        "upload",
+                    val r = call(
                         JSONObject()
                             .put("action", "chunk")
                             .put("sid", sid)
@@ -117,8 +130,7 @@ object FileTransfer {
                 }
             }
 
-            val end = ConnectionManager.send(
-                "upload",
+            val end = call(
                 JSONObject().put("action", "end").put("sid", sid),
                 120_000
             )
@@ -130,7 +142,7 @@ object FileTransfer {
             if (activeSid != null) {
                 withContext(NonCancellable) {
                     runCatching {
-                        ConnectionManager.send(
+                        owner?.call(
                             "upload",
                             JSONObject().put("action", "abort").put("sid", activeSid),
                             10_000

@@ -14,6 +14,7 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
+import androidx.appcompat.app.AlertDialog
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -68,6 +69,11 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
     private var terminalClient: AgentClient? = null
     private var origin: AgentClient? = null
     private var pointer = RemotePoint(0.5f, 0.5f)
+    private lateinit var localPause: MaterialButton
+    private lateinit var localStatus: TextView
+    private var localLease: RemoteLease? = null
+    private var localRequest: Job? = null
+    private var localPaused = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -156,6 +162,16 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
             row.addView(item, LinearLayout.LayoutParams(0, -2, 1f))
         }
         panel.addView(row)
+        val system = LinearLayout(this)
+        system.addView(compactButton("电脑音量") { AudioDialog(this).show() }, LinearLayout.LayoutParams(0, -2, 1f))
+        localPause = compactButton("暂停本机键鼠") { changeLocalInput() }.apply {
+            id = R.id.desktopLocalInput; isEnabled = false
+        }
+        system.addView(localPause, LinearLayout.LayoutParams(0, -2, 1f))
+        panel.addView(system)
+        localStatus = label("本机输入暂停支持定时或手动解除，需更新 Windows 1.7.0", 11f, R.color.dim)
+            .apply { id = R.id.desktopLocalStatus }
+        panel.addView(localStatus)
         panels.add(panel); panelHost.addView(panel)
     }
 
@@ -183,6 +199,16 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
         }.apply { id = R.id.desktopKeyboardSend }
         activeControls.add(send); row.addView(send)
         panel.addView(row)
+        val virtual = VirtualKeyboard(this) { names -> enqueue("input", JSONObject().put("keys", JSONArray(names))) }
+            .apply { visibility = View.GONE }
+        activeControls.add(virtual)
+        val expand = compactButton("展开虚拟键盘") {
+            virtual.resetModifiers()
+            virtual.visibility = if (virtual.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        activeControls.add(expand); panel.addView(expand)
+        panel.addView(label("Ctrl / Alt / Shift / Win 作用于下一个按键；横滑查看更多键", 11f, R.color.dim))
+        panel.addView(virtual)
         panels.add(panel); panelHost.addView(panel)
     }
 
@@ -212,6 +238,11 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
         commandSend = compactButton("执行") { execute() }.apply { id = R.id.desktopExecute }
         activeControls.add(commandSend); row.addView(commandSend)
         panel.addView(row)
+        panel.addView(compactButton("常用命令 · 点选填入") {
+            CommandHints.show(this, shell.selectedItemPosition == 1) { line ->
+                commandText.setText(line); commandText.setSelection(line.length)
+            }
+        })
         panels.add(panel); panelHost.addView(panel)
     }
 
@@ -241,7 +272,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
             .apply { topMargin = dp(8); bottomMargin = dp(8) }
         controlDock.layoutParams = LinearLayout.LayoutParams(if (sideBySide) dp(300) else -1, if (sideBySide) -1 else -2)
         controlDock.setPadding(if (sideBySide) dp(8) else 0, 0, 0, 0)
-        controlScroll.layoutParams = if (sideBySide) LinearLayout.LayoutParams(-1, 0, 1f) else LinearLayout.LayoutParams(-1, -2)
+        controlScroll.layoutParams = if (sideBySide) LinearLayout.LayoutParams(-1, 0, 1f) else LinearLayout.LayoutParams(-1, dp(240))
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -293,9 +324,25 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
                 preview.open(); controls.open()
                 coroutineContext.ensureActive(); checkOrigin(source)
                 terminalClient = terminal; commands = queue
+                val hasLocalInput = (0 until capabilities.length()).any { capabilities.optString(it) == "local_input" }
+                localLease = if (hasLocalInput) controls else null
+                localPause.isEnabled = hasLocalInput
                 activeControls.forEach { it.isEnabled = true }
                 screen.touchEnabled = touchSwitch.isChecked
                 coroutineScope {
+                    if (hasLocalInput) launch {
+                        while (isActive) {
+                            checkOrigin(source)
+                            val state = controls.call("local_input")
+                            localPaused = state.optBoolean("paused")
+                            localPause.text = if (localPaused) "恢复本机键鼠" else "暂停本机键鼠"
+                            localStatus.text = if (localPaused) {
+                                (if (state.isNull("remaining")) "已暂停 · 手动解除模式" else "已暂停 · ${state.optInt("remaining")} 秒后恢复") +
+                                    "\n本机解除：A R T E X + Ctrl + Delete，或 Ctrl+Alt+Del"
+                            } else "本机键鼠可用 · 支持不限时长暂停，断线自动恢复"
+                            delay(3000)
+                        }
+                    }
                     launch {
                         for (command in queue) {
                             checkOrigin(source)
@@ -324,6 +371,9 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
                 screen.touchEnabled = false
                 commands = null; queue.cancel()
                 terminalJob?.cancel(); terminalClient = null; origin = null
+                localRequest?.cancel(); localLease = null; localPaused = false
+                localPause.isEnabled = false; localPause.text = "暂停本机键鼠"
+                localStatus.text = "共享已结束，本机输入将恢复"
                 if (!isDestroyed) {
                     screen.clearFrame()
                     activeControls.forEach { it.isEnabled = false }
@@ -334,6 +384,28 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
                 if (!isDestroyed) { start.isEnabled = true; stop.isEnabled = false }
             }
         }
+    }
+
+    private fun changeLocalInput() {
+        val lease = localLease ?: return
+        if (localRequest?.isActive == true) return
+        fun apply(action: String, seconds: Int = 0) {
+            localPause.isEnabled = false
+            localRequest = task {
+                try {
+                    val state = lease.call("local_input", JSONObject().put("action", action).put("seconds", seconds))
+                    localPaused = state.optBoolean("paused")
+                    localPause.text = if (localPaused) "恢复本机键鼠" else "暂停本机键鼠"
+                    localStatus.text = if (localPaused) "已暂停 · 本机解除：A R T E X + Ctrl + Delete；断线自动恢复" else "本机输入已恢复"
+                } finally { localPause.isEnabled = localLease === lease }
+            }
+        }
+        if (localPaused) { apply("release"); return }
+        AlertDialog.Builder(this).setTitle("暂停电脑本机键鼠")
+            .setMessage("手机仍可控制，电脑显示暂停提示。\n\n本机解除：同时按 A、R、T、E、X + Ctrl + Delete。键盘不支持七键同时按下时，使用 Ctrl+Alt+Del。\n\n退出共享或心跳中断 12 秒自动恢复。部分触屏驱动可能独立处理触摸，此开关不禁用硬件。")
+            .setPositiveButton("手动解除（不限时长）") { _, _ -> apply("pause", 0) }
+            .setNeutralButton("暂停 30 秒") { _, _ -> apply("pause", 30) }
+            .setNegativeButton("取消", null).show()
     }
 
     private fun execute() {
@@ -388,6 +460,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
         ConnectionManager.removeListener(this)
         screen.cancelGesture()
         sessionJob?.cancel(); terminalJob?.cancel()
+        localRequest?.cancel()
         super.onStop()
     }
 }
