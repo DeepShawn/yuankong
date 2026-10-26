@@ -46,13 +46,13 @@ class MediaActivity : FeatureActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setup(if (camera) "摄像头" else "电脑屏幕", "电脑端允许后开始预览 · 每次授权最长 5 分钟")
+        setup(if (camera) "摄像头" else "电脑屏幕", "点击开始查看建立预览，关闭页面结束共享")
         val help = panel()
         help.addView(label("随时停止共享", 16f))
-        help.addView(label("关闭本页会结束预览。电脑端会显示共享提示和「立即停止」按钮。", 12f, R.color.dim))
+        help.addView(label("关闭本页会结束预览，也可点击下方「停止查看」。", 12f, R.color.dim))
         selector = Spinner(this)
         selector.isEnabled = false
-        selector.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("授权后选择摄像头"))
+        selector.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("开始后选择摄像头"))
         selector.visibility = if (camera) View.VISIBLE else View.GONE
         body.addView(selector)
         image = ImageView(this).apply {
@@ -90,7 +90,7 @@ class MediaActivity : FeatureActivity() {
                     error("请完整安装 Windows 1.5.0 接收端及采集组件")
                 }
                 lease = RemoteLease(kind)
-                status("等待电脑端允许本次${if (camera) "摄像头" else "屏幕"}共享…")
+                status("正在建立${if (camera) "摄像头" else "屏幕"}预览…")
                 lease.open()
                 coroutineContext.ensureActive()
                 if (camera) {

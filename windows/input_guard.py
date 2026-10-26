@@ -1,4 +1,4 @@
-"""Visible local keyboard/mouse pause with a physical escape chord and disconnect watchdog.
+"""Local keyboard/mouse pause with a physical escape chord and disconnect watchdog.
 
 Low-level hooks let the physical escape chord remain observable while suppressing
 normal input. They never alter drivers, the secure desktop or Ctrl+Alt+Del.
@@ -20,7 +20,6 @@ class InputGuard:
         self.queue = queue.Queue()
         self.owner = None
         self.deadline = 0
-        self.window = None
         self.ready = Future()
         self.thread = threading.Thread(target=self._run, name="lancmd-local-input", daemon=True)
         self.thread.start()
@@ -40,9 +39,6 @@ class InputGuard:
             self.native.block(False)
         self.owner = None
         self.deadline = 0
-        if self.window:
-            self.native.hide(self.window)
-            self.window = None
 
     def pause(self, owner, seconds, allowed):
         def start():
@@ -50,16 +46,9 @@ class InputGuard:
                 raise RuntimeError("控制会话已结束")
             if self.owner is not None:
                 raise RuntimeError("本机输入已暂停，请先解除或等待倒计时结束")
-            window = self.native.show(seconds)
-            if not window:
-                raise RuntimeError("无法显示本机暂停提示，未禁用本机输入")
-            try:
-                if not self.native.block(True):
-                    raise RuntimeError("Windows 拒绝暂停本机输入，请在电脑端以管理员身份启动接收端")
-            except Exception:
-                self.native.hide(window)
-                raise
-            self.window, self.owner = window, owner
+            if not self.native.block(True):
+                raise RuntimeError("Windows 拒绝暂停本机输入，请在电脑端以管理员身份启动接收端")
+            self.owner = owner
             self.deadline = self.clock() + seconds if seconds else None
             self.allowed = allowed
             return {"paused": True, "remaining": seconds if seconds else None}
@@ -89,7 +78,8 @@ class InputGuard:
                     if (self.deadline is not None and self.clock() >= self.deadline) or not self.allowed() or self.native.escape.is_set():
                         self._release()
                     else:
-                        self.native.update(self.window, max(1, int(self.deadline - self.clock() + 0.999)) if self.deadline is not None else 0)
+                        # Low-level hooks need a message pump even without a UI.
+                        self.native.pump()
                 try:
                     callback, future = self.queue.get(timeout=0.05)
                 except queue.Empty:
@@ -119,13 +109,6 @@ class NativeInputGuard:
         self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         self.kernel.GetModuleHandleW.argtypes = [w.LPCWSTR]
         self.kernel.GetModuleHandleW.restype = w.HMODULE
-        self.user.CreateWindowExW.argtypes = [w.DWORD, w.LPCWSTR, w.LPCWSTR, w.DWORD,
-            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, w.HWND, w.HMENU, w.HINSTANCE, ctypes.c_void_p]
-        self.user.CreateWindowExW.restype = w.HWND
-        self.user.DestroyWindow.argtypes = [w.HWND]
-        self.user.SetWindowTextW.argtypes = [w.HWND, w.LPCWSTR]
-        self.user.ShowWindow.argtypes = [w.HWND, ctypes.c_int]
-        self.user.UpdateWindow.argtypes = [w.HWND]
         self.user.PeekMessageW.argtypes = [ctypes.POINTER(w.MSG), w.HWND, w.UINT, w.UINT, w.UINT]
         self.user.TranslateMessage.argtypes = [ctypes.POINTER(w.MSG)]
         self.user.DispatchMessageW.argtypes = [ctypes.POINTER(w.MSG)]
@@ -200,29 +183,11 @@ class NativeInputGuard:
             self.hooks.append(hook)
         return True
 
-    def show(self, seconds):
-        window = self.user.CreateWindowExW(0x08000008, "STATIC", "", 0x90000101,
-            20, 20, 620, 100, None, None, None, None)
-        if window:
-            self.update(window, seconds)
-            self.user.ShowWindow(window, 4)
-            self.user.UpdateWindow(window)
-        return window
-
-    def update(self, window, seconds):
-        duration = "%d 秒后恢复" % seconds if seconds else "手动解除模式"
-        self.user.SetWindowTextW(window,
-            "LanCmd：本机键鼠暂停 · " + duration +
-            "\r\n解除：同时按 A R T E X + Ctrl + Delete（或 Ctrl+Alt+Del）。" +
-            "\r\n手机可提前恢复；退出共享或心跳中断 12 秒自动恢复。")
+    def pump(self):
         msg = self.MSG()
         while self.user.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
             self.user.TranslateMessage(ctypes.byref(msg))
             self.user.DispatchMessageW(ctypes.byref(msg))
-
-    def hide(self, window):
-        self.user.DestroyWindow(window)
-
 
 def escape_pressed(pressed):
     return set(map(ord, "ARTEX")).issubset(pressed) and 0x2E in pressed and bool(pressed.intersection((0x11, 0xA2, 0xA3)))

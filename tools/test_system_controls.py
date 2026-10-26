@@ -51,13 +51,9 @@ class Native:
         self.escape = threading.Event()
         self.events = []
         self.fail = False
+        self.pumped = threading.Event()
 
-    def show(self, seconds):
-        self.events.append(("show", seconds))
-        return 123
-
-    def hide(self, window): self.events.append(("hide", window))
-    def update(self, window, seconds): pass
+    def pump(self): self.pumped.set()
     def block(self, enabled):
         self.events.append(("block", enabled))
         return not self.fail
@@ -89,8 +85,7 @@ class GuardTest(unittest.TestCase):
         self.assertFalse(self.guard.release("other")["paused"])
         self.assertTrue(self.guard.status("phone")["paused"])
         self.guard.release("phone")
-        self.assertEqual(("block", False), self.native.events[-2])
-        self.assertEqual(("hide", 123), self.native.events[-1])
+        self.assertEqual(("block", False), self.native.events[-1])
 
     def test_finite_pause_expires(self):
         self.pause(30)
@@ -114,16 +109,17 @@ class GuardTest(unittest.TestCase):
         self.now += 31
         self.wait_released()
 
-    def test_install_failure_closes_notice_and_does_not_claim_pause(self):
+    def test_install_failure_does_not_claim_pause(self):
         self.native.fail = True
         with self.assertRaises(RuntimeError): self.pause()
         self.assertFalse(self.guard.status("phone")["paused"])
-        self.assertEqual(("hide", 123), self.native.events[-1])
+        self.assertEqual([("block", True)], self.native.events)
 
     def test_worker_preserves_remote_input_calls_while_paused(self):
         self.pause()
         self.assertEqual(self.guard.thread.ident, self.guard.invoke(threading.get_ident))
         self.assertEqual(42, self.guard.invoke(lambda: self.guard.invoke(lambda: 42)))
+        self.assertTrue(self.native.pumped.wait(1), "Hook messages must still be processed without a notice window")
 
     def test_exact_physical_escape_combination(self):
         keys = set(map(ord, "ARTEX")) | {0xA3, 0x2E}
@@ -152,11 +148,23 @@ class SessionTest(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "nt", "Windows ABI")
 class WindowsNativeTest(unittest.TestCase):
-    def test_native_notice_and_hooks_install_then_owner_release(self):
+    def test_native_hooks_install_without_notice_then_owner_release(self):
         guard = InputGuard()
         try:
             self.assertTrue(guard.pause("ci-own-session", 30, lambda: True)["paused"])
             self.assertTrue(guard.status("ci-own-session")["paused"])
+            from ctypes import wintypes as w
+            user = ctypes.WinDLL("user32")
+            enum_proc = ctypes.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
+            user.IsWindowVisible.argtypes = [w.HWND]
+            user.IsWindowVisible.restype = w.BOOL
+            user.EnumThreadWindows.argtypes = [w.DWORD, enum_proc, w.LPARAM]
+            visible = []
+            def record(window, unused):
+                if user.IsWindowVisible(window): visible.append(window)
+                return True
+            user.EnumThreadWindows(guard.thread.native_id, enum_proc(record), 0)
+            self.assertEqual([], visible, "Pausing input must not open a desktop notice")
             self.assertFalse(guard.release("ci-own-session")["paused"])
         finally:
             guard.close()

@@ -402,7 +402,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
         }
         if (localPaused) { apply("release"); return }
         AlertDialog.Builder(this).setTitle("暂停电脑本机键鼠")
-            .setMessage("手机仍可控制，电脑显示暂停提示。\n\n本机解除：同时按 A、R、T、E、X + Ctrl + Delete。键盘不支持七键同时按下时，使用 Ctrl+Alt+Del。\n\n退出共享或心跳中断 12 秒自动恢复。部分触屏驱动可能独立处理触摸，此开关不禁用硬件。")
+            .setMessage("手机仍可控制，暂停状态显示在手机端。\n\n本机解除：同时按 A、R、T、E、X + Ctrl + Delete。键盘不支持七键同时按下时，使用 Ctrl+Alt+Del。\n\n退出共享或心跳中断 12 秒自动恢复。部分触屏驱动可能独立处理触摸，此开关不禁用硬件。")
             .setPositiveButton("手动解除（不限时长）") { _, _ -> apply("pause", 0) }
             .setNeutralButton("暂停 30 秒") { _, _ -> apply("pause", 30) }
             .setNegativeButton("取消", null).show()

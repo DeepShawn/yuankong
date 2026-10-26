@@ -58,7 +58,7 @@ class WindowsBackend:
 
     def local_input(self, action, owner, seconds, allowed):
         if action == "pause":
-            # Initialize the worker that owns the visible input hooks.
+            # Initialize the worker that owns the input hooks and message pump.
             from input_guard import InputGuard
             with self.guard_lock:
                 if self.guard is None or not self.guard.thread.is_alive():
