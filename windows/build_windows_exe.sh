@@ -45,13 +45,15 @@ $CC -O2 -s -Wall -municode -mwindows -o "$WORK/Start.exe" \
     start_panel.c "$WORK/res.o" -ladvapi32 -lws2_32 -lshell32 -lcomctl32 -static
 $CXX -O2 -s -Wall -Wextra -static -std=c++17 -o "$WORK/LanCmdCapture.exe" \
     capture.cpp -lwindowscodecs -lmf -lmfreadwrite -lmfplat -lmfuuid -lole32 -lgdi32 -luuid
+${RECORD_CXX:-x86_64-w64-mingw32-g++-posix} -O2 -s -Wall -Wextra -static -std=c++17 -municode -o "$WORK/LanCmdRecord.exe" \
+    record.cpp -lmf -lmfreadwrite -lmfplat -lmfuuid -lole32 -lgdi32 -luser32 -lwinmm -luuid
 
 # 4) 组装
 echo "[4/5] 组装目录"
 rm -rf "$PKG"
 mkdir -p "$PKG/python"
-cp "$WORK/LanCmdAgent.exe" "$WORK/LanCmdCtl.exe" "$WORK/Start.exe" "$WORK/LanCmdCapture.exe" "$PKG/"
-cp lan_command_agent.py remote_features.py system_controls.py input_guard.py device_management.py touch_guard.py file_actions.py desktop_apps.py command_queue.py start.bat 诊断.bat 启动.vbs "$PKG/"
+cp "$WORK/LanCmdAgent.exe" "$WORK/LanCmdCtl.exe" "$WORK/Start.exe" "$WORK/LanCmdCapture.exe" "$WORK/LanCmdRecord.exe" "$PKG/"
+cp lan_command_agent.py remote_features.py system_controls.py input_guard.py device_management.py touch_guard.py file_actions.py desktop_apps.py command_queue.py recordings.py gestures.py start.bat 诊断.bat 启动.vbs "$PKG/"
 (cd "$PKG/python" && unzip -qo "$WORK/$EMBED_ZIP")
 # 精简：接收端用不到这些
 rm -f "$PKG/python"/_msi.pyd "$PKG/python"/_sqlite3.pyd "$PKG/python"/sqlite3.dll \

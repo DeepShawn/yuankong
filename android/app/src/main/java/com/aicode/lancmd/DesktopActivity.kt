@@ -190,6 +190,10 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
         system.addView(localPause, LinearLayout.LayoutParams(0, -2, 1f))
         panel.addView(system)
         panel.addView(compactButton("运行中的桌面程序") { startActivity(Intent(this, AppsActivity::class.java)) })
+        val recordingTools = LinearLayout(this)
+        recordingTools.addView(compactButton("录屏 / 录音") { startActivity(Intent(this, RecordingsActivity::class.java).putExtra("kind", "screen")) }, LinearLayout.LayoutParams(0, -2, 1f))
+        recordingTools.addView(compactButton("手势记录板") { startActivity(Intent(this, GesturesActivity::class.java)) }, LinearLayout.LayoutParams(0, -2, 1f))
+        panel.addView(recordingTools)
         localStatus = label("本机输入暂停包含标准 HID 触屏，需 Windows 1.9.0", 11f, R.color.dim)
             .apply { id = R.id.desktopLocalStatus }
         panel.addView(localStatus)

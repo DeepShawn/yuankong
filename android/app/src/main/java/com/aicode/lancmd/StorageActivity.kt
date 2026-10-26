@@ -99,7 +99,7 @@ class StorageActivity : FeatureActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        path = savedInstanceState?.getString("path") ?: ""
+        path = savedInstanceState?.getString("path") ?: intent.getStringExtra("path") ?: ""
         pendingDownload = savedInstanceState?.getString("download") ?: ""
         uploadTarget = savedInstanceState?.getString("upload") ?: ""
         setup("电脑存储", "查看磁盘空间、浏览目录，或选择手机中的文件上传")

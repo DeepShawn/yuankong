@@ -282,3 +282,9 @@ Windows `capabilities.features` 新增 `devices`。完成握手后使用：
 `commands` 默认 `action=list` 返回当前 `client_id` 的 `batches`；`action=add` 提供 `name` 与 `items[{line,shell,delay}]`，每批 1–50 条、每条等待 0–86400 秒，shell 为 cmd/powershell。第一条从启动开始等待，后续从前一条结束后等待，失败继续下一条。每条最多执行 300 秒；批次含 id/created/finished/items，每项含 status、due、started、finished、result 或 error。状态为 pending/waiting/running/completed/failed/cancelled。`action=cancel,batch_id` 取消尚未开始的项，不撤销 running 项。最多同时运行 4 批，结果 stdout/stderr 各截断 8192 字；手机断线不取消，接收端退出不持久化。
 
 `local_input` 的 pause/status 新增 `touch_devices`。capabilities 的 `touch_pause` 表示接收端支持标准 HID 触屏临时暂停；触屏存在但无法识别或禁用时失败，不降级为仅键鼠暂停。触屏独立恢复进程监视原进程管道与心跳，在解除、管道结束或 6 秒无心跳时重新启用本次禁用的设备，不设持久禁用标记。输入会话原 12 秒心跳恢复与本机快捷键仍适用。
+
+## 2.2.0 recordings / gestures
+
+`recordings` actions: `devices`, `list`, `start` (`mode`: audio/screen/camera, `audio`: bool, `microphone`: -1 default or device id, `camera`: id, `seconds`: 1..3600), `stop`/`delete` (`id`). Receiver-generated filenames, owner client_id checks, max 3 recordings and 200 records per owner. Files persist locally, no automatic deletion.
+
+`gestures`: read-only `dimensions` returns virtual desktop width/height. Other actions require input-session `sid`: `play` (`delay`: 0..86400, `events`: 1..6000 `{ms,action,x,y}`), `status`, `cancel`. Events are move/down/up, normalized finite coordinates, monotonic integer milliseconds <=300000 and balanced left-button down/up. Exclusive remote pointer reservation; session heartbeat <12 seconds; cancel on session end. No Windows privacy permissions or indicators are changed.

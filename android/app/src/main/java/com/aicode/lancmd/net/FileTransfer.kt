@@ -162,9 +162,18 @@ object FileTransfer {
         remotePath: String,
         dest: File,
         onProgress: (Progress) -> Unit
+    ): File = downloadFrom(remotePath, dest, null, onProgress)
+
+    suspend fun downloadFrom(
+        remotePath: String, dest: File, expectedClient: AgentClient?,
+        onProgress: (Progress) -> Unit
     ): File = withContext(Dispatchers.IO) {
-        val begin = ConnectionManager.send(
-            "download",
+        val owner = expectedClient ?: ConnectionManager.sessionClient()
+        suspend fun send(params: JSONObject, timeout: Long): JSONObject {
+            if (ConnectionManager.sessionClient() !== owner || owner.closed) throw IOException("连接已切换，下载已停止")
+            return owner.call("download", params, timeout)
+        }
+        val begin = send(
             JSONObject().put("action", "begin").put("path", remotePath),
             20_000
         )
@@ -183,8 +192,7 @@ object FileTransfer {
                 var offset = 0L
                 while (true) {
                     coroutineContext.ensureActive()
-                    val r = ConnectionManager.send(
-                        "download",
+                    val r = send(
                         JSONObject()
                             .put("action", "chunk")
                             .put("sid", sid)
@@ -208,8 +216,7 @@ object FileTransfer {
                 out.flush()
             }
 
-            ConnectionManager.send(
-                "download",
+            send(
                 JSONObject().put("action", "end").put("sid", sid),
                 20_000
             )
@@ -221,8 +228,7 @@ object FileTransfer {
         } catch (e: Throwable) {
             withContext(NonCancellable) {
                 runCatching {
-                    ConnectionManager.send(
-                        "download",
+                    owner.call("download",
                         JSONObject().put("action", "abort").put("sid", sid),
                         10_000
                     )

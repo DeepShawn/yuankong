@@ -95,6 +95,10 @@ class WindowsBackend:
             raise RuntimeError(r.stderr.decode("utf-8", "replace").strip() or "读取摄像头失败")
         return json.loads(r.stdout.decode("utf-8"))
 
+    def desktop_size(self):
+        user = ctypes.WinDLL("user32", use_last_error=True)
+        return max(1, user.GetSystemMetrics(78)), max(1, user.GetSystemMetrics(79))
+
     @staticmethod
     def _mouse_event(flags, x=0, y=0, data=0):
         from ctypes import wintypes as w
@@ -222,6 +226,7 @@ class RemoteFeatures:
         self.pending_consents = threading.BoundedSemaphore(3)
         self.pointer_lock = threading.RLock()
         self.pointer_owners = {}
+        self.playback_owner = None
 
     def _check(self, state):
         if not self.supported:
@@ -329,7 +334,7 @@ class RemoteFeatures:
                     finally:
                         self.pointer_owners.pop(button, None)
 
-    def pointer(self, q, state):
+    def pointer(self, q, state, playback=False, allowed=None):
         session = self.active(q, state, "input")
         action = q.get("action", "click")
         if action not in ("move", "click", "double_click", "down", "up", "scroll"):
@@ -346,6 +351,10 @@ class RemoteFeatures:
                                    delta == 0 or abs(delta) > 10):
             raise self.error("滚动步数需为 -10 到 10 的非零整数")
         with self.pointer_lock:
+            if self.playback_owner is not None and not playback:
+                raise self.error("手势正在等待或回放，请先取消手势")
+            if playback and self.playback_owner != session.sid:
+                raise self.error("手势回放已取消")
             if any(owner != session.sid for owner in self.pointer_owners.values()):
                 raise self.error("其他连接正在拖动，请稍后再试")
             if action in ("click", "double_click") and self.pointer_owners:
@@ -357,7 +366,7 @@ class RemoteFeatures:
                     return {"sent": True}
                 self.pointer_owners[button] = session.sid
             try:
-                self.backend.pointer(action, float(x), float(y), button, delta, session.alive)
+                self.backend.pointer(action, float(x), float(y), button, delta, allowed or session.alive)
             except Exception:
                 self._release_pointer(session)
                 raise

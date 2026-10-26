@@ -25,6 +25,12 @@ where cl >nul 2>nul
 if not errorlevel 1 (
     cl /nologo /O2 /EHsc /std:c++17 /Fe:LanCmdCapture.exe capture.cpp /link windowscodecs.lib mf.lib mfreadwrite.lib mfplat.lib mfuuid.lib ole32.lib gdi32.lib user32.lib uuid.lib
     if errorlevel 1 exit /b 1
+    cl /nologo /O2 /EHsc /std:c++17 /Fe:LanCmdRecord.exe record.cpp /link mf.lib mfreadwrite.lib mfplat.lib mfuuid.lib ole32.lib gdi32.lib user32.lib winmm.lib uuid.lib
+    if errorlevel 1 exit /b 1
+)
+if not exist LanCmdRecord.exe (
+    echo [X] Build or copy LanCmdRecord.exe from the complete Windows ZIP.
+    exit /b 1
 )
 if not exist LanCmdCapture.exe (
     echo [X] Run in an x64 Native Tools Command Prompt with the Windows SDK,
@@ -57,6 +63,8 @@ python -m PyInstaller --noconfirm --clean --onefile --noconsole ^
     --hidden-import file_actions ^
     --hidden-import desktop_apps ^
     --hidden-import command_queue ^
+    --hidden-import recordings ^
+    --hidden-import gestures ^
     --hidden-import tkinter ^
     --hidden-import tkinter.messagebox ^
     lan_command_agent.py
@@ -80,6 +88,8 @@ python -m PyInstaller --noconfirm --clean --onefile --console ^
     --hidden-import file_actions ^
     --hidden-import desktop_apps ^
     --hidden-import command_queue ^
+    --hidden-import recordings ^
+    --hidden-import gestures ^
     lan_command_agent.py
 if errorlevel 1 (
     echo [!] Control exe failed, main agent is still usable.
@@ -88,6 +98,7 @@ if errorlevel 1 (
 echo.
 echo ============================================
 if exist dist\LanCmdAgent.exe copy /y LanCmdCapture.exe dist\LanCmdCapture.exe >nul
+if exist dist\LanCmdAgent.exe copy /y LanCmdRecord.exe dist\LanCmdRecord.exe >nul
 echo  Done.
 echo ============================================
 echo  dist\LanCmdAgent.exe   <- run this (no window, background)

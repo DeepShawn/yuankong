@@ -75,6 +75,10 @@ class MediaActivity : FeatureActivity() {
         listOf(start, stop).forEach { buttons.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
         body.addView(buttons)
         body.addView(save)
+        body.addView(button(if (camera) "录制摄像头视频" else "录制屏幕视频") {
+            stream?.cancel()
+            startActivity(android.content.Intent(this, RecordingsActivity::class.java).putExtra("kind", if (camera) "camera" else "screen"))
+        })
     }
 
     private fun begin() {
