@@ -124,9 +124,11 @@ class StorageActivity : FeatureActivity() {
             textSize = 14f
             setTextColor(color(R.color.text))
             setHintTextColor(color(R.color.dim))
+            setBackgroundResource(R.drawable.input_bg)
+            setPadding(dp(14), 0, dp(14), 0)
             contentDescription = "搜索文件名"
         }
-        body.addView(search, LinearLayout.LayoutParams(-1, dp(48)))
+        body.addView(search, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(4); bottomMargin = dp(4) })
         search.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { filter() }
