@@ -41,7 +41,7 @@ abstract class FeatureActivity : AppCompatActivity() {
             setTitleTextColor(color(R.color.text))
             setNavigationIcon(R.drawable.ic_back)
             setNavigationIconTint(color(R.color.text))
-            setNavigationOnClickListener { finish() }
+            setNavigationOnClickListener { navigateBack() }
         }
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(56)))
         body = LinearLayout(this).apply {
@@ -74,6 +74,8 @@ abstract class FeatureActivity : AppCompatActivity() {
         textSize = size
         setTextColor(color(tint))
     }
+
+    protected open fun navigateBack() { finish() }
 
     /** 并排等分的按钮自动留出间距，避免相邻按钮贴在一起。 */
     private class SpacedButton(context: android.content.Context) : MaterialButton(context) {

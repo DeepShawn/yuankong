@@ -108,7 +108,7 @@ class StorageActivity : FeatureActivity() {
         breadcrumbs = LinearLayout(this)
         body.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(breadcrumbs) })
         val actions = LinearLayout(this)
-        listOf("上一级" to { load(parentOf(path)) }, "刷新" to { load(path) }, "新建" to { renameOrCreate(null) },
+        listOf("上一级" to { load(parentOf(path)) }, "刷新" to { load(path) }, "新建" to { newItem() },
             "上传" to {
                 if (transfer?.isCompleted != false && path.isNotBlank()) {
                     uploadTarget = path
@@ -118,6 +118,7 @@ class StorageActivity : FeatureActivity() {
             actions.addView(button(name, callback).apply { minWidth = 0; textSize = 12f }, LinearLayout.LayoutParams(0, -2, 1f))
         }
         body.addView(actions)
+        body.addView(button("脚本任务 · 运行记录") { ScriptJobsDialog.show(this,runCatching { ConnectionManager.sessionClient() }.getOrNull()) })
         search = EditText(this).apply {
             hint = "搜索当前目录"
             setSingleLine(true)
@@ -220,6 +221,10 @@ class StorageActivity : FeatureActivity() {
         val client = runCatching { ConnectionManager.sessionClient() }.getOrNull()
         menu.menu.add("在电脑打开")
         if (!item.optBoolean("dir")) menu.menu.add("预览")
+        if (!item.optBoolean("dir")) menu.menu.add("编辑文本")
+        val scriptType=item.optString("name").substringAfterLast('.',"").lowercase()
+        if (!item.optBoolean("dir") && scriptType in listOf("bat","cmd","vbs")) menu.menu.add("运行 ${scriptType.uppercase()}")
+        if (!item.optBoolean("dir") && item.optString("name").endsWith(".exe",true)) menu.menu.add("应用锁")
         if (!item.optBoolean("dir") && item.optString("name").endsWith(".zip", true)) menu.menu.add("解压 ZIP")
         if (!item.optBoolean("dir")) menu.menu.add("下载到手机")
         menu.menu.add("重命名")
@@ -234,6 +239,9 @@ class StorageActivity : FeatureActivity() {
                         status("已向电脑发送打开请求")
                     } }.show()
                 "预览" -> FilePreview.show(this, client, selected)
+                "编辑文本" -> startActivity(android.content.Intent(this,TextEditorActivity::class.java).putExtra("path",selected))
+                "运行 BAT","运行 CMD","运行 VBS" -> ScriptJobsDialog.show(this,client,selected)
+                "应用锁" -> startActivity(android.content.Intent(this,AppLocksActivity::class.java).putExtra("path",selected))
                 "解压 ZIP" -> {
                     val destination = EditText(this).apply {
                         setSingleLine(); setText(joinPath(path, item.getString("name").dropLast(4) + "_extracted"))
@@ -291,6 +299,37 @@ class StorageActivity : FeatureActivity() {
             }
         }
         dialog.show()
+    }
+
+    private fun newItem() {
+        val names = listOf("文件夹","文本文档 (.txt)","批处理 (.bat)","VBScript (.vbs)","命令脚本 (.cmd)","PowerShell (.ps1)","Markdown (.md)","JSON (.json)","配置文件 (.ini)","其他文本文件")
+        val suffixes = listOf("","txt","bat","vbs","cmd","ps1","md","json","ini","")
+        AlertDialog.Builder(this).setTitle("新建").setItems(names.toTypedArray()) { _, index ->
+            if (index == 0) { renameOrCreate(null); return@setItems }
+            val client = runCatching { ConnectionManager.sessionClient() }.getOrNull()
+            val base = path
+            val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18),0,dp(18),0) }
+            val name = EditText(this).apply { setSingleLine(); setText(if (suffixes[index].isEmpty()) "新文件.txt" else "新建文件.${suffixes[index]}"); contentDescription = "新文件名称" }
+            val format = android.widget.Spinner(this).apply {
+                adapter = android.widget.ArrayAdapter(this@StorageActivity,android.R.layout.simple_spinner_dropdown_item,TextEditorActivity.ENCODING_NAMES)
+                setSelection(when(suffixes[index]) { "bat","cmd" -> 2; "vbs" -> 4; else -> 0 })
+            }
+            content.addView(name); content.addView(label("编码（可在编辑页调整）",12f,R.color.dim)); content.addView(format)
+            val dialog = AlertDialog.Builder(this).setTitle("新建文本文件").setMessage("创建后直接进入编辑。BAT/CMD 中文通常使用 GBK，VBS 建议 UTF-16 LE；不会自动运行脚本。").setView(content)
+                .setNegativeButton("取消",null).setPositiveButton("创建并编辑",null).create()
+            dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val filename = name.text.toString().trim()
+                if (!validName(filename)) { name.error = "请输入兼容 Windows 的文件名"; return@setOnClickListener }
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+                task { try {
+                    val result = pinnedCall(client,"files",JSONObject().put("action","text_create").put("path",joinPath(base,filename)).put("text","")
+                        .put("encoding",TextEditorActivity.ENCODINGS[format.selectedItemPosition]).put("newline","crlf"))
+                    dialog.dismiss(); load(base)
+                    startActivity(android.content.Intent(this@StorageActivity,TextEditorActivity::class.java).putExtra("path",result.getString("path")).putExtra("encoding",TextEditorActivity.ENCODINGS[format.selectedItemPosition]))
+                } finally { dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true } }
+            } }
+            dialog.show()
+        }.show()
     }
 
     private fun validName(name: String) = name.isNotBlank() && name !in listOf(".", "..") &&

@@ -38,7 +38,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1087,6 +1087,12 @@ from desktop_apps import apps_request
 from command_queue import CommandQueue
 from recordings import Recordings
 from gestures import Gestures
+from app_locks import AppLocks
+from registry_editor import RegistryEditor
+from task_manager import TaskManager
+from browser_control import browser_request
+from script_runner import ScriptRunner
+from privacy_devices import PrivacyDevices
 
 _capture_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 _remote = RemoteFeatures(RpcError, log, os.path.join(_capture_dir, "LanCmdCapture.exe"))
@@ -1094,12 +1100,18 @@ _devices = DeviceManager(os.path.join(APP_DIR, "device-policy.json"), is_admin)
 _commands = CommandQueue(lambda line, shell: run_exec(line, shell, None, 300))
 _recordings = Recordings(os.path.join(APP_DIR, "recordings"), os.path.join(_capture_dir, "LanCmdRecord.exe"))
 _gestures = Gestures(_remote)
+_app_locks = AppLocks(os.path.join(APP_DIR,"app-locks.json"),protected=(_capture_dir,sys.executable))
+_registry = RegistryEditor(os.path.join(APP_DIR,"registry-backups"))
+_tasks = TaskManager(protected=(_capture_dir,))
+_scripts = ScriptRunner()
+_privacy_devices = PrivacyDevices(is_admin)
 
 
 def remote_capabilities():
-    features = ["storage", "file_preview", "zip_extract", "commands"]
+    features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures"])
+        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1130,6 +1142,12 @@ HANDLERS = {
     "commands": lambda q, st: _commands.request(q, st, RpcError),
     "recordings": lambda q, st: _recordings.request(q, st, RpcError),
     "gestures": lambda q, st: _gestures.request(q, st, RpcError),
+    "app_locks": lambda q, st: _app_locks.request(q,RpcError),
+    "registry": lambda q, st: _registry.request(q,RpcError),
+    "tasks": lambda q, st: _tasks.request(q,RpcError),
+    "browser": lambda q, st: browser_request(q,RpcError),
+    "scripts": lambda q, st: _scripts.request(q,st,RpcError),
+    "privacy_devices": lambda q, st: _privacy_devices.request(q,RpcError),
     "message": _remote.message,
     "info": lambda q, st: cmd_info(),
     "exec": lambda q, st: run_exec(

@@ -288,3 +288,13 @@ Windows `capabilities.features` 新增 `devices`。完成握手后使用：
 `recordings` actions: `devices`, `list`, `start` (`mode`: audio/screen/camera, `audio`: bool, `microphone`: -1 default or device id, `camera`: id, `seconds`: 1..3600), `stop`/`delete` (`id`). Receiver-generated filenames, owner client_id checks, max 3 recordings and 200 records per owner. Files persist locally, no automatic deletion.
 
 `gestures`: read-only `dimensions` returns virtual desktop width/height. Other actions require input-session `sid`: `play` (`delay`: 0..86400, `events`: 1..6000 `{ms,action,x,y}`), `status`, `cancel`. Events are move/down/up, normalized finite coordinates, monotonic integer milliseconds <=300000 and balanced left-button down/up. Exclusive remote pointer reservation; session heartbeat <12 seconds; cancel on session end. No Windows privacy permissions or indicators are changed.
+
+## 2.3.0 management
+
+`files` adds `text_read` (`encoding`: auto or explicit) and `text_create`/`text_write` (`text`, `encoding`, `newline`, `revision` required on write). Bounded to 512 KiB, exclusive create, optimistic content hash, Windows ReplaceFile. Encoding IDs: utf-8, utf-8-bom, gbk, gb18030, utf-16-le/be; newline preserve/crlf/lf/cr.
+
+`scripts`: run(path), list, cancel(id); BAT/CMD/VBS only, owner client_id, 4 concurrent, 300 seconds, 8 KiB per output stream. `tasks`: list/detail(pid)/terminate(pid,created). `app_locks`: list/lock(path)/unlock(id)/forget(id), selected EXE execute ACL journal with conflict checks.
+
+`registry`: root HKCU/HKLM/HKCR/HKU/HKCC, path, view 32/64; browse with key_offset/value_offset pages of 100; get(name); set(name,value,revision); delete_value(name,revision); create_key(child); delete_key(empty only); history/restore(id). Value is {type,data}; integers and binary use strings; MULTI_SZ uses array. Missing value revision is `missing`.
+
+`browser`: list/open(url,browser=default or fresh inventory ID), HTTP(S) only. `privacy_devices`: list; set_enabled(id,enabled), admin; mute(id,muted), capture endpoints only. Actual permissions, system indicators and hardware lights are unchanged.

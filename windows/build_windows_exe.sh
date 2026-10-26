@@ -53,7 +53,7 @@ echo "[4/5] 组装目录"
 rm -rf "$PKG"
 mkdir -p "$PKG/python"
 cp "$WORK/LanCmdAgent.exe" "$WORK/LanCmdCtl.exe" "$WORK/Start.exe" "$WORK/LanCmdCapture.exe" "$WORK/LanCmdRecord.exe" "$PKG/"
-cp lan_command_agent.py remote_features.py system_controls.py input_guard.py device_management.py touch_guard.py file_actions.py desktop_apps.py command_queue.py recordings.py gestures.py start.bat 诊断.bat 启动.vbs "$PKG/"
+cp lan_command_agent.py remote_features.py system_controls.py input_guard.py device_management.py touch_guard.py file_actions.py desktop_apps.py command_queue.py recordings.py gestures.py text_editor.py app_locks.py registry_editor.py task_manager.py browser_control.py script_runner.py privacy_devices.py start.bat 诊断.bat 启动.vbs "$PKG/"
 (cd "$PKG/python" && unzip -qo "$WORK/$EMBED_ZIP")
 # 精简：接收端用不到这些
 rm -f "$PKG/python"/_msi.pyd "$PKG/python"/_sqlite3.pyd "$PKG/python"/sqlite3.dll \
