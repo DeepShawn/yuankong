@@ -207,7 +207,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
                 virtual.resetModifiers()
                 val expanded = virtual.visibility != View.VISIBLE
                 virtual.visibility = if (expanded) View.VISIBLE else View.GONE
-                text = if (expanded) "收起虚拟键盘" else "展开虚拟键盘"
+                this.text = if (expanded) "收起虚拟键盘" else "展开虚拟键盘"
                 ViewCompat.setStateDescription(this, if (expanded) "已展开" else "已收起")
                 if (expanded) controlScroll.post { controlScroll.smoothScrollTo(0, virtual.top) }
             }
