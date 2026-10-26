@@ -211,6 +211,7 @@ class DesktopUiTest {
             assertEquals(View.VISIBLE, virtual.visibility)
             shadowOf(Looper.getMainLooper()).idle()
             render(activity, "desktop-keyboard-expanded")
+            assertTrue("Expanded keyboard should receive more vertical space", (virtual.parent!!.parent!!.parent as View).height > 240)
             expand.performClick()
             assertEquals("展开虚拟键盘", expand.text.toString())
             assertEquals(View.GONE, virtual.visibility)

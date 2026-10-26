@@ -64,6 +64,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
     private var mode = 0
     private var fullscreen = false
     private var landscape = false
+    private var virtualKeyboardExpanded = false
     private var sessionJob: Job? = null
     private var terminalJob: Job? = null
     private var commands: Channel<InputCommand>? = null
@@ -95,6 +96,9 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
             }
         }
         workspace = LinearLayout(this)
+        workspace.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (virtualKeyboardExpanded && bottom - top != oldBottom - oldTop) configureWorkspace()
+        }
         body.addView(workspace, LinearLayout.LayoutParams(-1, 0, 1f))
         workspace.addView(screen)
         controlDock = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -206,9 +210,11 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
             setOnClickListener {
                 virtual.resetModifiers()
                 val expanded = virtual.visibility != View.VISIBLE
+                virtualKeyboardExpanded = expanded
                 virtual.visibility = if (expanded) View.VISIBLE else View.GONE
                 this.text = if (expanded) "收起虚拟键盘" else "展开虚拟键盘"
                 ViewCompat.setStateDescription(this, if (expanded) "已展开" else "已收起")
+                configureWorkspace()
                 if (expanded) controlScroll.post { controlScroll.smoothScrollTo(0, virtual.top) }
             }
         }
@@ -255,6 +261,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
     private fun showMode() {
         panels.forEachIndexed { index, panel -> panel.visibility = if (!fullscreen && index == mode) View.VISIBLE else View.GONE }
         modeButtons.forEachIndexed { index, button -> button.setTextColor(color(if (index == mode) R.color.accent else R.color.dim)) }
+        configureWorkspace()
     }
 
     private fun setFullscreen(value: Boolean) {
@@ -278,7 +285,10 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
             .apply { topMargin = dp(8); bottomMargin = dp(8) }
         controlDock.layoutParams = LinearLayout.LayoutParams(if (sideBySide) dp(300) else -1, if (sideBySide) -1 else -2)
         controlDock.setPadding(if (sideBySide) dp(8) else 0, 0, 0, 0)
-        controlScroll.layoutParams = if (sideBySide) LinearLayout.LayoutParams(-1, 0, 1f) else LinearLayout.LayoutParams(-1, dp(240))
+        val keyboardHeight = if (mode == 1 && virtualKeyboardExpanded && !fullscreen)
+            minOf(dp(432), maxOf(dp(240), (workspace.height * 0.75f).toInt())) else dp(240)
+        controlScroll.layoutParams = if (sideBySide) LinearLayout.LayoutParams(-1, 0, 1f)
+            else LinearLayout.LayoutParams(-1, keyboardHeight)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {

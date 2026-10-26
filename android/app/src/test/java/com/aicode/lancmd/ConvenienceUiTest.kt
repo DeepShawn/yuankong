@@ -67,6 +67,10 @@ class ConvenienceUiTest {
     }
     private fun render(view: View, name: String, width: Int = 411) {
         val wrap = view is VirtualKeyboard
+        if (wrap && !view.isAttachedToWindow) {
+            (view.context as android.app.Activity).setContentView(view, ViewGroup.LayoutParams(-1, -2))
+        }
+        shadowOf(Looper.getMainLooper()).idle()
         view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(700, if (wrap) View.MeasureSpec.AT_MOST else View.MeasureSpec.EXACTLY))
         val height = if (wrap) view.measuredHeight else 700
@@ -234,7 +238,7 @@ class ConvenienceUiTest {
         controller.get().setContentView(host)
         key("Ctrl").performClick(); key("Shift").performClick()
         assertTrue(key("Ctrl").isSelected); assertTrue(key("Shift").isSelected)
-        assertEquals(1f, key("Shift").alpha)
+        assertEquals(1f, key("Shift").alpha, 0f)
         assertTrue(key("清除").isEnabled)
         render(keyboard, "virtual-keyboard-combination")
         key("功能").performClick()
