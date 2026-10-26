@@ -37,14 +37,18 @@ object ScriptJobsDialog {
             val detail=AlertDialog.Builder(activity).setTitle("脚本结果").setView(ScrollView(activity).apply { addView(output) }).setNegativeButton("关闭",null)
                 .setPositiveButton("停止脚本",null).create()
             var updater:Job?=null
+            var actionError=""
             detail.setOnShowListener {
                 detail.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                    activity.lifecycleScope.launch { runCatching { pinnedCall(client,"scripts",JSONObject().put("action","cancel").put("id",id)) }.onFailure { status.text=it.message } }
+                    activity.lifecycleScope.launch {
+                        runCatching { pinnedCall(client,"scripts",JSONObject().put("action","cancel").put("id",id)) }
+                            .onSuccess { actionError="" }.onFailure { actionError="停止失败：${it.message}";status.text=it.message }
+                    }
                 }
                 updater=activity.lifecycleScope.launch { while(isActive && detail.isShowing) {
                     val item=items.firstOrNull { it.optString("id")==id }
                     if(item!=null) {
-                        val value="${item.getString("path")}\n${state(item)} · 退出码 ${if(item.has("code"))item.optInt("code") else "—"}\n\n${item.optString("out")}\n${item.optString("err")}${if(item.optBoolean("truncated"))"\n（输出已截断，各最多 8 KB）" else ""}"
+                        val value="${item.getString("path")}\n${state(item)} · 退出码 ${if(item.has("code"))item.optInt("code") else "—"}\n\n${item.optString("out")}\n${item.optString("err")}${if(item.optBoolean("truncated"))"\n（输出已截断，各最多 8 KB）" else ""}${if(actionError.isNotEmpty())"\n\n$actionError" else ""}"
                         if(output.text.toString()!=value)output.text=value
                         detail.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=item.optString("status") in listOf("starting","running")
                     };delay(500)

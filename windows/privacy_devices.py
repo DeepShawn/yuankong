@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import threading
+import re
+import time
 from touch_guard import TouchDevices
 from system_controls import endpoint_audio
 
@@ -24,6 +26,13 @@ ConvertTo-Json -InputObject $items -Compress -Depth 5
 '''
 
 
+def capture_endpoint(instance):
+    """Only capture MMDevice endpoints; never route a mute to a render device."""
+    if not isinstance(instance,str):return None
+    match=re.fullmatch(r"SWD\\MMDEVAPI\\(\{0\.0\.1\.[0-9a-f]{8}\}\.\{[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\})",instance,re.IGNORECASE)
+    return match.group(1) if match else None
+
+
 class PrivacyHardware(TouchDevices):
     def node(self,instance):
         node=self.w.DWORD();result=self.cm.CM_Locate_DevNodeW(ctypes.byref(node),instance,0)
@@ -33,10 +42,20 @@ class PrivacyHardware(TouchDevices):
         executable=os.path.join(os.environ.get("SystemRoot",r"C:\Windows"),"System32","WindowsPowerShell","v1.0","powershell.exe")
         result=subprocess.run([executable,"-NoLogo","-NoProfile","-NonInteractive","-Command",INVENTORY],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30,creationflags=0x08000000)
         if result.returncode:raise RuntimeError("读取摄像头/麦克风设备失败："+result.stderr.decode("utf-8","replace")[-1000:])
-        items=json.loads(result.stdout.decode("utf-8-sig"))
-        for item in items:
+        raw=json.loads(result.stdout.decode("utf-8-sig"))
+        if not isinstance(raw,list):raise RuntimeError("设备列表格式无效")
+        items=[]
+        for item in raw:
+            if not isinstance(item,dict) or item.get("kind") not in ("camera","microphone") or not isinstance(item.get("id"),str) or not item["id"]:
+                continue
+            if item["kind"]=="microphone":
+                endpoint=capture_endpoint(item["id"])
+                if endpoint is None:continue
+                item["endpoint"]=endpoint
+            item["name"]=item.get("name") or item["id"]
             try:item.update(self.status(item["id"]))
             except RuntimeError as exc:item.update(enabled=False,problem=-1,error=str(exc))
+            items.append(item)
         return items
     def status(self,instance):
         status,problem=self.w.ULONG(),self.w.ULONG();node=self.node(instance)
@@ -52,6 +71,12 @@ class PrivacyHardware(TouchDevices):
 
 class PrivacyDevices:
     def __init__(self,admin,backend=None,audio=endpoint_audio):self.admin=admin;self.backend=backend;self.audio=audio;self.lock=threading.RLock()
+    @staticmethod
+    def _endpoint(item):
+        endpoint=item.get("endpoint")
+        if not isinstance(endpoint,str) or not endpoint or any(ord(c)<32 for c in endpoint):
+            raise ValueError("麦克风端点编号无效，请刷新；不会修改默认音频设备")
+        return endpoint
     def request(self,q,error):
         try:
             if self.backend is None:
@@ -62,24 +87,40 @@ class PrivacyDevices:
                 if action=="list":
                     for item in items:
                         if item["kind"]=="microphone" and item.get("enabled"):
-                            try:item.update(self.audio(device_id=item["endpoint"],flow=1))
-                            except RuntimeError as exc:item["audio_error"]=str(exc)
+                            try:
+                                response=self.audio(device_id=self._endpoint(item),flow=1)
+                                if not isinstance(response,dict) or not isinstance(response.get("muted"),bool):
+                                    raise RuntimeError("未能读取麦克风静音状态")
+                                item.update(response)
+                            except (OSError,RuntimeError,ValueError) as exc:item["audio_error"]=str(exc)
                     return {"items":items,"admin":bool(self.admin())}
                 item=next((v for v in items if v["id"]==q.get("id")),None)
                 if not item:raise ValueError("设备已断开或不属于可管理的摄像头/麦克风，请刷新")
+                if item.get("kind") not in ("camera","microphone"):
+                    raise ValueError("不支持控制此类设备")
                 if action=="set_enabled":
                     enabled=q.get("enabled")
                     if not isinstance(enabled,bool):raise ValueError("设备状态必须为布尔值")
                     if not self.admin():raise ValueError("设备启停需要管理员接收端")
+                    if item.get("error") or item.get("problem") not in (0,22) or not isinstance(item.get("enabled"),bool):
+                        raise ValueError("设备状态异常或未知，未执行启停，请刷新检查驱动")
                     if item.get("enabled")==enabled and (enabled or item.get("problem")==22):return {"unchanged":True}
                     self.backend.set_enabled(item["id"],enabled)
-                    state=self.backend.status(item["id"])
-                    if state["enabled"]!=enabled:raise ValueError("Windows 已接受请求，但状态尚未完成切换，请刷新；驱动可能需要重新插拔或重启")
+                    deadline=time.monotonic()+1.5
+                    while True:
+                        state=self.backend.status(item["id"])
+                        confirmed=state.get("enabled") is enabled and state.get("problem")== (0 if enabled else 22)
+                        if confirmed:break
+                        if time.monotonic()>=deadline:raise ValueError("Windows 已接受请求，但状态尚未完成切换，请刷新；驱动可能需要重新插拔或重启")
+                        time.sleep(.1)
                     return dict(state,changed=True)
                 if action=="mute":
                     if item["kind"]!="microphone" or not item.get("enabled"):raise ValueError("请先启用目标麦克风")
                     muted=q.get("muted")
                     if not isinstance(muted,bool):raise ValueError("静音状态必须为布尔值")
-                    return self.audio(muted=muted,device_id=item["endpoint"],flow=1)
+                    response=self.audio(muted=muted,device_id=self._endpoint(item),flow=1)
+                    if not isinstance(response,dict) or response.get("muted") is not muted:
+                        raise ValueError("麦克风未确认切换到所选静音状态，请刷新检查")
+                    return response
                 raise ValueError("无效的隐私设备操作")
         except (OSError,ValueError,RuntimeError,KeyError,TypeError,subprocess.SubprocessError) as exc:raise error(str(exc))

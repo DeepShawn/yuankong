@@ -14,11 +14,13 @@ def browsers():
             for view in (w.KEY_WOW64_64KEY,w.KEY_WOW64_32KEY):
                 try:
                     with w.OpenKey(hive,"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\"+exe,0,w.KEY_READ|view) as key:
-                        value=w.QueryValueEx(key,"")[0].strip('"')
+                        value=w.QueryValueEx(key,"")[0]
+                    if not isinstance(value,str):continue
+                    value=value.strip('"')
                     path=Path(os.path.expandvars(value)).resolve()
                     if path.is_file() and path.name.lower()==exe and str(path).casefold() not in seen:
                         seen.add(str(path).casefold());out.append(dict(id=str(path),name=label,path=str(path)))
-                except OSError:pass
+                except (OSError,ValueError,RuntimeError):pass
     return out
 
 
@@ -29,9 +31,9 @@ def browser_request(q,error,inventory=None):
         if action=="list":return {"items":inventory()}
         if action!="open":raise ValueError("无效的浏览器操作")
         url=q.get("url")
-        if not isinstance(url,str) or len(url)>8192 or any(ord(c)<33 for c in url):raise ValueError("请输入有效网址，不能包含空格或控制字符")
+        if not isinstance(url,str) or len(url)>8192 or any(c.isspace() or ord(c)<33 or ord(c)==127 or c in '\\"<>' for c in url):raise ValueError("请输入有效网址，不能包含空格、控制字符或未编码的引号")
         parts=urlsplit(url)
-        if parts.scheme.lower() not in ("http","https") or not parts.hostname or parts.username or parts.password or parts.port==0:raise ValueError("仅支持不含用户名密码的 HTTP / HTTPS 网址")
+        if parts.scheme.lower() not in ("http","https") or not parts.hostname or parts.username is not None or parts.password is not None or parts.port==0:raise ValueError("仅支持不含用户名密码的 HTTP / HTTPS 网址")
         selected=q.get("browser","default")
         if selected=="default":os.startfile(url,"open")
         else:

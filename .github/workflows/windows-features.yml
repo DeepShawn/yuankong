@@ -65,7 +65,9 @@ jobs:
       - name: Recordings, native media encoding and gesture playback
         run: python -m unittest discover -s tools -p test_recordings.py -v
       - name: Text editor, native permissions, registry, scripts and privacy devices
-        run: python -m unittest discover -s tools -p test_management.py -v
+        run: python -m unittest discover -s tools -p "test_management*.py" -v
+      - name: Application lock and privacy device recovery edge checks
+        run: python -m unittest discover -s tools -p test_privacy_lock_edges.py -v
   package-windows:
     runs-on: ubuntu-latest
     timeout-minutes: 15

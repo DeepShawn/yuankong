@@ -11,6 +11,8 @@ import uuid
 ROOTS=("HKCU","HKLM","HKCR","HKU","HKCC")
 TYPES={"REG_SZ":1,"REG_EXPAND_SZ":2,"REG_BINARY":3,"REG_DWORD":4,"REG_MULTI_SZ":7,"REG_QWORD":11}
 NAMES={v:k for k,v in TYPES.items()}
+VALUE_LIMIT=64*1024
+PACKED_LIMIT=256*1024
 
 
 def packed(value):
@@ -32,7 +34,7 @@ def unpack(value):
     if kind in (1,2):
         if not isinstance(data,str) or "\0" in data:raise ValueError("字符串不能包含空字符")
     elif kind==7:
-        if not isinstance(data,list) or any(not isinstance(v,str) or "\0" in v for v in data):raise ValueError("多字符串需为字符串列表")
+        if not isinstance(data,list) or any(not isinstance(v,str) or not v or "\0" in v for v in data):raise ValueError("多字符串需为不含空项的字符串列表")
     elif kind==3:
         if not isinstance(data,str):raise ValueError("二进制值使用十六进制")
         try:data=bytes.fromhex(data)
@@ -41,7 +43,11 @@ def unpack(value):
         if not isinstance(data,str) or len(data)>22 or not re.fullmatch(r"(?:0[xX][0-9a-fA-F]+|[0-9]+)",data):raise ValueError("整数值使用十进制或 0x 十六进制")
         data=int(data,16 if data.lower().startswith("0x") else 10)
         if not 0<=data<(1<<(32 if kind==4 else 64)):raise ValueError("整数超出类型范围")
-    if len(json.dumps(packed((kind,data)),ensure_ascii=True))>128*1024:raise ValueError("注册表值过大，最多约 64 KB 文本或二进制")
+    if kind in (1,2):size=len(data.encode("utf-16-le"))+2
+    elif kind==7:size=len(("\0".join(data)+"\0\0").encode("utf-16-le"))
+    elif kind==3:size=len(data)
+    else:size=4 if kind==4 else 8
+    if size>VALUE_LIMIT or len(json.dumps(packed((kind,data)),ensure_ascii=True))>PACKED_LIMIT:raise ValueError("注册表值过大，最多 64 KB 文本或二进制")
     return kind,data
 
 
@@ -50,8 +56,8 @@ class NativeRegistry:
         import winreg
         self.w=winreg
         self.roots=dict(zip(ROOTS,(winreg.HKEY_CURRENT_USER,winreg.HKEY_LOCAL_MACHINE,winreg.HKEY_CLASSES_ROOT,winreg.HKEY_USERS,winreg.HKEY_CURRENT_CONFIG)))
-    def open(self,root,path,view,write=False):
-        rights=self.w.KEY_READ|(self.w.KEY_WRITE if write else 0)|(self.w.KEY_WOW64_32KEY if view==32 else self.w.KEY_WOW64_64KEY)
+    def open(self,root,path,view,write=False,access=None):
+        rights=(access if access is not None else self.w.KEY_READ|(self.w.KEY_SET_VALUE if write else 0))|(self.w.KEY_WOW64_32KEY if view==32 else self.w.KEY_WOW64_64KEY)
         return self.w.OpenKey(self.roots[root],path,0,rights)
     def browse(self,root,path,view,ko,vo):
         with self.open(root,path,view) as key:
@@ -67,15 +73,16 @@ class NativeRegistry:
             try:value,kind=self.w.QueryValueEx(key,name);return kind,value
             except FileNotFoundError:return None
     def write(self,root,path,view,name,value):
-        with self.open(root,path,view,True) as key:
+        with self.open(root,path,view,access=self.w.KEY_SET_VALUE) as key:
             if value is None:self.w.DeleteValue(key,name)
             else:self.w.SetValueEx(key,name,0,value[0],value[1])
     def create(self,root,path,view,name):
-        with self.open(root,path,view,True) as parent:
+        flag=self.w.KEY_WOW64_32KEY if view==32 else self.w.KEY_WOW64_64KEY
+        with self.open(root,path,view,access=self.w.KEY_CREATE_SUB_KEY|self.w.KEY_ENUMERATE_SUB_KEYS) as parent:
             try:
-                with self.w.OpenKey(parent,name):pass
+                with self.w.OpenKey(parent,name,0,self.w.KEY_READ|flag):pass
             except FileNotFoundError:
-                with self.w.CreateKeyEx(parent,name,0,self.w.KEY_WRITE):pass
+                with self.w.CreateKeyEx(parent,name,0,self.w.KEY_WRITE|flag):pass
                 return
             raise ValueError("注册表子项已存在")
     def delete(self,root,path,view):
@@ -132,6 +139,7 @@ class RegistryEditor:
                     current=backend.read(root,path,view,name)
                     if version(current)!=version(after):raise ValueError("当前值已变化，未覆盖，不能直接恢复此备份")
                     self._journal(root,path,view,name,current,before)
+                    if version(backend.read(root,path,view,name))!=version(current):raise ValueError("备份期间注册表值已变化，未覆盖")
                     if current is not None or before is not None:backend.write(root,path,view,name,before)
                     return {"restored":True}
                 root,path,view=self._location(q)
@@ -141,7 +149,7 @@ class RegistryEditor:
                     return dict(backend.browse(root,path,view,ko,vo),root=root,path=path,view=view)
                 if action=="create_key":
                     child=q.get("child")
-                    if not isinstance(child,str) or not child or len(child)>255 or any(c in child for c in "\\/\0"):raise ValueError("请输入单个有效子项名称")
+                    if not isinstance(child,str) or not child or child in (".","..") or len(child)>255 or any(c in child for c in "\\/\0"):raise ValueError("请输入单个有效子项名称")
                     backend.create(root,path,view,child);return {"created":True}
                 if action=="delete_key":
                     if not path:raise ValueError("不能删除注册表根项")
@@ -150,10 +158,12 @@ class RegistryEditor:
                 if action=="get":
                     if current is None:raise ValueError("注册表值不存在")
                     data=packed(current)
-                    if len(json.dumps(data,ensure_ascii=True))>128*1024:raise ValueError("此值过大，不支持在线编辑")
+                    if current[0] in NAMES:unpack(data)
+                    elif len(json.dumps(data,ensure_ascii=True))>128*1024:raise ValueError("此值过大，不支持在线编辑")
                     return dict(data,name=name,revision=version(current))
                 if action not in ("set","delete_value"):raise ValueError("无效的注册表操作")
                 if current is not None and current[0] not in NAMES:raise ValueError("此类型仅支持浏览，不支持在线修改")
+                if current is not None:unpack(packed(current))
                 if q.get("revision")!=version(current):raise ValueError("注册表值已变化，未覆盖；请刷新后再编辑")
                 if action=="delete_value" and current is None:raise ValueError("注册表值不存在")
                 after=unpack(q.get("value")) if action=="set" else None

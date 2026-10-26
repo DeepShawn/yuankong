@@ -91,7 +91,16 @@ def write_text(path, q, create=False):
         if create:
             # Exclusive create protects against races and existing links.
             with path.open("xb") as stream:
-                stream.write(data); stream.flush(); os.fsync(stream.fileno())
+                created=os.fstat(stream.fileno())
+                try:
+                    stream.write(data); stream.flush(); os.fsync(stream.fileno())
+                except OSError:
+                    stream.close()
+                    try:
+                        current=path.lstat()
+                        if (created.st_dev,created.st_ino)==(current.st_dev,current.st_ino):path.unlink()
+                    except OSError:pass
+                    raise
         else:
             expected = q.get("revision")
             if not isinstance(expected, str) or not re.fullmatch("[0-9a-f]{64}", expected):

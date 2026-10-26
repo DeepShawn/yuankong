@@ -26,7 +26,8 @@ class ProcessJob:
         if not self.handle:raise ctypes.WinError(ctypes.get_last_error())
         limits=Extended();limits.basic.flags=0x2000
         if not self.kernel.SetInformationJobObject(self.handle,9,ctypes.byref(limits),ctypes.sizeof(limits)) or not self.kernel.AssignProcessToJobObject(self.handle,int(process._handle)):
-            self.kernel.CloseHandle(self.handle);self.handle=None;raise ctypes.WinError(ctypes.get_last_error())
+            error=ctypes.get_last_error()
+            self.kernel.CloseHandle(self.handle);self.handle=None;raise ctypes.WinError(error)
     def terminate(self):
         if self.handle and not self.kernel.TerminateJobObject(self.handle,1):raise ctypes.WinError(ctypes.get_last_error())
     def close(self,normal=False):
@@ -37,16 +38,29 @@ class ProcessJob:
         self.kernel.CloseHandle(self.handle);self.handle=None
 
 
+def attach_process_job(process):
+    try:
+        return ProcessJob(process)
+    except OSError:
+        # A small BAT file may finish between CreateProcess and assignment.
+        # Its result and remaining pipe bytes are still valid.
+        if process.poll() is not None:
+            return None
+        raise
+
+
 def script_command(path):
     env=dict(os.environ)
     if path.suffix.lower() in (".bat",".cmd"):
         # The path is expanded once, inside quotes. CALL and delayed expansion
         # would expand a filename containing percent signs or exclamation marks.
         env["LANCMD_SCRIPT_FILE"]=str(path)
-        prefix=[os.environ.get("COMSPEC",str(Path(os.environ.get("WINDIR",r"C:\Windows"))/"System32"/"cmd.exe")),"/d","/q","/v:off","/s","/c"]
+        prefix=[str(Path(os.environ.get("WINDIR",r"C:\Windows"))/"System32"/"cmd.exe"),"/d","/q","/v:off","/s","/c"]
         return subprocess.list2cmdline(prefix)+' ""%LANCMD_SCRIPT_FILE%""',env
     cscript=str(Path(os.environ.get("WINDIR",r"C:\Windows"))/"System32"/"cscript.exe")
-    return [cscript,"//B","//Nologo","//U","//T:300",str(path)],env
+    # CScript is a console host, hidden by CREATE_NO_WINDOW. Its batch flag
+    # suppresses WScript.Echo as well as errors, so retain normal redirected I/O.
+    return [cscript,"//Nologo","//U","//T:300",str(path)],env
 
 
 def read_available(stream):
@@ -79,8 +93,8 @@ class ScriptRunner:
                 if not isinstance(value,str) or not value or "\0" in value:raise ValueError("请选择脚本文件")
                 path=Path(value).resolve(strict=True)
                 if not path.is_file() or path.suffix.lower() not in (".bat",".cmd",".vbs"):raise ValueError("只支持运行 BAT、CMD、VBS 文件")
-                if sum(j["data"]["status"] in ("starting","running") for j in self.jobs.values())>=4:raise ValueError("最多同时运行 4 个脚本")
-                history=[rid for rid,j in self.jobs.items() if j["data"]["status"] not in ("starting","running")]
+                if sum("finished" not in j["data"] for j in self.jobs.values())>=4:raise ValueError("最多同时运行 4 个脚本")
+                history=[rid for rid,j in self.jobs.items() if "finished" in j["data"]]
                 while len(self.jobs)>=100 and history:self.jobs.pop(history.pop(0))
                 rid=uuid.uuid4().hex
                 job={"owner":state.client_id,"cancel":threading.Event(),"data":dict(id=rid,path=str(path),status="starting",created=time.time(),out="",err="",timeout=300)}
@@ -95,7 +109,7 @@ class ScriptRunner:
             if job["cancel"].is_set():data["status"]="cancelled";return
             process=self.popen(command,cwd=str(path.parent),env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,bufsize=0,
                 creationflags=0x08000000 if os.name=="nt" else 0,close_fds=True)
-            if os.name=="nt":group=ProcessJob(process)
+            if os.name=="nt":group=attach_process_job(process)
             data["status"]="running";data["started"]=time.time()
             deadline=time.monotonic()+300;output=bytearray();errors=bytearray();killed=False
             while True:
@@ -134,7 +148,10 @@ class ScriptRunner:
         finally:
             if group:group.close(normal)
             if process:
-                if process.poll() is None:process.kill()
+                if process.poll() is None:
+                    process.kill()
+                    try:process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:pass
                 for stream in (process.stdout,process.stderr):
                     if stream:stream.close()
             data["finished"]=time.time()

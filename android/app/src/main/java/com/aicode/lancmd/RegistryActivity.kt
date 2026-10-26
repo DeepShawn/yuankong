@@ -54,8 +54,13 @@ class RegistryActivity : FeatureActivity() {
         task { try {
             val result=pinnedCall(origin,"registry",target)
             current=JSONObject().put("root",result.getString("root")).put("path",result.getString("path")).put("view",result.getInt("view"))
+            root.setSelection(roots.indexOf(current.getString("root")).coerceAtLeast(0))
+            view.setSelection(if(current.getInt("view")==32)1 else 0)
+            path.setText(current.getString("path"))
             currentLabel.text="${current.getString("root")}\\${current.getString("path")} · ${current.getInt("view")} 位"
             if(!moreKeys && !moreValues){keys.removeAllViews();values.removeAllViews();keys.addView(label("子项",16f));values.addView(label("值",16f))}
+            if(moreKeys)itRemoveLast(keys)
+            if(moreValues)itRemoveLast(values)
             if(!moreValues) {
                 val list=result.getJSONArray("keys")
                 for(i in 0 until list.length()) {
@@ -63,17 +68,18 @@ class RegistryActivity : FeatureActivity() {
                     keys.addView(button(name) { browse(destination) })
                 }
                 keyOffset=result.getInt("key_offset")+list.length()
-                if(keyOffset<result.getInt("key_count"))keys.addView(button("加载更多子项") { (itRemoveLast(keys));browse(current,moreKeys=true) })
+                if(keyOffset<result.getInt("key_count"))keys.addView(button("加载更多子项") { browse(current,moreKeys=true) })
             }
             if(!moreKeys) {
                 val list=result.getJSONArray("values")
                 for(i in 0 until list.length()) {
                     val item=list.getJSONObject(i)
                     val name=item.getString("name")
-                    values.addView(button("${name.ifEmpty { "(默认)" }} · ${item.getString("type")}\n${item.getString("preview")}") { editValue(name) }.apply { maxLines=4;textSize=12f;gravity=android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL })
+                    val location=JSONObject(current.toString())
+                    values.addView(button("${name.ifEmpty { "(默认)" }} · ${item.getString("type")}\n${item.getString("preview")}") { editValue(name,location) }.apply { maxLines=4;textSize=12f;gravity=android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL })
                 }
                 valueOffset=result.getInt("value_offset")+list.length()
-                if(valueOffset<result.getInt("value_count"))values.addView(button("加载更多值") { itRemoveLast(values);browse(current,moreValues=true) })
+                if(valueOffset<result.getInt("value_count"))values.addView(button("加载更多值") { browse(current,moreValues=true) })
             }
             status("${result.getInt("key_count")} 个子项 · ${result.getInt("value_count")} 个值")
         } finally { busy=false } }
@@ -93,9 +99,8 @@ class RegistryActivity : FeatureActivity() {
                 pinnedCall(origin,"registry",location.put("action","delete_key"));browse(JSONObject(current.toString()).put("path",current.getString("path").substringBeforeLast('\\',"")))
             } }.show()
     }
-    private fun editValue(existing: String?) {
+    private fun editValue(existing: String?, location: JSONObject=JSONObject(current.toString())) {
         if(busy)return
-        val location=JSONObject(current.toString())
         task {
             val loaded=if(existing!=null)pinnedCall(origin,"registry",JSONObject(location.toString()).put("action","get").put("name",existing)) else null
             val content=LinearLayout(this@RegistryActivity).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(16),0,dp(16),0) }
@@ -130,7 +135,11 @@ class RegistryActivity : FeatureActivity() {
     private fun history()=task {
         val result=pinnedCall(origin,"registry",JSONObject().put("action","history"));val items=result.getJSONArray("items")
         if(items.length()==0){status("暂无值修改备份");return@task}
-        val labels=(0 until items.length()).map { val r=items.getJSONObject(it);"${r.getString("root")}\\${r.getString("path")}\n${r.getString("name").ifEmpty { "(默认)" }}" }
+        val labels=(0 until items.length()).map {
+            val r=items.getJSONObject(it)
+            val date=java.text.DateFormat.getDateTimeInstance().format(java.util.Date((r.optDouble("created")*1000).toLong()))
+            "${r.getString("root")}\\${r.getString("path")}\n${r.getString("name").ifEmpty { "(默认)" }} · ${r.getInt("view")} 位\n$date · ${r.getString("id").takeLast(6)}"
+        }
         AlertDialog.Builder(this@RegistryActivity).setTitle("最近 100 次值修改备份").setItems(labels.toTypedArray()) { _,index->
             val item=items.getJSONObject(index)
             AlertDialog.Builder(this@RegistryActivity).setTitle("恢复到该次修改前？").setMessage("${labels[index]}\n当前值必须仍与该次修改结果相同，外部变化时停止恢复。")

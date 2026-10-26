@@ -21,6 +21,7 @@ class NativeProcesses:
     @staticmethod
     def ticks(value):return (value.dwHighDateTime<<32)|value.dwLowDateTime
     def info(self,pid,name="",handle=None):
+        if type(pid)is not int or not 0<pid<=0xffffffff:raise ValueError("进程编号无效")
         own=handle is None
         handle=handle or self.kernel.OpenProcess(0x410,False,pid) or self.kernel.OpenProcess(0x1000,False,pid)
         item=dict(pid=pid,name=name,path="",created="",memory=0,cpu_ticks=0,critical=True,can_terminate=False)
@@ -39,9 +40,10 @@ class NativeProcesses:
             critical=w.BOOL()
             if hasattr(self.kernel,"IsProcessCritical") and self.kernel.IsProcessCritical(handle,ctypes.byref(critical)):
                 item["critical"]=bool(critical.value)
-            resolved=Path(item["path"]).resolve() if item["path"] else None
+            try:resolved=Path(item["path"]).resolve() if item["path"] else None
+            except (OSError,RuntimeError):resolved=None
             ours=resolved is not None and any(resolved==p or p in resolved.parents for p in self.protected)
-            item["can_terminate"]=bool(item["created"]) and pid not in (0,4,os.getpid()) and not item["critical"] and not ours
+            item["can_terminate"]=bool(item["created"]) and resolved is not None and pid not in (0,4,os.getpid()) and not item["critical"] and not ours
             return item
         finally:
             if own:self.kernel.CloseHandle(handle)
@@ -62,6 +64,7 @@ class NativeProcesses:
         finally:self.kernel.CloseHandle(snapshot)
         return items
     def terminate(self,pid,created):
+        if type(pid)is not int or not 0<pid<=0xffffffff:raise ValueError("进程编号无效")
         handle=self.kernel.OpenProcess(0x1001,False,pid)
         if not handle:raise ctypes.WinError(ctypes.get_last_error())
         try:
@@ -91,10 +94,10 @@ class TaskManager:
                     self.previous=history
                 return {"items":items,"self_pid":os.getpid(),"count":len(items)}
             pid=q.get("pid")
-            if type(pid)is not int or pid<=0:raise ValueError("进程编号无效")
+            if type(pid)is not int or not 0<pid<=0xffffffff:raise ValueError("进程编号无效")
             if action=="detail":return {"process":self.backend.info(pid)}
             if action!="terminate":raise ValueError("无效的任务操作")
             created=q.get("created")
-            if not isinstance(created,str) or not created.isdigit() or pid in (4,os.getpid()):raise ValueError("请先刷新并选择可结束的进程")
+            if not isinstance(created,str) or not 1<=len(created)<=20 or not created.isdigit() or pid in (4,os.getpid()):raise ValueError("请先刷新并选择可结束的进程")
             self.backend.terminate(pid,created);return {"terminated":True}
         except (OSError,ValueError,TypeError) as exc:raise error(str(exc))

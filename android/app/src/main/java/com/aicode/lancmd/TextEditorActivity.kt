@@ -47,6 +47,7 @@ class TextEditorActivity : FeatureActivity() {
     private var loaded = false
     private var setting = false
     private var saving = false
+    private var loading = false
     private var autosave: Job? = null
     private val draftFile get(): File {
         val hash = MessageDigest.getInstance("SHA-256").digest((computer + "\n" + path).toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) }
@@ -102,11 +103,12 @@ class TextEditorActivity : FeatureActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (saving) { status("正在保存，请稍候"); return }
-                if (!dirty()) { finish(); return }
-                persistDraft()
+                if (!dirty()) { persistDraft(); finish(); return }
+                val retained = persistDraft()
                 AlertDialog.Builder(this@TextEditorActivity).setTitle("有未保存的修改")
-                    .setMessage("草稿已保存在手机；可保存到电脑后退出，或保留草稿稍后继续。")
-                    .setNegativeButton("继续编辑",null).setNeutralButton("保留草稿退出") { _,_ -> finish() }
+                    .setMessage(if (retained) "草稿已保存在手机；可保存到电脑后退出，或保留草稿稍后继续。" else "手机草稿保存失败，请继续编辑或先保存到电脑。")
+                    .setNegativeButton("继续编辑",null)
+                    .apply { if (retained) setNeutralButton("保留草稿退出") { _,_ -> finish() } }
                     .setPositiveButton("保存并退出") { _,_ -> save(exit=true) }.show()
             }
         })
@@ -121,38 +123,56 @@ class TextEditorActivity : FeatureActivity() {
     }
 
     private fun load(restoreDraft: Boolean = false, selected: String = "auto") {
-        if (saving || path.isBlank()) return
-        loaded = false; text.isEnabled = false; saveButton.isEnabled = false; auto.isChecked = false
+        if (saving || loading || path.isBlank()) return
+        autosave?.cancel(); auto.isChecked = false
+        // A local draft must remain available even when the PC cannot be reached.
+        if (restoreDraft && this.restoreDraft()) return
+        loading = true; text.isEnabled = false; saveButton.isEnabled = false; auto.isEnabled = false; encoding.isEnabled = false; newline.isEnabled = false
         task {
-            val result = pinnedCall(origin,"files",JSONObject().put("action","text_read").put("path",path).put("encoding",selected))
-            setting = true
-            revision = result.getString("revision"); baseline = result.getString("text")
-            savedEncoding = result.getString("encoding"); savedNewline = if (result.optBoolean("mixed")) "preserve" else result.getString("newline")
-            text.setText(baseline); encoding.setSelection(ENCODINGS.indexOf(savedEncoding).coerceAtLeast(0)); newline.setSelection(NEWLINES.indexOf(savedNewline).coerceAtLeast(0))
-            loaded = true; text.isEnabled = true; saveButton.isEnabled = true; auto.isEnabled = true; setting = false
-            status(if (result.optBoolean("mixed")) "已读取，包含混合换行；默认保留原有换行" else "已读取 · ${result.optInt("size")} 字节")
-            if (restoreDraft && draftFile.isFile) {
-                val draft = runCatching { JSONObject(draftFile.readText()) }.getOrNull()
-                if (draft != null && draft.optString("path") == path && draft.optString("computer") == computer) {
-                    setting = true; text.setText(draft.optString("text")); baseline = draft.optString("baseline")
-                    revision = draft.optString("revision"); savedEncoding = draft.optString("savedEncoding"); savedNewline = draft.optString("savedNewline")
-                    encoding.setSelection(ENCODINGS.indexOf(draft.optString("encoding")).coerceAtLeast(0)); newline.setSelection(NEWLINES.indexOf(draft.optString("newline")).coerceAtLeast(0)); setting = false
-                    status("已恢复手机草稿；保存时会检查电脑文件是否变更")
-                }
+            try {
+                val result = pinnedCall(origin,"files",JSONObject().put("action","text_read").put("path",path).put("encoding",selected))
+                setting = true
+                revision = result.getString("revision"); baseline = result.getString("text")
+                savedEncoding = result.getString("encoding"); savedNewline = if (result.optBoolean("mixed")) "preserve" else result.getString("newline")
+                text.setText(baseline); encoding.setSelection(ENCODINGS.indexOf(savedEncoding).coerceAtLeast(0)); newline.setSelection(NEWLINES.indexOf(savedNewline).coerceAtLeast(0))
+                loaded = true
+                draftFile.delete()
+                status(if (result.optBoolean("mixed")) "已读取，包含混合换行；默认保留原有换行" else "已读取 · ${result.optInt("size")} 字节")
+            } finally {
+                setting = false; loading = false
+                text.isEnabled = loaded; saveButton.isEnabled = loaded; auto.isEnabled = loaded
+                encoding.isEnabled = true; newline.isEnabled = true
             }
         }
     }
 
+    private fun restoreDraft(): Boolean {
+        val draft = runCatching { if (draftFile.isFile) JSONObject(draftFile.readText()) else null }.getOrNull() ?: return false
+        if (draft.optString("path") != path || draft.optString("computer") != computer ||
+            draft.optString("encoding") !in ENCODINGS || draft.optString("savedEncoding") !in ENCODINGS ||
+            draft.optString("newline") !in NEWLINES || draft.optString("savedNewline") !in NEWLINES ||
+            draft.optString("text").length > 512 * 1024 || draft.optString("baseline").length > 512 * 1024 || draft.optString("revision").isBlank()) return false
+        setting = true
+        try {
+            text.setText(draft.getString("text")); baseline = draft.getString("baseline")
+            revision = draft.getString("revision"); savedEncoding = draft.getString("savedEncoding"); savedNewline = draft.getString("savedNewline")
+            encoding.setSelection(ENCODINGS.indexOf(draft.getString("encoding"))); newline.setSelection(NEWLINES.indexOf(draft.getString("newline")))
+            loaded = true; text.isEnabled = true; saveButton.isEnabled = true; auto.isEnabled = true
+            status("已恢复手机草稿；保存时会检查电脑文件是否变更")
+        } finally { setting = false }
+        return true
+    }
+
     private fun confirmReload() {
-        if (saving) return
+        if (saving || loading) return
         val selected = selectedEncoding()
         AlertDialog.Builder(this).setTitle("重新读取电脑文件？")
             .setMessage("将按 $selected 编码重新读取，当前未保存修改会被替换。也可先另存为保留修改。")
-            .setNegativeButton("取消",null).setPositiveButton("重新读取") { _,_ -> draftFile.delete(); load(selected=selected) }.show()
+            .setNegativeButton("取消",null).setPositiveButton("重新读取") { _,_ -> persistDraft(); load(selected=selected) }.show()
     }
 
     private fun save(exit: Boolean = false) {
-        if (!loaded || saving) return
+        if (!loaded || saving || loading) return
         autosave?.cancel()
         val value = text.text.toString(); val format = selectedEncoding(); val ending = selectedNewline()
         saving = true; saveButton.isEnabled = false
@@ -170,7 +190,7 @@ class TextEditorActivity : FeatureActivity() {
     }
 
     private fun saveAs() {
-        if (!loaded || saving) return
+        if (!loaded || saving || loading) return
         val target = EditText(this).apply { setSingleLine(); setText(path + ".copy.txt") }
         AlertDialog.Builder(this).setTitle("另存为电脑文件").setMessage("目标必须不存在，不覆盖已有文件。").setView(target)
             .setNegativeButton("取消",null).setPositiveButton("保存副本") { _,_ ->
@@ -179,13 +199,15 @@ class TextEditorActivity : FeatureActivity() {
             }.show()
     }
 
-    private fun persistDraft() {
-        if (!loaded || !dirty()) return
-        runCatching {
+    private fun persistDraft(): Boolean {
+        if (!loaded) return false
+        if (!dirty()) return runCatching { !draftFile.exists() || draftFile.delete() }.getOrDefault(false)
+        return runCatching {
             val value = JSONObject().put("path",path).put("computer",computer).put("text",text.text.toString()).put("baseline",baseline).put("revision",revision)
                 .put("encoding",selectedEncoding()).put("newline",selectedNewline()).put("savedEncoding",savedEncoding).put("savedNewline",savedNewline)
             val file = draftFile; val temp = File(file.parentFile,file.name + ".tmp"); temp.writeText(value.toString()); if (!temp.renameTo(file)) { temp.delete(); error("无法保存手机草稿") }
-        }.onFailure { status("手机草稿保存失败：${it.message}",true) }
+            true
+        }.onFailure { status("手机草稿保存失败：${it.message}",true) }.getOrDefault(false)
     }
     override fun onPause() { autosave?.cancel(); persistDraft(); super.onPause() }
     override fun navigateBack() { onBackPressedDispatcher.onBackPressed() }

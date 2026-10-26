@@ -66,6 +66,18 @@ class TextTest(unittest.TestCase):
         write_text(self.path,dict(text=value["text"],newline="preserve",revision=value["revision"]))
         self.assertEqual(data,self.path.read_bytes())
 
+    def test_failed_creation_removes_only_the_new_partial_file(self):
+        with mock.patch("text_editor.os.fsync",side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):write_text(self.path,dict(text="new file"),True)
+        self.assertFalse(self.path.exists())
+
+    def test_external_change_during_temp_write_is_retained(self):
+        self.path.write_text("original");value=read_text(self.path)
+        def change(_):self.path.write_text("external during save")
+        with mock.patch("text_editor.os.fsync",side_effect=change):
+            with self.assertRaisesRegex(ValueError,"保存期间"):write_text(self.path,dict(text="phone",revision=value["revision"]))
+        self.assertEqual("external during save",self.path.read_text());self.assertEqual([],list(self.path.parent.glob('.lancmd-edit-*')))
+
 
 class ACL:
     def __init__(self):self.values={};self.calls=[]
@@ -80,7 +92,7 @@ class ACL:
 
 class AppLockTest(unittest.TestCase):
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name);self.exe=self.root/"selected.exe";self.exe.write_bytes(b"MZtest")
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name).resolve();self.exe=self.root/"selected.exe";self.exe.write_bytes(b"MZtest")
         self.acl=ACL();self.manager=AppLocks(self.root/"locks.json",backend=self.acl)
     def call(self,**q):return self.manager.request(q,Error)
     def test_backup_survives_restart_and_unlock_restores_original(self):
@@ -169,8 +181,9 @@ class TaskTest(unittest.TestCase):
     def test_creation_token_required_and_cpu_sampling_uses_same_process_instance(self):
         backend=SimpleNamespace(list=lambda:[dict(pid=999999,name="test",created="123",cpu_ticks=100,memory=1)],terminate=mock.Mock())
         manager=TaskManager(backend=backend)
-        self.assertIsNone(manager.request({},Error)["items"][0]["cpu"])
-        self.assertIsNotNone(manager.request({},Error)["items"][0]["cpu"])
+        with mock.patch("task_manager.time.monotonic",side_effect=[1.0,2.0]):
+            self.assertIsNone(manager.request({},Error)["items"][0]["cpu"])
+            self.assertIsNotNone(manager.request({},Error)["items"][0]["cpu"])
         with self.assertRaises(Error):manager.request(dict(action="terminate",pid=999999),Error)
         manager.request(dict(action="terminate",pid=999999,created="123"),Error)
         backend.terminate.assert_called_once_with(999999,"123")
@@ -211,8 +224,9 @@ class ScriptTest(unittest.TestCase):
 class NativeManagementTest(unittest.TestCase):
     def test_acl_deny_execute_then_restore_exact_original(self):
         with tempfile.TemporaryDirectory(prefix="LanCmd 权限 ") as directory:
-            root=Path(directory);exe=root/"selected.exe";exe.write_bytes(b"MZtest")
-            backend=FilePermissions();original=backend.call(action="inspect",paths=[str(exe)])[0]["sddl"]
+            root=Path(directory).resolve();exe=root/"selected.exe";exe.write_bytes(b"MZtest")
+            backend=FilePermissions();inspection=backend.call(action="inspect",paths=[str(exe)])[0]
+            self.assertIn("sddl",inspection,inspection);original=inspection["sddl"]
             manager=AppLocks(root/"backup.json",backend=backend)
             try:
                 item=manager.request(dict(action="lock",path=str(exe)),Error)["items"][0]
@@ -224,8 +238,9 @@ class NativeManagementTest(unittest.TestCase):
                 if handle!=ctypes.c_void_p(-1).value:kernel.CloseHandle(handle);self.fail("execute ACL was not denied")
                 self.assertEqual(5,ctypes.get_last_error())
             finally:
-                data=json.loads((root/"backup.json").read_text())
-                if data:manager.request(dict(action="unlock",id=next(iter(data))),Error)
+                if (root/"backup.json").exists():
+                    data=json.loads((root/"backup.json").read_text())
+                    if data:manager.request(dict(action="unlock",id=next(iter(data))),Error)
             self.assertEqual(original,backend.call(action="inspect",paths=[str(exe)])[0]["sddl"])
     def test_native_registry_round_trip_under_isolated_hkcu_key(self):
         import winreg as w
@@ -245,7 +260,8 @@ class NativeManagementTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/"edit.txt";path.write_text("old")
             Path(str(path)+":lancmd-test").write_text("stream")
-            backend=FilePermissions();original=backend.call(action="inspect",paths=[str(path)])[0]["sddl"]
+            backend=FilePermissions();inspection=backend.call(action="inspect",paths=[str(path)])[0]
+            self.assertIn("sddl",inspection,inspection);original=inspection["sddl"]
             read=read_text(path);write_text(path,dict(text="new",revision=read["revision"]))
             self.assertEqual("new",path.read_text());self.assertEqual("stream",Path(str(path)+":lancmd-test").read_text())
             self.assertEqual(original,backend.call(action="inspect",paths=[str(path)])[0]["sddl"])

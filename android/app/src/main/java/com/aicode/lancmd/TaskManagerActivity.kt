@@ -81,7 +81,9 @@ class TaskManagerActivity : FeatureActivity() {
             }.setPositiveButton("结束进程") { _,_->
                 AlertDialog.Builder(this).setTitle("结束 ${item.optString("name")}？").setMessage("PID ${item.getInt("pid")}\n未保存内容可能丢失。")
                     .setNegativeButton("取消",null).setPositiveButton("结束") { _,_-> task {
-                        pinnedCall(origin,"tasks",JSONObject().put("action","terminate").put("pid",item.getInt("pid")).put("created",item.getString("created")));refresh()
+                        try {
+                            pinnedCall(origin,"tasks",JSONObject().put("action","terminate").put("pid",item.getInt("pid")).put("created",item.getString("created")));refresh()
+                        } catch(e:Exception) { automatic.isChecked=false;throw e }
                     } }.show()
             }.create()
         dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=item.optBoolean("can_terminate");dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled=path.isNotEmpty() }
