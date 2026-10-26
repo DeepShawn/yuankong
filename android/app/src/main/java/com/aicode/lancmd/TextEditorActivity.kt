@@ -76,7 +76,7 @@ class TextEditorActivity : FeatureActivity() {
             setPadding(dp(12),dp(12),dp(12),dp(12)); contentDescription = "电脑文件文本内容"; isEnabled = false
         }
         body.addView(text, LinearLayout.LayoutParams(-1,0,1f).apply { topMargin = dp(6) })
-        auto = CheckBox(this).apply { this.text = "自动保存（停止输入 1 秒后）"; setTextColor(color(R.color.text)); isEnabled = false }
+        auto = styleCheck(CheckBox(this).apply { this.text = "自动保存（停止输入 1 秒后）"; isEnabled = false })
         body.addView(auto)
         val buttons = LinearLayout(this)
         saveButton = primary(button("保存") { save() }).apply { isEnabled = false }
@@ -191,7 +191,7 @@ class TextEditorActivity : FeatureActivity() {
 
     private fun saveAs() {
         if (!loaded || saving || loading) return
-        val target = EditText(this).apply { setSingleLine(); setText(path + ".copy.txt") }
+        val target = styleInput(EditText(this).apply { setSingleLine(); setText(path + ".copy.txt") })
         AlertDialog.Builder(this).setTitle("另存为电脑文件").setMessage("目标必须不存在，不覆盖已有文件。").setView(target)
             .setNegativeButton("取消",null).setPositiveButton("保存副本") { _,_ ->
                 val destination = target.text.toString().trim(); val value = text.text.toString(); val format = selectedEncoding(); val ending = selectedNewline()

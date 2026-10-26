@@ -36,18 +36,18 @@ class TaskManagerActivity : FeatureActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState);origin
         setup("任务管理器","查看电脑进程、CPU 与内存，按需结束所选进程；关键进程和 LanCmd 自身受到保护。")
-        search=EditText(this).apply { hint="搜索名称、PID 或路径";setSingleLine();contentDescription="搜索电脑进程" }
+        search=styleInput(EditText(this).apply { hint="搜索名称、PID 或路径";setSingleLine();contentDescription="搜索电脑进程" })
         body.addView(search)
         search.addTextChangedListener(object:TextWatcher {
             override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
             override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){filter()}
             override fun afterTextChanged(s:Editable?){}
         })
-        val controls=LinearLayout(this)
-        sort=Spinner(this).apply { adapter=ArrayAdapter(this@TaskManagerActivity,android.R.layout.simple_spinner_dropdown_item,listOf("内存排序","CPU 排序","名称排序")) }
+        val controls=LinearLayout(this).apply { setPadding(0,dp(8),0,0) }
+        sort=styleSpinner(Spinner(this).apply { adapter=ArrayAdapter(this@TaskManagerActivity,android.R.layout.simple_spinner_dropdown_item,listOf("内存排序","CPU 排序","名称排序")) })
         controls.addView(sort,LinearLayout.LayoutParams(0,-2,1f))
         controls.addView(button("刷新") { refresh() },LinearLayout.LayoutParams(0,-2,1f));body.addView(controls)
-        automatic=CheckBox(this).apply { text="每 3 秒刷新（CPU 需两次采样）";isChecked=true;setTextColor(color(R.color.text)) };body.addView(automatic)
+        automatic=styleCheck(CheckBox(this).apply { text="每 3 秒刷新（CPU 需两次采样）";isChecked=true });body.addView(automatic)
         sort.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:android.view.View?,position:Int,id:Long){filter()}

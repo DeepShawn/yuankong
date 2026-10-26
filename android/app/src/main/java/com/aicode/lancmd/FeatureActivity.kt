@@ -3,7 +3,10 @@ package com.aicode.lancmd
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.widget.CheckBox
+import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.ScrollView
 import androidx.appcompat.app.AppCompatActivity
@@ -76,6 +79,33 @@ abstract class FeatureActivity : AppCompatActivity() {
     }
 
     protected open fun navigateBack() { finish() }
+
+    /** 统一输入框外观：圆角描边底、聚焦时高亮、主题文字与提示色。 */
+    protected fun styleInput(view: EditText): EditText = view.apply {
+        setBackgroundResource(R.drawable.input_bg)
+        setTextColor(color(R.color.text))
+        setHintTextColor(color(R.color.dim))
+        setPadding(dp(12), dp(10), dp(12), dp(10))
+        textSize = 14f
+        if (minHeight < dp(48)) minHeight = dp(48)
+    }
+
+    /** 统一复选框外观：主题文字色与选中时的强调色勾选。 */
+    protected fun styleCheck(view: CheckBox): CheckBox = view.apply {
+        setTextColor(color(R.color.text))
+        textSize = 13f
+        setPadding(dp(6), dp(6), 0, dp(6))
+        buttonTintList = android.content.res.ColorStateList(
+            arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+            intArrayOf(color(R.color.accent), color(R.color.dim)))
+    }
+
+    /** 统一下拉框外观：圆角描边底与内边距，弹出项保持系统默认。 */
+    protected fun styleSpinner(view: Spinner): Spinner = view.apply {
+        setBackgroundResource(R.drawable.input_bg)
+        minimumHeight = dp(48)
+        if (paddingStart < dp(12)) setPadding(dp(12), paddingTop, dp(12), paddingBottom)
+    }
 
     /** 并排等分的按钮自动留出间距，避免相邻按钮贴在一起。 */
     private class SpacedButton(context: android.content.Context) : MaterialButton(context) {
