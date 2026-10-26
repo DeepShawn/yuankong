@@ -288,13 +288,20 @@ class ConvenienceUiTest {
             val shown = visible(keyboard)
             assertTrue(shown.isNotEmpty())
             shown.forEach { key ->
-                val bounds = android.graphics.Rect(0, 0, key.width, key.height)
+                val bounds = android.graphics.Rect()
+                key.getDrawingRect(bounds)
                 keyboard.offsetDescendantRectToMyCoords(key, bounds)
-                assertTrue("$section / $width / ${key.text} must fit horizontally", bounds.left >= 0 && bounds.right <= width)
+                assertTrue("$section / $width / ${key.text} must fit horizontally: $bounds", bounds.left >= 0 && bounds.right <= width)
                 assertTrue("Key must have a usable height", key.height >= 32)
                 assertEquals("Labels must fit the key", 0, key.layout.getEllipsisCount(0))
             }
-            if (width == 360) render(keyboard, "virtual-keyboard-${section}", width)
+            if (width == 360) {
+                // A window may relayout its root between screenshots. Keep the measured
+                // keyboard independent from that window and attach only the preview.
+                val preview = VirtualKeyboard(controller.get()) {}
+                buttons(preview).single { it.text == section }.performClick()
+                render(preview, "virtual-keyboard-${section}", width)
+            }
         }
         controller.pause().stop().destroy()
     }
