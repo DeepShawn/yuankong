@@ -3,7 +3,9 @@
 手机在同一个局域网下直接控制电脑：执行命令、查看屏幕和摄像头、发送消息和按键、管理磁盘文件、锁屏与剪贴板。
 电脑端由本机启动、停止接收服务；手机端开机即自动发现、**不用输连接码**、**掉线自动重连**。
 
-**2.10.0：安卓界面重构——统一间距与字号标度，列表改为带状态标签和分隔线的结构化条目，输入框带名称，相关操作并排成组，破坏性操作用危险色；功能与 2.9.0 一致。**
+**3.0.0：安卓管理界面重构，摄像头／屏幕预览支持等比全屏，浏览器页率先迁移至 Compose + miuix。其余页面保留现有界面与主题，Windows 同步版本号。**
+
+2.10.0：首页分类胶囊、分组标题和全部工具面板主题化。
 
 2.9.0：占位文件优先快速预分配真实空间，不支持时回退逐块写入；USB 0x17 增加兼容停用与待生效配置恢复。包含文件索引搜索、菜单 UI 和摄像头恢复改进。
 
@@ -21,9 +23,9 @@
 
 1.9.0：触屏输入暂停、桌面程序管理、文件打开/解压/预览、顺序延迟命令列表，以及全屏等比显示和虚拟键盘更新。
 
-- [下载 Android 2.10.0 APK](https://github.com/DeepShawn/yuankong/releases/download/v2.10.0/LanCmd-2.10.0.apk)
-- [下载 Windows 2.10.0 接收端](https://github.com/DeepShawn/yuankong/releases/download/v2.10.0/LanCmd-Windows-2.10.0.zip)
-- 新功能与限制见 [2.10.0 说明](docs/releases/v2.10.0.md)。
+- [下载 Android 3.0.0 APK](https://github.com/DeepShawn/yuankong/releases/download/v3.0.0/LanCmd-3.0.0.apk)
+- [下载 Windows 3.0.0 接收端](https://github.com/DeepShawn/yuankong/releases/download/v3.0.0/LanCmd-Windows-3.0.0.zip)
+- 新功能与限制见 [3.0.0 说明](docs/releases/v3.0.0.md)。
 - 首页「更多」进入录制与手势板，详见 [2.2.0 说明](docs/releases/v2.2.0.md)。录制遵循系统隐私权限和设备指示，不自动更改系统隐私设置。
 - 首页「U盘锁 / 设备」查看 USB 存储和 USB MTP/PTP 手机。可移动磁盘支持锁定、只读和恢复原策略；便携设备支持锁定和恢复。管理员接收端可修改策略或安全弹出设备，标准权限可查看。
 - 新增「远程桌面」卡片，点击画面控制电脑：单击、双击、长按右键、拖动、双指滚动。
@@ -34,7 +36,7 @@
 - 保留屏幕及摄像头 JPEG 预览、桌面消息、组合按键、文字输入和可视化文件管理。
 - 手机对外统一显示「LanCmd 手机」，保留原有配对 ID，不再发送手机型号或机名。
 - 接收端沿用 1.5.0 的连接行为：完成握手即可使用功能，不校验配对 token，也没有本机确认窗口或共享时长上限。停止接收服务可终止连接。
-- Android 2.10.0 沿用 1.4.10 及之后版本签名，可覆盖安装；1.4.9 用户需要先卸载再安装。
+- Android 3.0.0 沿用 1.4.10 及之后版本签名，可覆盖安装；1.4.9 用户需要先卸载再安装。
 
 ```
 ┌──────────────┐   UDP 47824 广播探测/应答   ┌──────────────────────┐
@@ -69,10 +71,10 @@ Windows 接收端完成握手后即可接收命令。旧参数 `--auto-accept` /
 
 ### 2. 手机端（Android 7.0+，arm64-v8a）
 
-从上方链接下载 `LanCmd-2.10.0.apk` 后安装：
+从上方链接下载 `LanCmd-3.0.0.apk` 后安装：
 
 ```bash
-adb install -r LanCmd-2.10.0.apk
+adb install -r LanCmd-3.0.0.apk
 ```
 
 打开 App 自动扫描并连上唯一的那台电脑；有多台时弹列表让你选。
@@ -81,7 +83,7 @@ adb install -r LanCmd-2.10.0.apk
 
 ## 二、界面说明
 
-首页右上角调色板按钮（或「更多 → 外观主题」）可切换 6 种主题色与 4 种背景色调（深海、午夜蓝、石墨、纯黑），全部页面同步生效，只影响外观。
+首页右上角调色板按钮（或「更多 → 外观主题」）可切换 6 种主题色与 4 种背景色调（深海、午夜蓝、石墨、纯黑），现有 View 页面同步生效；Compose + miuix 浏览器页目前跟随系统深浅色。
 
 桌面页「运行中的桌面程序」可查看窗口标题、进程名和 PID，切换前台、最小化或正常关闭。文件管理菜单支持在电脑打开应用/文件/文件夹，手机预览文本、图片、ZIP 目录；ZIP 可解压到新文件夹，不覆盖目标，最多 2000 项、512 MB，不支持加密 ZIP 或 RAR/7z。
 
@@ -381,7 +383,7 @@ export ANDROID_HOME=<你的 SDK>
 ```
 
 本地签名通过 `android/keystore.properties` 指向私有密钥库，口令与密钥都不入库。
-Android SDK 需 platforms;android-36 + build-tools;35.0.0。
+构建和单元测试使用 JDK 21（miuix 依赖需要）；应用字节码目标仍为 Java 17。Android SDK 需 platforms;android-36 + build-tools;35.0.0。
 
 配置仓库 Actions Secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、
 `ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。维护此项目的发布应沿用 1.4.10 的密钥；独立分发可使用自己的密钥。
@@ -389,7 +391,7 @@ Android SDK 需 platforms;android-36 + build-tools;35.0.0。
 在 Actions 中运行 **Android signed APK**，或推送与应用版本一致的 `v*` 标签，会生成已签名 APK 和校验文件。
 工作流先启动真实接收端并运行 Android 单元/集成测试，再核对证书指纹，构建后清理临时密钥。**Windows feature checks** 运行 Windows 原生回归，并交叉编译完整 Windows ZIP。双端产物在 Actions Artifacts 中下载，不会自动修改已有 Release 附件。
 
-**ABI**：App 纯 Kotlin + AndroidX/Material，无 JNI/native 库，任何 ABI 都能装，
+**ABI**：App 使用 Kotlin + AndroidX/Material + Compose/miuix，无 JNI/native 库，任何 ABI 都能装，
 arm64-v8a 设备直接使用。`ndk.abiFilters` 里保留 `arm64-v8a` 只是给将来加 native 库时定调。
 
 电脑端 Python 逻辑只依赖标准库；屏幕与摄像头需要编译 `capture.cpp` 或使用完整 Windows 包。验证协议：
@@ -409,7 +411,7 @@ python3 -m unittest discover -s tools -p test_file_operations.py -v
 
 ```
 lan-cmd/
-├── android/                       安卓工程（Kotlin + Material 3）
+├── android/                       安卓工程（Kotlin + View/Compose + miuix）
 │   ├── app/src/main/java/com/aicode/lancmd/
 │   │   ├── LanCmdApp.kt           Application 级启动（Activity 重建不断连）
 │   │   ├── LanCmdService.kt       前台常驻服务，防后台冻结
@@ -457,7 +459,7 @@ lan-cmd/
 
 ## 八、已验证
 
-在容器内（Python 3.12 + JDK 17 + Android SDK 36）实测：
+以下为早期版本在容器内（Python 3.12 + JDK 17 + Android SDK 36）的实测记录；3.0.0 起构建和测试使用 JDK 21，最新结果见 Actions：
 
 - `test_client.py`：10/10 通过（发现、握手、执行+退出码、目录、上传/下载/删除、未握手拒绝）
 - `test_reconnect.py`：8 轮 RST 掉线全部重连成功，平均 12ms，服务端持续在线无重启
