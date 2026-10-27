@@ -240,16 +240,24 @@ class ManagementUiTest {
     @Test fun registryTasksBrowserAndHomeCardsRenderWithReachableConsole() {
         Stub().use { stub->
             stub.install()
-            for((type,name) in listOf(RegistryActivity::class.java to "registry-editor",TaskManagerActivity::class.java to "task-manager",BrowserActivity::class.java to "browser")) {
+            for((type,name) in listOf(RegistryActivity::class.java to "registry-editor",TaskManagerActivity::class.java to "task-manager")) {
                 val controller=Robolectric.buildActivity(type).setup();val root=controller.get().window.decorView
-                val cmd=when(name){"registry-editor"->"registry";"task-manager"->"tasks";else->"browser"}
+                val cmd=if(name=="registry-editor")"registry" else "tasks"
                 waitFor {
                     val texts=all(root).filterIsInstance<TextView>().map { it.text.toString() }
                     stub.requests.any { it.optString("cmd")==cmd } && texts.any {
-                        when(cmd) { "registry"->it.contains("1 个子项");"tasks"->it.contains("1 个进程");else->it.contains("已读取 1 个") }
+                        when(cmd) { "registry"->it.contains("1 个子项");else->it.contains("1 个进程") }
                     }
                 };shadowOf(Looper.getMainLooper()).idle()
                 render(root,name);controller.pause().stop().destroy()
+            }
+            // 浏览器页已迁移到 Compose（miuix），文本不再是 TextView，
+            // 这里只核对页面打开后向电脑读取了浏览器列表。
+            run {
+                val controller=Robolectric.buildActivity(BrowserActivity::class.java).setup()
+                waitFor { stub.requests.any { it.optString("cmd")=="browser" } }
+                shadowOf(Looper.getMainLooper()).idle()
+                controller.pause().stop().destroy()
             }
             val home=Robolectric.buildActivity(MainActivity::class.java).setup();val activity=home.get()
             for(height in listOf(640,891)) {
