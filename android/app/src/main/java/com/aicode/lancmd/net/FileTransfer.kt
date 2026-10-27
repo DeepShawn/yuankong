@@ -43,12 +43,16 @@ object FileTransfer {
         onProgress: (Progress) -> Unit
     ): JSONObject = uploadTo(ctx, uri, remotePath, null, onProgress)
 
-    suspend fun uploadTo(
+    suspend fun uploadTo(ctx:Context,uri:Uri,remotePath:String,expectedClient:AgentClient?,onProgress:(Progress)->Unit):JSONObject =
+        uploadRevision(ctx,uri,remotePath,expectedClient,onProgress,null)
+
+    suspend fun uploadRevision(
         ctx: Context,
         uri: Uri,
         remotePath: String,
         expectedClient: AgentClient?,
-        onProgress: (Progress) -> Unit
+        onProgress: (Progress) -> Unit,
+        expectedFileId: String? = null
     ): JSONObject = withContext(Dispatchers.IO) {
         val resolver = ctx.contentResolver
         val knownSize = querySize(ctx, uri)
@@ -91,7 +95,7 @@ object FileTransfer {
                 JSONObject()
                     .put("action", "begin")
                     .put("path", remotePath)
-                    .put("size", size),
+                    .put("size", size).apply { if(expectedFileId!=null)put("file_id",expectedFileId) },
                 20_000
             )
             if (!begin.optBoolean("ok")) throw IOException(begin.optString("error", "无法开始上传"))
@@ -165,77 +169,67 @@ object FileTransfer {
     ): File = downloadFrom(remotePath, dest, null, onProgress)
 
     suspend fun downloadFrom(
-        remotePath: String, dest: File, expectedClient: AgentClient?,
-        onProgress: (Progress) -> Unit
-    ): File = withContext(Dispatchers.IO) {
-        val owner = expectedClient ?: ConnectionManager.sessionClient()
-        suspend fun send(params: JSONObject, timeout: Long): JSONObject {
-            if (ConnectionManager.sessionClient() !== owner || owner.closed) throw IOException("连接已切换，下载已停止")
-            return owner.call("download", params, timeout)
-        }
-        val begin = send(
-            JSONObject().put("action", "begin").put("path", remotePath),
-            20_000
-        )
-        if (!begin.optBoolean("ok")) throw IOException(begin.optString("error", "无法开始下载"))
-        val sid = begin.optString("sid")
-        val total = begin.optLong("size", 0)
-        val chunkSize = begin.optInt("chunk", 512 * 1024).coerceIn(16 * 1024, 4 * 1024 * 1024)
-
-        dest.parentFile?.mkdirs()
-        var written = 0L
-        val started = SystemClock.elapsedRealtime()
-        var lastEmit = 0L
-
+        remotePath:String,dest:File,expectedClient:AgentClient?,
+        onProgress:(Progress)->Unit
+    ):File {
+        var opened=false
         try {
-            FileOutputStream(dest).use { out ->
-                var offset = 0L
-                while (true) {
-                    coroutineContext.ensureActive()
-                    val r = send(
-                        JSONObject()
-                            .put("action", "chunk")
-                            .put("sid", sid)
-                            .put("offset", offset)
-                            .put("len", chunkSize),
-                        120_000
-                    )
-                    if (!r.optBoolean("ok")) throw IOException(r.optString("error", "分块接收失败"))
-                    val raw = Base64.decode(r.optString("data"), Base64.DEFAULT)
-                    if (raw.isEmpty()) break
-                    out.write(raw)
-                    offset += raw.size
-                    written += raw.size
-                    val now = SystemClock.elapsedRealtime()
-                    if (now - lastEmit >= 120) {
-                        lastEmit = now
-                        onProgress(Progress(written, total, speed(written, started, now)))
-                    }
-                    if (r.optBoolean("eof", false) || (total > 0 && offset >= total)) break
-                }
-                out.flush()
-            }
+            downloadToStream(remotePath,expectedClient,{
+                dest.parentFile?.mkdirs()
+                FileOutputStream(dest).also { opened=true }
+            },onProgress)
+            return dest
+        } catch(e:Throwable) {
+            if(opened)dest.delete()
+            throw e
+        }
+    }
 
-            send(
-                JSONObject().put("action", "end").put("sid", sid),
-                20_000
-            )
-            if (total > 0 && written != total) {
-                throw IOException("文件不完整：$written / $total 字节")
-            }
-            onProgress(Progress(written, total, speed(written, started, SystemClock.elapsedRealtime())))
-            dest
-        } catch (e: Throwable) {
-            withContext(NonCancellable) {
-                runCatching {
-                    owner.call("download",
-                        JSONObject().put("action", "abort").put("sid", sid),
-                        10_000
-                    )
+    /** Stream directly to a newly-created SAF document; the caller owns deletion on failure. */
+    suspend fun downloadToStream(
+        remotePath:String,expectedClient:AgentClient?,openOutput:()->OutputStream,
+        onProgress:(Progress)->Unit,expectedFileId:String?=null
+    ):Long = withContext(Dispatchers.IO) {
+        val owner=expectedClient ?: ConnectionManager.sessionClient()
+        var activeSid:String?=null
+        suspend fun send(params:JSONObject,timeout:Long):JSONObject {
+            if(ConnectionManager.sessionClient()!==owner || owner.closed)throw IOException("连接已切换，下载已停止")
+            val result=owner.call("download",params,timeout)
+            if(!result.optBoolean("ok"))throw IOException(result.optString("error","下载失败"))
+            return result
+        }
+        try {
+            val begin=send(JSONObject().put("action","begin").put("path",remotePath).apply {
+                if(expectedFileId!=null)put("file_id",expectedFileId)
+            },20_000)
+            val sid=begin.getString("sid");activeSid=sid
+            val total=begin.getLong("size")
+            if(total<0)throw IOException("文件长度无效")
+            val chunkSize=begin.optInt("chunk",512*1024).coerceIn(16*1024,4*1024*1024)
+            var written=0L;val started=SystemClock.elapsedRealtime();var lastEmit=0L
+            openOutput().use { output->
+                while(true) {
+                    coroutineContext.ensureActive()
+                    val result=send(JSONObject().put("action","chunk").put("sid",sid).put("offset",written).put("len",chunkSize),120_000)
+                    val raw=Base64.decode(result.optString("data"),Base64.DEFAULT)
+                    if(raw.size>chunkSize || written+raw.size>total)throw IOException("下载数据超过声明长度")
+                    if(raw.isEmpty())break
+                    output.write(raw);written+=raw.size
+                    val now=SystemClock.elapsedRealtime()
+                    if(now-lastEmit>=120 || written==total){lastEmit=now;onProgress(Progress(written,total,speed(written,started,now)))}
+                    if(result.optBoolean("eof") || written==total)break
                 }
+                output.flush()
             }
-            dest.delete()
-            throw if (e is CancellationException) e else IOException(e.message ?: "下载失败", e)
+            if(written!=total)throw IOException("文件不完整：$written / $total 字节")
+            send(JSONObject().put("action","end").put("sid",sid),20_000);activeSid=null
+            onProgress(Progress(written,total,speed(written,started,SystemClock.elapsedRealtime())))
+            written
+        } catch(e:Throwable) {
+            if(activeSid!=null)withContext(NonCancellable) {
+                runCatching { owner.call("download",JSONObject().put("action","abort").put("sid",activeSid),10_000) }
+            }
+            throw if(e is CancellationException)e else IOException(e.message ?: "下载失败",e)
         }
     }
 

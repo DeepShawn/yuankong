@@ -26,7 +26,7 @@ object FilePreview {
             .setView(scroll).setPositiveButton("关闭", null).create()
         val job = activity.lifecycleScope.launch {
             try {
-                val result = pinnedCall(client, "files", JSONObject().put("action", "preview").put("path", path))
+                val result = FileDelay.call(activity,client, "files", JSONObject().put("action", "preview").put("path", path))
                 when (result.getString("kind")) {
                     "text" -> {
                         text.typeface = android.graphics.Typeface.MONOSPACE

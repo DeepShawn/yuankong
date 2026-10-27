@@ -10,6 +10,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.aicode.lancmd.net.ConnectionManager
+import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.joinPath
 import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.CancellationException
@@ -18,9 +19,10 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /** A directory must be successfully listed before it can be selected. */
-class RemoteDirectoryPicker(private val activity: AppCompatActivity) {
+class RemoteDirectoryPicker(private val activity: AppCompatActivity,private val expectedClient:AgentClient?=null) {
     fun show(initial: String, selected: (String) -> Unit) {
-        val client = runCatching { ConnectionManager.sessionClient() }.getOrElse { return }
+        val client = expectedClient ?: runCatching { ConnectionManager.sessionClient() }.getOrElse { return }
+        if(client.closed || runCatching { ConnectionManager.sessionClient() }.getOrNull()!==client)return
         fun dp(value: Int) = (value * activity.resources.displayMetrics.density).toInt()
         val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), 0, dp(16), 0) }
         val location = TextView(activity).apply { setTextIsSelectable(true); textSize = 13f }

@@ -10,6 +10,7 @@ import org.json.JSONObject
 import java.io.IOException
 
 class DevicesActivity : FeatureActivity() {
+    override val inlineResults=false
     private var origin: AgentClient? = null
     private lateinit var policies: LinearLayout
     private lateinit var devices: LinearLayout
@@ -17,6 +18,10 @@ class DevicesActivity : FeatureActivity() {
     private lateinit var refresh: MaterialButton
     private val controls = ArrayList<MaterialButton>()
     private var busy = false
+    private var receiverVersion=""
+    private var connectionSupported=false
+    private var checkedCapabilities=false
+    private val eligibility=java.util.IdentityHashMap<MaterialButton,Boolean>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,6 +44,10 @@ class DevicesActivity : FeatureActivity() {
         val response = client.call("devices", params, if(params.optString("action")=="force_disconnect")120_000 else 45_000)
         if (!response.optBoolean("ok")) {
             val error = response.optString("error", "设备操作失败")
+            if(params.optString("action") in listOf("force_disconnect","restore_connection") && (error.contains("无效的设备管理操作") || error.contains("未知命令"))) {
+                connectionSupported=false
+                throw IOException(usbUpgradeMessage(receiverVersion))
+            }
             throw IOException(if (error.contains("未知命令")) "请更新 Windows 接收端至 1.8.0" else error)
         }
         return response
@@ -52,6 +61,13 @@ class DevicesActivity : FeatureActivity() {
         status(if (params == null) "正在读取设备与策略…" else "正在执行设备操作…")
         task {
             try {
+                if(!checkedCapabilities) {
+                    val caps=pinnedCall(origin,"capabilities")
+                    receiverVersion=caps.optString("version")
+                    connectionSupported=supportsUsbConnection(caps);checkedCapabilities=true
+                }
+                if(params?.optString("action") in listOf("force_disconnect","restore_connection") && !connectionSupported)
+                    throw IOException(usbUpgradeMessage(receiverVersion))
                 val notice = params?.let { call(it).optString("notice") }.orEmpty()
                 val result = call()
                 render(result)
@@ -59,6 +75,7 @@ class DevicesActivity : FeatureActivity() {
             } finally {
                 busy = false
                 refresh.isEnabled = true
+                controls.forEach { it.isEnabled=eligibility[it]==true && (connectionSupported || !(it.text.startsWith("强制断开") || it.text.startsWith("恢复连接"))) }
             }
         }
     }
@@ -72,14 +89,20 @@ class DevicesActivity : FeatureActivity() {
     private fun action(parent: LinearLayout, text: String, enabled: Boolean, block: () -> Unit) {
         val view = button(text, block).apply { isEnabled = enabled }
         controls.add(view)
+        eligibility[view]=enabled
         parent.addView(view)
     }
 
     private fun render(result: JSONObject) {
         controls.clear()
+        eligibility.clear()
         policies.removeAllViews()
         devices.removeAllViews()
         disconnected.removeAllViews()
+        result.optJSONArray("actions")?.let { actions->
+            val supported=(0 until actions.length()).map { actions.optString(it) }
+            connectionSupported="force_disconnect" in supported && "restore_connection" in supported
+        }
         val admin = result.optBoolean("admin")
         val records=result.optJSONArray("disconnected")
         if(records!=null && records.length()>0) {
@@ -88,12 +111,13 @@ class DevicesActivity : FeatureActivity() {
                 val item=records.getJSONObject(i)
                 disconnected.addView(label(item.optString("name","USB 存储"),15f))
                 disconnected.addView(label(if(item.optInt("problem")==22)"已禁用 · 强制断开" else if(item.optBoolean("enabled"))"已启用 · 可清理恢复记录" else item.optString("error","状态异常，请检查设备"),12f,R.color.dim))
-                action(disconnected,"恢复连接 · ${item.optString("name","USB 存储")}",admin && (item.optInt("problem")==22 || item.optBoolean("enabled"))) {
+                action(disconnected,"恢复连接 · ${item.optString("name","USB 存储")}",admin && connectionSupported && (item.optInt("problem")==22 || item.optBoolean("enabled"))) {
                     confirm("恢复 USB 存储连接？","只恢复 LanCmd 记录的磁盘设备。若已拔出，请先重新插入；部分驱动需要重启或重新插拔。",JSONObject().put("action","restore_connection").put("device_id",item.getString("id")))
                 }
             }
         }
-        policies.addView(label(if (admin) "接收端权限：管理员" else "接收端权限：标准用户", 14f))
+        policies.addView(label((if (admin) "接收端权限：管理员" else "接收端权限：标准用户")+" · Windows ${receiverVersion.ifBlank { "版本未知" }}", 14f))
+        if(!connectionSupported)policies.addView(label(usbUpgradeMessage(receiverVersion),12f,R.color.warn))
         if (!admin) policies.addView(label("修改策略或弹出设备前，请在电脑 Start.exe 选择「管理员启动 / 重启」。", 13f, R.color.dim))
         policies.addView(label("设置作用于整类设备，重启后保留。解锁恢复 LanCmd 修改前的策略；不会清除原有系统限制。", 13f, R.color.dim))
         val state = result.getJSONObject("policies")
@@ -136,7 +160,7 @@ class DevicesActivity : FeatureActivity() {
                 confirm("安全弹出 $name？", "请先保存文件并关闭正在使用设备的程序。设备忙时会返回失败，不会强制卸载。",
                     JSONObject().put("action", "eject").put("device_id", device.getString("id")))
             }
-            if(device.optString("kind")=="storage")action(devices,"强制断开 $name",admin && device.optBoolean("ejectable") && !device.optBoolean("protected")) {
+            if(device.optString("kind")=="storage")action(devices,"强制断开 $name",admin && connectionSupported && device.optBoolean("ejectable") && !device.optBoolean("protected")) {
                 confirm("强制断开 $name？","禁用整个 USB 存储设备，会立即中断所有分区访问，正在读写时可能丢失数据或损坏文件系统。设备可能仍有供电。建议先安全弹出；可在本页恢复连接。",
                     JSONObject().put("action","force_disconnect").put("device_id",device.getString("id")).put("confirm_data_loss",true))
             }

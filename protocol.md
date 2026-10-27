@@ -312,3 +312,24 @@ Windows advertises `placeholders`. `create(path,size)` accepts integer bytes 0..
 Android internal Activity transitions preserve pinned sharing sessions and send keepalives while frame polling is suspended; returning resumes capture. Leaving the app (700 ms handoff grace), finishing the owner, explicit stop, or changing the originating connection still ends sharing. Camera preview waits while this client's camera recording is active.
 
 `local_input` pause/status adds `keyboard_mouse`, `touch_detected`, `touch_already_disabled`, and `warning`; `touch_devices` remains the number disabled by this pause. A zero detected count does not assert that vendor-specific touch is blocked. HID probing is independent of SM_DIGITIZER; recognized devices must report problem 22 after disable and enabled/problem0 after restoration. Only devices disabled by this worker are restored. Touch recovery errors are returned as warnings with paused=false, and a pending recovery prevents a new pause. Remote tagged input does not run on the low-level hook's message-pump thread. Existing ownership, zero-only `seconds`, 12-second session heartbeat and independent recovery watchdog remain unchanged.
+
+
+## 2.7 批量文件任务与连接能力
+
+`ls` 每项增加 `file_id`（基于设备、文件 ID、修改时间、大小、类型的 SHA256）与 `link`，目录响应也包含 `file_id`。`download.begin` 可带 `file_id`，开始与每次读取核对该版本；不匹配关闭会话并报错。`rm` 可带 `file_id`。
+
+`file_jobs` 仅 Windows，绑定已连接的 `client_id`：
+- `action=list`：返回该手机最近 5 个 `jobs` 和恢复 `warning`。
+- `action=create, operation=copy|move|delete, items=[{path,file_id}], destination`：每批 1–100 个绝对路径，复制/移动必须指定已有目标目录；返回 `job`。每个根最多 20000 项，拒绝链接/重解析点，不覆盖同名目标，复制须保留 1 GB 可用空间。
+- `action=cancel, job_id`：停止未完成步骤；已发布副本或已删除项目不可撤销。离开安卓页面不自动取消 Windows 任务。
+- 每任务含 `id,operation,status,created,finished?,items`，每项含 `path,file_id,status,bytes?,total_bytes?,destination?,error?,cleanup_warning?`。跨卷移动复制完成后源移除失败时状态为 failed、`copied=true`，目标副本保留。
+- 临时副本写入前持久化临时目录身份，重启恢复时仅清理身份一致的本应用临时目录。已完成任务仅保留到接收端退出。
+
+`capabilities.features` 增加 `file_jobs` 与 `usb_connection`；`devices.list` 增加 `actions`，包含支持的 action。安卓优先采用动作列表，兼容 2.5/2.6 的版本字段；旧接收端或旧模块不支持时明确提示完整更新并重启，不重试为其他禁用方式。
+
+
+`file_schedule`：`add` 含 `command,params,delay`（0–86400 整数秒），白名单为 files/rm/rename/mkdir/put/file_jobs.create/placeholders.create/scripts.run，返回 job；`get,job_id` 返回状态和完成 result；`list` 返回本手机最近20项元数据；`cancel,job_id` 仅取消等待项。每次接收端最多20项等待/运行、保留50项，退出不续跑。对所选已存在源保存并重新验证 file_id。批量作业创建延迟结束后还需按原 file_jobs 接口查看执行结果。
+
+`files.open` 可带 `application=default|wps,background=bool`，请求后台时使用 SW_SHOWNOACTIVATE 并将新建且同 PID 的窗口置于原前台窗口下方；单实例复用和应用自行激活不保证遵守。`files.mtime` 含 `modified` Unix秒，范围1970–2100，保留 atime，可带 file_id。
+
+`upload.begin` 可带 `file_id`，只允许覆盖该版本，`end` 提交前再次检查；冲突删除临时上传，保留电脑原件。成功返回新的 file_id。手机 Office 副本通过受限 FileProvider 的 content URI 向办公应用授权读写，明确确认后回传。

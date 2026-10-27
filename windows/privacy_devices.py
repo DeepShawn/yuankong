@@ -69,7 +69,11 @@ class PrivacyHardware(TouchDevices):
         node=self.node(instance)
         # Explicit persistent device disable, unlike the temporary touch guard.
         result=self.cm.CM_Enable_DevNode(node,0) if enabled else self.cm.CM_Disable_DevNode(node,CM_DISABLE_UI_NOT_OK|CM_DISABLE_PERSIST)
-        if result:raise RuntimeError("设备启停失败，需要管理员权限或驱动支持 (0x%X)"%result)
+        if result:
+            if result==0x17:raise RuntimeError("驱动拒绝停用设备 (0x17 / CR_REMOVE_VETOED)。请先停止摄像头共享、录制并关闭占用软件后重试；驱动仍拒绝时本次未禁用，不能通过禁用父控制器替代")
+            if result==0x33:raise RuntimeError("设备启停权限不足 (0x33)，请使用管理员接收端")
+            if result==0x28:raise RuntimeError("此设备驱动不支持停用 (0x28)，本次未更改")
+            raise RuntimeError("设备驱动拒绝启停 (0x%X)，请刷新检查状态和驱动支持"%result)
 
 
 class PrivacyDevices:

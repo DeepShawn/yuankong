@@ -130,7 +130,7 @@ class TextEditorActivity : FeatureActivity() {
         loading = true; text.isEnabled = false; saveButton.isEnabled = false; auto.isEnabled = false; encoding.isEnabled = false; newline.isEnabled = false
         task {
             try {
-                val result = pinnedCall(origin,"files",JSONObject().put("action","text_read").put("path",path).put("encoding",selected))
+                val result = FileDelay.call(this@TextEditorActivity,origin,"files",JSONObject().put("action","text_read").put("path",path).put("encoding",selected))
                 setting = true
                 revision = result.getString("revision"); baseline = result.getString("text")
                 savedEncoding = result.getString("encoding"); savedNewline = if (result.optBoolean("mixed")) "preserve" else result.getString("newline")
@@ -178,7 +178,7 @@ class TextEditorActivity : FeatureActivity() {
         saving = true; saveButton.isEnabled = false
         task {
             try {
-                val result = pinnedCall(origin,"files",JSONObject().put("action","text_write").put("path",path).put("text",value)
+                val result = FileDelay.call(this@TextEditorActivity,origin,"files",JSONObject().put("action","text_write").put("path",path).put("text",value)
                     .put("encoding",format).put("newline",ending).put("revision",revision))
                 revision = result.getString("revision"); baseline = value; savedEncoding = format; savedNewline = ending
                 if (dirty()) persistDraft() else draftFile.delete()
@@ -195,7 +195,7 @@ class TextEditorActivity : FeatureActivity() {
         AlertDialog.Builder(this).setTitle("另存为电脑文件").setMessage("目标必须不存在，不覆盖已有文件。").setView(target)
             .setNegativeButton("取消",null).setPositiveButton("保存副本") { _,_ ->
                 val destination = target.text.toString().trim(); val value = text.text.toString(); val format = selectedEncoding(); val ending = selectedNewline()
-                task { pinnedCall(origin,"files",JSONObject().put("action","text_create").put("path",destination).put("text",value).put("encoding",format).put("newline",ending)); status("副本已保存：$destination") }
+                task { FileDelay.call(this@TextEditorActivity,origin,"files",JSONObject().put("action","text_create").put("path",destination).put("text",value).put("encoding",format).put("newline",ending)); status("副本已保存：$destination") }
             }.show()
     }
 

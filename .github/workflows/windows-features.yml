@@ -70,6 +70,10 @@ jobs:
         run: python -m unittest discover -s tools -p test_privacy_lock_edges.py -v
       - name: Allocated placeholder files, cancellation and crash cleanup
         run: python -m unittest discover -s tools -p test_placeholder_files.py -v
+      - name: Delayed file actions, document revisions and Windows defaults
+        run: python -m unittest discover -s tools -p test_file_schedule.py -v
+      - name: Batch file copy move delete and recoverable staging
+        run: python -m unittest discover -s tools -p test_file_jobs.py -v
   package-windows:
     runs-on: ubuntu-latest
     timeout-minutes: 15

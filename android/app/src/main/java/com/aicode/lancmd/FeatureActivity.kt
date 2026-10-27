@@ -36,6 +36,11 @@ abstract class FeatureActivity : AppCompatActivity() {
     private var lastFeedback:Feedback?=null
     private var feedbackHidden=false
     private var inlineStatus=false
+    protected open val inlineResults=true
+    private var topDetails:LinearLayout?=null
+    private var topDetailsText:TextView?=null
+    private var topDetailsScroll:ScrollView?=null
+    private var topDetailsButton:MaterialButton?=null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Themes.apply(this)
@@ -188,6 +193,7 @@ abstract class FeatureActivity : AppCompatActivity() {
     protected fun feedbackContext():CoroutineContext=feedbackOwner.asContextElement(feedbackOwner.get() ?: FeedbackScope(lastFeedback))
 
     private fun feedbackFor(button:View):Feedback? {
+        if(!inlineResults)return null
         var anchor=button
         var parent=anchor.parent
         while(parent is LinearLayout && parent.orientation==LinearLayout.HORIZONTAL) { anchor=parent;parent=anchor.parent }
@@ -221,11 +227,13 @@ abstract class FeatureActivity : AppCompatActivity() {
         catch (e: Exception) { status(e.message ?: "操作失败", true) }
     }
 
+    internal fun fileOperationNotice(text:String)=status(text)
+
     protected fun status(text: String, error: Boolean = false) {
         if (isDestroyed) return
         statusText.text = text
         statusText.setTextColor(color(if (error) R.color.danger else R.color.dim))
-        val feedback=feedbackOwner.get()?.target
+        val feedback=if(inlineResults)feedbackOwner.get()?.target else null
         inlineStatus=feedback!=null && attachedToBody(feedback.parent)
         statusText.visibility=if(feedbackHidden || inlineStatus)View.GONE else View.VISIBLE
         if(inlineStatus && feedback!=null) {
@@ -239,6 +247,28 @@ abstract class FeatureActivity : AppCompatActivity() {
             feedback.result.visibility=if(feedbackHidden)View.GONE else View.VISIBLE
         }
     }
+
+    protected fun reportTopResults(summary:String,lines:List<String>,failed:Boolean=false) {
+        status(summary,failed)
+        if(topDetails==null) {
+            val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+            val content=label("",12f,R.color.dim).apply { setTextIsSelectable(true);setPadding(dp(8),dp(6),dp(8),dp(6));contentDescription="逐项操作结果" }
+            val scroll=ScrollView(this).apply { addView(content);visibility=View.GONE;setBackgroundResource(R.drawable.status_bg) }
+            val expand=button("展开逐项结果") {
+                scroll.visibility=if(scroll.visibility==View.VISIBLE)View.GONE else View.VISIBLE
+                topDetailsButton?.text=if(scroll.visibility==View.VISIBLE)"收起逐项结果" else "展开逐项结果"
+            }.apply { textSize=12f;minHeight=dp(48) }
+            box.addView(expand);box.addView(scroll,LinearLayout.LayoutParams(-1,dp(104)))
+            body.addView(box,1)
+            topDetails=box;topDetailsText=content;topDetailsScroll=scroll;topDetailsButton=expand
+        }
+        topDetailsScroll?.layoutParams=topDetailsScroll?.layoutParams?.apply { height=dp((lines.size*20+12).coerceIn(48,104)) }
+        topDetailsText?.text=lines.joinToString("\n").take(100_000)
+        topDetails?.visibility=if(lines.isEmpty())View.GONE else View.VISIBLE
+        topDetailsScroll?.visibility=if(failed)View.VISIBLE else View.GONE
+        topDetailsButton?.text=if(failed)"收起逐项结果" else "展开逐项结果（${lines.size}）"
+    }
+    protected fun clearTopResults() { topDetails?.visibility=View.GONE }
 
     protected fun color(id: Int): Int = Themes.color(this, id)
     protected fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()

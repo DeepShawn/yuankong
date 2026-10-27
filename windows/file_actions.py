@@ -2,6 +2,7 @@
 import base64
 import codecs
 import os
+import math
 from pathlib import Path
 import shutil
 import stat
@@ -122,6 +123,16 @@ def file_request(q, error):
     try:
         path = checked_path(q.get("path"))
         action = q.get("action")
+        if q.get("file_id") is not None:
+            from file_jobs import file_token, snapshot
+            if file_token(snapshot(path)) != q["file_id"]:raise ValueError("所选文件已变化，请刷新后重试")
+        if action == "mtime":
+            value=q.get("modified")
+            if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or not 0 <= value <= 4102444800:
+                raise ValueError("修改日期须在 1970–2100 年之间")
+            before=path.stat()
+            os.utime(path,ns=(before.st_atime_ns,int(value*1_000_000_000)))
+            return {"path":str(path),"mtime":path.stat().st_mtime}
         if action in ("text_read", "text_create", "text_write"):
             from text_editor import text_request
             return text_request(path, q)
@@ -131,12 +142,8 @@ def file_request(q, error):
             destination = checked_path(q.get("destination") or str(path.with_name(path.stem + "_extracted")))
             return extract_zip(path, destination)
         if action == "open":
-            if os.name != "nt":
-                raise ValueError("在电脑打开仅支持 Windows")
-            if not path.exists():
-                raise ValueError("目标不存在，请刷新目录")
-            os.startfile(str(path), "open")
-            return {"opened": str(path)}
+            from document_open import open_document
+            return open_document(path,q.get("application","default"),q.get("background",False))
         raise ValueError("无效的文件操作")
     except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
         raise error(str(exc))

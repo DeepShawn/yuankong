@@ -200,7 +200,7 @@ class WindowsBackend:
             return False
         def display():
             try:
-                ctypes.windll.user32.MessageBoxW(None, text, "LanCmd · " + title, 0x40 | 0x10000)
+                ctypes.windll.user32.MessageBoxW(None, text, title, 0x40 | 0x10000)
             finally:
                 self.message_slots.release()
         threading.Thread(target=display, name="lancmd-message", daemon=True).start()

@@ -59,7 +59,7 @@ object ScriptJobsDialog {
         dialog.setOnShowListener {
             poll=activity.lifecycleScope.launch {
                 if(startPath!=null) {
-                    try { pinnedCall(client,"scripts",JSONObject().put("action","run").put("path",startPath));status.text="脚本任务已提交" }
+                    try { FileDelay.call(activity,client,"scripts",JSONObject().put("action","run").put("path",startPath));status.text="脚本任务已提交" }
                     catch(e:Exception){status.text=e.message;return@launch}
                 }
                 while(isActive && dialog.isShowing) {

@@ -365,7 +365,8 @@ class DeviceManager:
         try:
             if action == "list":
                 return {"devices": self.enumerate(), "policies": self.policies(), "admin": self.admin(),
-                        "disconnected": self.disconnected()}
+                        "disconnected": self.disconnected(),
+                        "actions": ["list","policy","eject","force_disconnect","restore_connection"]}
             if not self.admin():
                 raise error("需要管理员权限，请在电脑 Start.exe 点击「管理员启动 / 重启」并允许 UAC；未更改设备")
             if action == "policy":
