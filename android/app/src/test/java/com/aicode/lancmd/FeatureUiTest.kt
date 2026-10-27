@@ -84,6 +84,16 @@ class FeatureUiTest {
         else -> emptyList()
     }
 
+    /** 该视图及其所有父级是否都可见：隐藏整行时按钮自身的 visibility 不变。 */
+    private fun onScreen(view: View): Boolean {
+        var current: View? = view
+        while (current != null) {
+            if (current.visibility != View.VISIBLE) return false
+            current = current.parent as? View
+        }
+        return true
+    }
+
     @Test fun cameraAndScreenPreviewSupportFullscreen() {
         stopConnection()
         listOf("camera" to "camera-fullscreen", "screen" to "screen-fullscreen").forEach { (kind, preview) ->
@@ -107,8 +117,8 @@ class FeatureUiTest {
             shadowOf(Looper.getMainLooper()).idle()
             assertEquals("Exit control must appear in fullscreen", View.VISIBLE, exit.visibility)
             assertEquals("退出全屏", toggle.text.toString())
-            assertEquals("Start control is hidden in fullscreen", View.GONE,
-                buttons(root).single { it.text == "开始查看" }.visibility)
+            assertFalse("Start control is hidden in fullscreen",
+                onScreen(buttons(root).single { it.text == "开始查看" }))
             root.measure(View.MeasureSpec.makeMeasureSpec(411, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(891, View.MeasureSpec.EXACTLY))
             root.layout(0, 0, 411, 891)
             assertTrue("Fullscreen preview must use the full height, was ${image.height}", image.height > 800)
@@ -118,7 +128,8 @@ class FeatureUiTest {
             shadowOf(Looper.getMainLooper()).idle()
             assertEquals(View.GONE, exit.visibility)
             assertEquals("全屏", toggle.text.toString())
-            assertEquals(View.VISIBLE, buttons(root).single { it.text == "开始查看" }.visibility)
+            assertTrue("Controls return after leaving fullscreen",
+                onScreen(buttons(root).single { it.text == "开始查看" }))
 
             toggle.performClick()
             shadowOf(Looper.getMainLooper()).idle()
