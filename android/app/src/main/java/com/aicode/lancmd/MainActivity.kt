@@ -249,8 +249,8 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             activeGroup=title
             categorized[title]=mutableListOf()
             sections.addView(TextView(this).apply {
-                text=title;textSize=12f;setTextColor(Themes.color(this@MainActivity,R.color.accent))
-                setPadding(dp(4),dp(14),dp(4),dp(5));typeface=android.graphics.Typeface.DEFAULT_BOLD
+                text=title;textSize=11.5f;setTextColor(Themes.color(this@MainActivity,R.color.accent));letterSpacing=0.05f
+                setPadding(dp(4),dp(15),dp(4),dp(6));typeface=android.graphics.Typeface.create("sans-serif-medium",android.graphics.Typeface.NORMAL)
                 androidx.core.view.ViewCompat.setAccessibilityHeading(this,true)
             }.also { categorized.getValue(title).add(it) })
         }
@@ -304,11 +304,22 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             R.id.btnVolume to Action(R.drawable.ic_volume,"电脑音量") { AudioDialog(this).show() }
         ))
         sections.addView(hints,LinearLayout.LayoutParams(-1,dp(48)).apply { topMargin=dp(8) })
-        val chips=com.google.android.material.chip.ChipGroup(this).apply { isSingleSelection=true;isSelectionRequired=true;setSingleLine(true);contentDescription="首页工具分类" }
+        val chips=com.google.android.material.chip.ChipGroup(this).apply { isSingleSelection=true;isSelectionRequired=true;setSingleLine(true);chipSpacingHorizontal=dp(6);contentDescription="首页工具分类" }
         val labels=listOf("全部","共享与控制","文件与设备","系统与应用","录制与自动化")
+        val chipBg=android.content.res.ColorStateList(
+            arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf()),
+            intArrayOf(Themes.color(this,R.color.accent_dim),Themes.color(this,R.color.surface_variant)))
+        val chipText=android.content.res.ColorStateList(
+            arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf()),
+            intArrayOf(Themes.color(this,R.color.accent),Themes.color(this,R.color.dim)))
+        val chipStroke=android.content.res.ColorStateList(
+            arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf()),
+            intArrayOf(Themes.color(this,R.color.accent),Themes.color(this,R.color.outline_soft)))
         labels.forEach { category->
             chips.addView(com.google.android.material.chip.Chip(this).apply {
                 id=View.generateViewId();text=category;isCheckable=true;isChecked=category==homeCategory;setEnsureMinTouchTargetSize(true)
+                chipBackgroundColor=chipBg;setTextColor(chipText);chipStrokeColor=chipStroke;chipStrokeWidth=dp(1).toFloat()
+                isCheckedIconVisible=false;chipMinHeight=dp(34).toFloat();setChipCornerRadius(dp(17).toFloat());rippleColor=android.content.res.ColorStateList.valueOf(Themes.color(this@MainActivity,R.color.accent_glow))
                 setOnCheckedChangeListener { _,checked->if(checked){homeCategory=category;categorized.forEach { (name,views)->views.forEach { it.visibility=if(category=="全部" || category==name)View.VISIBLE else View.GONE } };this@MainActivity.findViewById<android.widget.ScrollView>(R.id.homeTools).scrollTo(0,0)} }
             })
         }

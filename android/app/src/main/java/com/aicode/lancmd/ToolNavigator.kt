@@ -36,8 +36,9 @@ object ToolNavigator {
     fun show(activity:AppCompatActivity) {
         fun dp(v:Int)=(v*activity.resources.displayMetrics.density).toInt()
         val dialog=BottomSheetDialog(activity)
-        val body=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(14),dp(16),dp(16));setBackgroundColor(Themes.color(activity,R.color.bg)) }
-        body.addView(TextView(activity).apply { text="全部工具";textSize=20f;setTextColor(Themes.color(activity,R.color.text));setPadding(dp(4),0,0,dp(12)) })
+        val body=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(10),dp(16),dp(16));setBackgroundResource(R.drawable.sheet_bg) }
+        body.addView(View(activity).apply { setBackgroundResource(R.drawable.sheet_handle) },LinearLayout.LayoutParams(dp(36),dp(4)).apply { gravity=android.view.Gravity.CENTER_HORIZONTAL;bottomMargin=dp(12) })
+        body.addView(TextView(activity).apply { text="全部工具";textSize=20f;setTextColor(Themes.color(activity,R.color.text));typeface=android.graphics.Typeface.create("sans-serif-medium",android.graphics.Typeface.NORMAL);setPadding(dp(4),0,0,dp(12)) })
         val search=EditText(activity).apply { hint="搜索工具、文档、设备或操作";contentDescription="搜索全部工具";setSingleLine();textSize=14f;minHeight=dp(48);setTextColor(Themes.color(activity,R.color.text));setHintTextColor(Themes.color(activity,R.color.dim));setPadding(dp(12),dp(8),dp(12),dp(8));setBackgroundResource(R.drawable.input_bg) }
         body.addView(search)
         val list=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL }
@@ -46,13 +47,14 @@ object ToolNavigator {
             list.removeAllViews();val query=search.text.toString().trim()
             val matches=tools.filter { (it.group+it.title+it.detail).contains(query,true) }
             for((group,items) in matches.groupBy { it.group }) {
-                list.addView(TextView(activity).apply { text=group;textSize=12f;setTextColor(Themes.color(activity,R.color.accent));setPadding(dp(4),dp(14),0,dp(4));androidx.core.view.ViewCompat.setAccessibilityHeading(this,true) })
+                list.addView(TextView(activity).apply { text=group;textSize=11.5f;letterSpacing=0.05f;typeface=android.graphics.Typeface.create("sans-serif-medium",android.graphics.Typeface.NORMAL);setTextColor(Themes.color(activity,R.color.accent));setPadding(dp(4),dp(16),0,dp(6));androidx.core.view.ViewCompat.setAccessibilityHeading(this,true) })
                 for(tool in items)list.addView(MaterialButton(activity).apply {
                     text=tool.title+"\n"+tool.detail;textSize=13f;isAllCaps=false;gravity=android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
-                    minHeight=dp(64);cornerRadius=dp(14);setPadding(dp(14),dp(8),dp(10),dp(8));setIconResource(tool.icon);iconTint=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.accent))
-                    backgroundTintList=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.surface_variant));setTextColor(Themes.color(activity,R.color.text));contentDescription=tool.title
+                    minHeight=dp(64);cornerRadius=dp(16);setPadding(dp(14),dp(10),dp(12),dp(10));setIconResource(tool.icon);iconTint=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.accent));iconSize=dp(22)
+                    backgroundTintList=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.surface_variant));setTextColor(Themes.color(activity,R.color.text))
+                    strokeWidth=dp(1);strokeColor=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.outline_soft));rippleColor=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.accent_glow));contentDescription=tool.title
                     setOnClickListener { dialog.dismiss();activity.startActivity(Intent(activity,tool.target).putExtra("kind",tool.kind)) }
-                },LinearLayout.LayoutParams(-1,-2))
+                },LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) })
             }
             if(matches.isEmpty())list.addView(TextView(activity).apply { text="没有匹配的工具，请换个关键词";setTextColor(Themes.color(activity,R.color.dim));setPadding(dp(8),dp(20),dp(8),dp(20)) })
         }
@@ -61,7 +63,7 @@ object ToolNavigator {
             override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){render()}
             override fun afterTextChanged(s:Editable?){}
         })
-        body.addView(MaterialButton(activity).apply { text="文件操作延迟 · ${FileDelay.seconds(activity)} 秒";minHeight=dp(48);isAllCaps=false;backgroundTintList=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.surface_variant));setTextColor(Themes.color(activity,R.color.accent));setOnClickListener { FileDelay.choose(activity) { text="文件操作延迟 · ${FileDelay.seconds(activity)} 秒" } } })
+        body.addView(MaterialButton(activity).apply { text="文件操作延迟 · ${FileDelay.seconds(activity)} 秒";minHeight=dp(48);isAllCaps=false;cornerRadius=dp(14);setIconResource(R.drawable.ic_history);iconTint=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.accent));backgroundTintList=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.surface_variant));strokeWidth=dp(1);strokeColor=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.outline_soft));setTextColor(Themes.color(activity,R.color.accent));setOnClickListener { FileDelay.choose(activity) { text="文件操作延迟 · ${FileDelay.seconds(activity)} 秒" } } },LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(10) })
         val height=(activity.resources.displayMetrics.heightPixels*.82f).toInt()
         dialog.setContentView(body,android.view.ViewGroup.LayoutParams(-1,height));dialog.behavior.skipCollapsed=true;dialog.behavior.state=com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
         render();dialog.show()
