@@ -21,6 +21,7 @@ object ToolNavigator {
         Tool("共享与控制","虚拟键盘","组合键、Win 键与文字输入",R.drawable.ic_keyboard,ControlActivity::class.java,"input"),
         Tool("共享与控制","发送消息","自定义标题和内容",R.drawable.ic_message,ControlActivity::class.java,"message"),
         Tool("文件与设备","文件管理","文档、WPS、多选、最后修改日期与占位文件",R.drawable.ic_folder,StorageActivity::class.java),
+        Tool("文件与设备","文件搜索","全盘与文件夹索引，名称、路径和通配符搜索",R.drawable.ic_folder,FileSearchActivity::class.java),
         Tool("文件与设备","U盘与移动设备","访问策略、安全弹出、断开与恢复",R.drawable.ic_usb,DevicesActivity::class.java),
         Tool("文件与设备","摄像头与麦克风","设备启停、麦克风静音与驱动状态",R.drawable.ic_camera,PrivacyDevicesActivity::class.java),
         Tool("系统与应用","任务管理器","多选结束进程、内存和 CPU",R.drawable.ic_process,TaskManagerActivity::class.java),

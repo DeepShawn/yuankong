@@ -76,6 +76,8 @@ python -m PyInstaller --noconfirm --clean --onefile --noconsole ^
     --hidden-import file_jobs ^
     --hidden-import file_schedule ^
     --hidden-import document_open ^
+    --hidden-import file_search ^
+    --hidden-import sqlite3 ^
     --hidden-import tkinter ^
     --hidden-import tkinter.messagebox ^
     lan_command_agent.py
@@ -112,6 +114,8 @@ python -m PyInstaller --noconfirm --clean --onefile --console ^
     --hidden-import file_jobs ^
     --hidden-import file_schedule ^
     --hidden-import document_open ^
+    --hidden-import file_search ^
+    --hidden-import sqlite3 ^
     lan_command_agent.py
 if errorlevel 1 (
     echo [!] Control exe failed, main agent is still usable.

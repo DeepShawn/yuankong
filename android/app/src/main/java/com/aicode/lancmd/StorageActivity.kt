@@ -53,6 +53,8 @@ class StorageActivity : FeatureActivity() {
     private fun sourceReady(): Boolean = try { checkSource(); true } catch(e: Exception) { status(e.message ?: "连接已改变",true); false }
 
     private var path = ""
+    private val highlightName by lazy { intent.getStringExtra("highlight").orEmpty() }
+    private val highlightFolder by lazy { intent.getStringExtra("path").orEmpty() }
     private var pendingDownload = ""
     private var uploadTarget = ""
     private var entries = listOf<JSONObject>()
@@ -283,6 +285,11 @@ class StorageActivity : FeatureActivity() {
             search.setText("")
             crumbs()
             filter()
+            if(path==highlightFolder && highlightName.isNotBlank()) {
+                val position=visible.indexOfFirst { it.optString("name")==highlightName }
+                if(position>=0)list.post { list.scrollToPosition(position) }
+                if(lastResult==null && notice==null)lastResult=if(position>=0)"已定位：$highlightName" else "所选文件可能已移动或删除，请更新搜索索引"
+            }
             if(notice!=null)lastResult=notice
             status(lastResult ?: if(entries.isEmpty())"此目录为空" else "${entries.size} 项 · 长按多选，⋮ 单项操作",lastError)
         }
@@ -780,6 +787,7 @@ class StorageActivity : FeatureActivity() {
         }
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val item = visible[position]
+            holder.row.backgroundTintList=android.content.res.ColorStateList.valueOf(color(if(path==highlightFolder && item.optString("name")==highlightName)R.color.accent_dim else R.color.surface_variant))
             holder.name.text = item.optString("name")
             holder.icon.setImageResource(if (item.optBoolean("dir")) R.drawable.ic_folder else R.drawable.ic_file)
             val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(item.optLong("mtime") * 1000))

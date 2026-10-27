@@ -340,3 +340,12 @@ Android internal Activity transitions preserve pinned sharing sessions and send 
 `capabilities.features` 增加 `privacy_device_recovery`。`privacy_devices.set_enabled(false)` 在硬件变更前释放 LanCmd 相关摄像头会话和录制并等待；不处理其他应用。常规 CM 接口在 0x17/0x28/0x13 时尝试所选设备的 SetupAPI DIF_PROPERTYCHANGE，验证 Camera/Image/捕获 AudioEndpoint 类别并设置 DI_QUIETINSTALL，不操作父设备。权限不足不进入备用流程。
 
 成功返回 `changed=true,method,enabled,problem,released={camera_sessions?,recordings?},notice`，状态必须已确认。驱动要求重启且尚未切换时返回 `changed=false,pending_reboot=true,notice`，不会自动重启。释放或驱动操作失败返回错误，安卓刷新核对状态并在原设备卡片保留结果。
+
+
+## 2.8 文件索引搜索
+
+`file_search` 绑定当前接收端，能力字段包含 `file_search`。
+- `status`：`index={available,count,roots,updated,skipped,incomplete},job?,drives,can_cancel`，drives 默认仅本地固定磁盘。
+- `build,roots:[绝对目录]`：1–32 个目录，合并重叠范围；异步扫描属性，返回 job。状态 building/completed/cancelled/failed，phase scanning/optimizing；每次最多一项建立任务，最多200万条，保留1GB空闲。手机断线继续，重启不续建，已完成缓存保留。
+- `cancel,job_id`：仅创建任务的手机可取消。取消/失败不替换旧索引。
+- `query,query,scope=name|path,kind=all|files|folders,sort=name|path|modified|size,offset,limit`：关键词最多256字符、12个词，支持双引号短语和*、?，每页1–100项；返回 items(path/name/parent/dir/size/mtime/file_id),total,offset,limit,index。读取缓存不访问文件内容，未建立时返回空结果和 available=false。索引文件变化需手动重建，操作原件仍须校验 file_id。

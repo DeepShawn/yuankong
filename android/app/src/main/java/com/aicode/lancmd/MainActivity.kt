@@ -284,10 +284,10 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         ))
         section("文件与设备")
         tiles(files,listOf(
-            0 to Action(R.drawable.ic_folder,"存储") { openFeature(StorageActivity::class.java) },
+            0 to Action(R.drawable.ic_folder,"文件管理") { openFeature(StorageActivity::class.java) },
+            0 to Action(R.drawable.ic_folder,"文件搜索") { openFeature(FileSearchActivity::class.java) },
             R.id.btnDevices to Action(R.drawable.ic_usb,"U盘与设备") { openFeature(DevicesActivity::class.java) },
-            0 to Action(R.drawable.ic_camera,"隐私设备") { openFeature(PrivacyDevicesActivity::class.java) },
-            0 to Action(R.drawable.ic_info,"电脑信息") { showInfo() }
+            0 to Action(R.drawable.ic_camera,"隐私设备") { openFeature(PrivacyDevicesActivity::class.java) }
         ))
         section("系统与应用")
         tiles(management,listOf(
@@ -908,6 +908,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         connection.add(0,2,1,getString(R.string.menu_manual))
         connection.add(0,3,2,getString(R.string.menu_disconnect))
         connection.add(0,4,3,getString(R.string.menu_forget))
+        connection.add(0,41,4,"电脑信息")
         val settings=popup.menu.addSubMenu("应用设置")
         settings.add(0,30,0,"外观主题")
         settings.add(0,7,1,if(LanCmdService.isRunning)"关闭后台常驻" else "开启后台常驻")
@@ -934,6 +935,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                 7 -> toggleResident()
                 8 -> startPickFiles()
                 9 -> showCrashLog()
+                41 -> showInfo()
                 40 -> ToolNavigator.show(this)
                 30 -> ThemeDialog(this).show()
                 31 -> openFeature(RecordingsActivity::class.java)

@@ -1130,6 +1130,7 @@ from privacy_devices import PrivacyDevices
 from placeholder_files import PlaceholderFiles
 from file_jobs import FileJobs, file_token
 from file_schedule import FileSchedule
+from file_search import FileSearch
 
 _capture_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 
@@ -1168,11 +1169,14 @@ _placeholders = PlaceholderFiles()
 _file_jobs = FileJobs(os.path.join(APP_DIR,"file-jobs.json"),protected=(_capture_dir,APP_DIR,os.environ.get("SystemRoot")))
 
 
+_file_search = FileSearch(os.path.join(APP_DIR,"file-search"))
+
+
 def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures"])
-        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery"])
+        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1210,6 +1214,7 @@ HANDLERS = {
     "scripts": lambda q, st: _scripts.request(q,st,RpcError),
     "privacy_devices": lambda q, st: _privacy_devices.request(q,RpcError),
     "placeholders": lambda q, st: _placeholders.request(q,st,RpcError),
+    "file_search": lambda q,st: _file_search.request(q,st,RpcError),
     "file_jobs": lambda q, st: _file_jobs.request(q,st,RpcError),
     "message": _remote.message,
     "info": lambda q, st: cmd_info(),
