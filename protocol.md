@@ -349,3 +349,10 @@ Android internal Activity transitions preserve pinned sharing sessions and send 
 - `build,roots:[绝对目录]`：1–32 个目录，合并重叠范围；异步扫描属性，返回 job。状态 building/completed/cancelled/failed，phase scanning/optimizing；每次最多一项建立任务，最多200万条，保留1GB空闲。手机断线继续，重启不续建，已完成缓存保留。
 - `cancel,job_id`：仅创建任务的手机可取消。取消/失败不替换旧索引。
 - `query,query,scope=name|path,kind=all|files|folders,sort=name|path|modified|size,offset,limit`：关键词最多256字符、12个词，支持双引号短语和*、?，每页1–100项；返回 items(path/name/parent/dir/size/mtime/file_id),total,offset,limit,index。读取缓存不访问文件内容，未建立时返回空结果和 available=false。索引文件变化需手动重建，操作原件仍须校验 file_id。
+
+
+## 2.9 快速占位与 USB 配置恢复
+
+能力新增 `placeholders_fast,usb_connection_fallback`。占位任务新增状态 allocating、method=preallocate|stream；written 表示已处理/预分配字节，完成时仍返回核实的 allocated。快速路径按最多16GiB分段设置 FileAllocationInfo 与 FileEndOfFileInfo，不调用 SetFileValidData 或稀疏接口；仅明确不支持或分配量未确认时清理并回退流式写入。磁盘满与权限失败直接报错，保留原取消及清理行为。
+
+USB 恢复记录新增 config_restore 布尔值，表示兼容停用可能留下的配置必须恢复。记录先于任何设备变更持久化。兼容路径仅 DiskDrive 类，DIF_PROPERTYCHANGE 作用于当前硬件配置，设置 DI_QUIETINSTALL。驱动要求重启而状态未确认时返回错误并保留记录；restore_connection 对 config_restore=true 的记录始终恢复配置，即使运行时设备仍启用，重启仍待完成时不删除记录。

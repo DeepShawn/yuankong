@@ -8,6 +8,7 @@ import threading
 import time
 from pathlib import Path
 from touch_guard import TouchDevices
+from device_property_change import change_state,USB_DISK_CLASSES
 
 ROOT = r"SOFTWARE\Policies\Microsoft\Windows\RemovableStorageDevices"
 CLASSES = {
@@ -110,7 +111,7 @@ class UsbHardware(TouchDevices):
             raise RuntimeError("读取 USB 存储状态失败 (0x%X)" % result)
         return {"enabled": bool(flags.value & 8) and problem.value == 0, "problem": problem.value}
 
-    def set_enabled(self, instance, enabled):
+    def _usb_node(self, instance):
         node = self.node(instance)
         cm, w = self.cm, self.w
         cm.CM_Get_DevNode_Registry_PropertyW.argtypes = [w.DWORD, w.ULONG, ctypes.POINTER(w.ULONG), ctypes.c_void_p, ctypes.POINTER(w.ULONG), w.ULONG]
@@ -141,10 +142,24 @@ class UsbHardware(TouchDevices):
             current = parent
         if not usb:
             raise RuntimeError("未确认设备属于 USB 存储，未执行操作")
+        return node
+
+    def restore_config(self,instance):
+        self._usb_node(instance)
+        return change_state(instance,True,USB_DISK_CLASSES,scope=2)
+
+    def set_enabled(self,instance,enabled):
+        node=self._usb_node(instance)
+        cm=self.cm
         # Temporary disable; CM_DISABLE_UI_NOT_OK, no persistent-disable flag.
         result = cm.CM_Enable_DevNode(node, 0) if enabled else cm.CM_Disable_DevNode(node, 4)
+        if result in (0x17,0x28,0x13):
+            try:return change_state(instance,enabled,USB_DISK_CLASSES,scope=2)
+            except (OSError,RuntimeError,ValueError) as exc:
+                raise RuntimeError("USB 常规接口被驱动拒绝 (0x%X)，兼容接口也未完成：%s；恢复记录已保留，不会停用父控制器"%(result,exc))
         if result:
-            raise RuntimeError("Windows 拒绝切换 USB 存储状态，驱动可能不支持或需要重启 (0x%X)" % result)
+            raise RuntimeError("Windows 拒绝切换 USB 存储状态 (0x%X)，请检查权限和驱动；恢复记录已保留"%result)
+        return {"method":"cfgmgr32","reboot_required":False}
 
 
 class Registry:
@@ -197,7 +212,7 @@ class DeviceManager:
                 raise ValueError()
             for key, item in result.items():
                 if (not isinstance(key, str) or not key or len(key) > 512 or any(ord(c) < 32 for c in key) or
-                        not isinstance(item, dict) or item.get("kind") != "storage" or item.get("protected") is not False):
+                        not isinstance(item, dict) or item.get("kind") != "storage" or item.get("protected") is not False or type(item.get("config_restore",False)) is not bool):
                     raise ValueError()
             return result
         except (ValueError, TypeError):
@@ -229,13 +244,15 @@ class DeviceManager:
                 items.append(item)
             return items
 
-    def _confirmed(self, instance, enabled):
+    def _confirmed(self, instance, enabled, metadata=None):
         deadline = time.monotonic() + 2
         while True:
             state = self._connection().status(instance)
             if state.get("enabled") is enabled and state.get("problem") == (0 if enabled else 22):
                 return state
             if time.monotonic() >= deadline:
+                if isinstance(metadata,dict) and metadata.get("reboot_required"):
+                    raise RuntimeError("USB 驱动要求重启后切换，当前未确认断开；恢复记录已保留，可点击恢复连接撤销待生效配置，不会自动重启")
                 raise RuntimeError("Windows 已接受请求，但未确认设备状态；请刷新，必要时在本机设备管理器检查")
             time.sleep(.1)
 
@@ -247,7 +264,14 @@ class DeviceManager:
                 if instance not in records:
                     raise RuntimeError("没有 LanCmd 保存的断开记录，未启用其他设备")
                 state = backend.status(instance)
-                if state.get("enabled") is True and state.get("problem") == 0:
+                if records[instance].get("config_restore") is True:
+                    if state.get("problem") not in (0,22):raise RuntimeError("设备状态异常，恢复记录已保留，请检查驱动")
+                    restore=getattr(backend,"restore_config",None)
+                    metadata=restore(instance) if callable(restore) else backend.set_enabled(instance,True)
+                    self._confirmed(instance,True,metadata)
+                    if isinstance(metadata,dict) and metadata.get("reboot_required"):
+                        return {"notice":"已请求恢复 USB 启用配置，驱动仍要求重启；恢复记录保留，请重启后刷新确认"}
+                elif state.get("enabled") is True and state.get("problem") == 0:
                     pass  # Replug/reboot may already have restored the temporary disable.
                 elif state.get("problem") == 22 and state.get("enabled") is False:
                     backend.set_enabled(instance, True)
@@ -270,12 +294,15 @@ class DeviceManager:
                 raise RuntimeError("USB 恢复记录已满，请先恢复并清理旧记录")
             records[instance] = {k: device[k] for k in ("name", "kind", "protected")}
             records[instance]["paths"] = device.get("paths", [])
+            records[instance]["config_restore"]=True  # A property-change attempt can leave pending configuration even if it fails.
             self._save_disconnected(records)  # Recovery information precedes device mutation.
             latest = next((d for d in self.enumerate() if d["id"] == instance), None)
             if not latest or latest.get("kind") != "storage" or latest.get("protected") is not False or not latest.get("ejectable"):
                 raise RuntimeError("设备在准备期间已变化，未强制断开；恢复记录已保留")
-            backend.set_enabled(instance, False)
-            self._confirmed(instance, False)
+            metadata=backend.set_enabled(instance, False)
+            if isinstance(metadata,dict) and metadata.get("method")=="cfgmgr32":
+                records[instance]["config_restore"]=False;self._save_disconnected(records)
+            self._confirmed(instance, False,metadata)
             return {"notice": "USB 存储已禁用，连接已强制断开；设备可能仍有供电，可在设备管理恢复启用"}
 
     def _load(self):

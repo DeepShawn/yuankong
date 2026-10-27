@@ -177,7 +177,7 @@ class DeviceTest(unittest.TestCase):
     def usb_backend(self):
         self.items[0].update(kind="storage", paths=["E:\\"])
         self.usb_state = {"enabled": True, "problem": 0}
-        backend = mock.Mock()
+        backend = mock.Mock();backend.restore_config=None
         backend.status.side_effect = lambda instance: dict(self.usb_state)
         backend.set_enabled.side_effect = lambda instance, enabled: self.usb_state.update(enabled=enabled, problem=0 if enabled else 22)
         self.manager.connection = backend
@@ -249,7 +249,7 @@ class DeviceTest(unittest.TestCase):
         self.request(action="restore_connection", device_id=self.items[0]["id"])
         with self.assertRaises(agent.RpcError):
             self.request(action="restore_connection", device_id="USBSTOR\\UNRECORDED")
-        self.assertEqual(1, backend.set_enabled.call_count)
+        self.assertEqual(2, backend.set_enabled.call_count)
 
     def test_receiver_and_recovery_drive_cannot_be_disconnected(self):
         with mock.patch.object(agent, "_capture_dir", "E:\\LanCmd"), mock.patch.object(agent, "APP_DIR", "C:\\LanCmd"):

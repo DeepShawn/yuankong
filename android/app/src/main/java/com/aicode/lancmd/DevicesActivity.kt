@@ -20,6 +20,7 @@ class DevicesActivity : FeatureActivity() {
     private var busy = false
     private var receiverVersion=""
     private var connectionSupported=false
+    private var compatibilitySupported=false
     private var checkedCapabilities=false
     private val eligibility=java.util.IdentityHashMap<MaterialButton,Boolean>()
 
@@ -64,7 +65,9 @@ class DevicesActivity : FeatureActivity() {
                 if(!checkedCapabilities) {
                     val caps=pinnedCall(origin,"capabilities")
                     receiverVersion=caps.optString("version")
-                    connectionSupported=supportsUsbConnection(caps);checkedCapabilities=true
+                    connectionSupported=supportsUsbConnection(caps)
+                    val features=caps.optJSONArray("features");compatibilitySupported=features!=null && (0 until features.length()).any { features.optString(it)=="usb_connection_fallback" }
+                    checkedCapabilities=true
                 }
                 if(params?.optString("action") in listOf("force_disconnect","restore_connection") && !connectionSupported)
                     throw IOException(usbUpgradeMessage(receiverVersion))
@@ -110,13 +113,14 @@ class DevicesActivity : FeatureActivity() {
             for(i in 0 until records.length()) {
                 val item=records.getJSONObject(i)
                 disconnected.addView(label(item.optString("name","USB 存储"),15f))
-                disconnected.addView(label(if(item.optInt("problem")==22)"已禁用 · 强制断开" else if(item.optBoolean("enabled"))"已启用 · 可清理恢复记录" else item.optString("error","状态异常，请检查设备"),12f,R.color.dim))
+                disconnected.addView(label(if(item.optInt("problem")==22)"已禁用 · 强制断开" else if(item.optBoolean("enabled") && item.optBoolean("config_restore"))"当前仍启用 · 有待恢复的停用配置" else if(item.optBoolean("enabled"))"已启用 · 可清理恢复记录" else item.optString("error","状态异常，请检查设备"),12f,R.color.dim))
                 action(disconnected,"恢复连接 · ${item.optString("name","USB 存储")}",admin && connectionSupported && (item.optInt("problem")==22 || item.optBoolean("enabled"))) {
-                    confirm("恢复 USB 存储连接？","只恢复 LanCmd 记录的磁盘设备。若已拔出，请先重新插入；部分驱动需要重启或重新插拔。",JSONObject().put("action","restore_connection").put("device_id",item.getString("id")))
+                    confirm("恢复 USB 存储连接？","只恢复 LanCmd 记录的磁盘设备。若已拔出，请先重新插入；会撤销未完成的兼容停用配置，驱动要求重启时保留记录，不会自动重启。",JSONObject().put("action","restore_connection").put("device_id",item.getString("id")))
                 }
             }
         }
         policies.addView(label((if (admin) "接收端权限：管理员" else "接收端权限：标准用户")+" · Windows ${receiverVersion.ifBlank { "版本未知" }}", 14f))
+        if(connectionSupported && !compatibilitySupported)policies.addView(label("0x17 兼容修复需要 Windows 2.9.0 完整包；请停止旧接收端、完整替换并重启，不能只更新安卓。",12f,R.color.dim))
         if(!connectionSupported)policies.addView(label(usbUpgradeMessage(receiverVersion),12f,R.color.warn))
         if (!admin) policies.addView(label("修改策略或弹出设备前，请在电脑 Start.exe 选择「管理员启动 / 重启」。", 13f, R.color.dim))
         policies.addView(label("设置作用于整类设备，重启后保留。解锁恢复 LanCmd 修改前的策略；不会清除原有系统限制。", 13f, R.color.dim))

@@ -77,6 +77,7 @@ python -m PyInstaller --noconfirm --clean --onefile --noconsole ^
     --hidden-import file_schedule ^
     --hidden-import document_open ^
     --hidden-import file_search ^
+    --hidden-import device_property_change ^
     --hidden-import sqlite3 ^
     --hidden-import tkinter ^
     --hidden-import tkinter.messagebox ^
@@ -115,6 +116,7 @@ python -m PyInstaller --noconfirm --clean --onefile --console ^
     --hidden-import file_schedule ^
     --hidden-import document_open ^
     --hidden-import file_search ^
+    --hidden-import device_property_change ^
     --hidden-import sqlite3 ^
     lan_command_agent.py
 if errorlevel 1 (
