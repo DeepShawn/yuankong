@@ -309,7 +309,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         labels.forEach { category->
             chips.addView(com.google.android.material.chip.Chip(this).apply {
                 id=View.generateViewId();text=category;isCheckable=true;isChecked=category==homeCategory;setEnsureMinTouchTargetSize(true)
-                setOnCheckedChangeListener { _,checked->if(checked){homeCategory=category;categorized.forEach { (name,views)->views.forEach { it.visibility=if(category=="全部" || category==name)View.VISIBLE else View.GONE } };findViewById<android.widget.ScrollView>(R.id.homeTools).scrollTo(0,0)} }
+                setOnCheckedChangeListener { _,checked->if(checked){homeCategory=category;categorized.forEach { (name,views)->views.forEach { it.visibility=if(category=="全部" || category==name)View.VISIBLE else View.GONE } };this@MainActivity.findViewById<android.widget.ScrollView>(R.id.homeTools).scrollTo(0,0)} }
             })
         }
         categorized.forEach { (name,views)->views.forEach { it.visibility=if(homeCategory=="全部" || homeCategory==name)View.VISIBLE else View.GONE } }
