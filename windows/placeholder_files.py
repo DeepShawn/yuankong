@@ -25,12 +25,17 @@ def target_path(value):
     expanded = os.path.expanduser(value)
     if not os.path.isabs(expanded):
         raise ValueError("请输入占位文件的绝对路径")
-    path = Path(os.path.abspath(expanded))
-    name = path.name
+    raw = Path(expanded)
+    # GetFullPathNameW (used by ntpath.abspath) can erase a trailing dot before
+    # validation. Validate the caller's basename before Win32 normalization.
+    name = raw.name
     if (not name or name.endswith((".", " ")) or any(ord(c) < 32 or c in ':*?"<>|' for c in name) or
             name.split(".")[0].rstrip(" ").upper() in {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
                 *["COM%s" % n for n in "123456789¹²³"], *["LPT%s" % n for n in "123456789¹²³"]}):
         raise ValueError("文件名不兼容 Windows")
+    if any(part.endswith((".", " ")) and part not in (".", "..") for part in raw.parts[1:-1]):
+        raise ValueError("目录名含有 Windows 会改写的尾随点或空格")
+    path = Path(os.path.abspath(expanded))
     for parent in (path.parent, *path.parent.parents):
         info = parent.lstat()
         if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:

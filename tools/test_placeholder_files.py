@@ -72,6 +72,10 @@ class PlaceholderTest(unittest.TestCase):
         self.path = Path(self.temp.name) / "reserve.dat"
     def call(self, **q):
         return self.manager.request(q, self.owner, Error)
+    def tearDown(self):
+        self.manager.close()
+        for job in self.manager.jobs.values():
+            self.assertTrue(job["done"].wait(8), "allocation worker did not finish cleanup")
     def wait(self, job):
         self.assertTrue(self.manager.jobs[job["id"]]["done"].wait(8))
         return self.call()["items"][0]
