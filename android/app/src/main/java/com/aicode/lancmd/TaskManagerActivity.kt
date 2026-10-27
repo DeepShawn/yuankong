@@ -79,14 +79,32 @@ class TaskManagerActivity : FeatureActivity() {
                         .putExtra("path",if(index==0)parentOf(path) else path)) }
                 }.show()
             }.setPositiveButton("结束进程") { _,_->
-                AlertDialog.Builder(this).setTitle("结束 ${item.optString("name")}？").setMessage("PID ${item.getInt("pid")}\n未保存内容可能丢失。")
-                    .setNegativeButton("取消",null).setPositiveButton("结束") { _,_-> task {
-                        try {
-                            pinnedCall(origin,"tasks",JSONObject().put("action","terminate").put("pid",item.getInt("pid")).put("created",item.getString("created")));refresh()
-                        } catch(e:Exception) { automatic.isChecked=false;throw e }
-                    } }.show()
+                confirmTerminate(item)
             }.create()
         dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=item.optBoolean("can_terminate");dialog.getButton(AlertDialog.BUTTON_NEUTRAL).isEnabled=path.isNotEmpty() }
+        dialog.show()
+    }
+    private fun confirmTerminate(item:JSONObject) {
+        val dialog=AlertDialog.Builder(this).setTitle("结束 ${item.optString("name")}？").setMessage("PID ${item.getInt("pid")}\n未保存内容可能丢失。")
+            .setNegativeButton("取消",null).setPositiveButton("结束",null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=false
+                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).text="关闭"
+                dialog.setMessage("正在结束 PID ${item.getInt("pid")}…")
+                task {
+                    try {
+                        pinnedCall(origin,"tasks",JSONObject().put("action","terminate").put("pid",item.getInt("pid")).put("created",item.getString("created")))
+                        dialog.setMessage("已结束 ${item.optString("name")}\nPID ${item.getInt("pid")}")
+                        refresh()
+                    } catch(e:Exception) {
+                        if(e is kotlinx.coroutines.CancellationException)throw e
+                        automatic.isChecked=false
+                        dialog.setMessage("结束失败：${e.message}")
+                    } finally { dialog.getButton(AlertDialog.BUTTON_POSITIVE).visibility=android.view.View.GONE }
+                }
+            }
+        }
         dialog.show()
     }
     override fun onStart() { super.onStart();poll=lifecycleScope.launch { refresh();while(isActive){delay(3000);if(automatic.isChecked)refresh()} } }

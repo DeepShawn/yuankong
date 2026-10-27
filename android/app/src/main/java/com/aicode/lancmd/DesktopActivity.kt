@@ -390,7 +390,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
                             localPaused = state.optBoolean("paused")
                             localPause.text = if (localPaused) "恢复本机输入" else "暂停本机输入"
                             localStatus.text = if (localPaused) {
-                                "键鼠已暂停 · 已禁用 ${state.optInt("touch_devices")} / 已识别 ${state.optInt("touch_detected",state.optInt("touch_devices"))} 个触屏" +
+                                pauseSummary(state) +
                                     "\n本机解除：A R T E X + Ctrl + Delete，或 Ctrl+Alt+Del"
                             } else if(state.optString("warning").isNotBlank()) "已恢复本机输入：${state.optString("warning")}"
                             else if (touchPauseSupported) "本机输入可用 · 校验 HID 触屏实际状态，断线自动恢复" else "触屏暂停需完整更新 Windows 接收端"
@@ -452,16 +452,24 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
                     val state = lease.call("local_input", JSONObject().put("action", action).put("seconds", 0), 75_000)
                     localPaused = state.optBoolean("paused")
                     localPause.text = if (localPaused) "恢复本机输入" else "暂停本机输入"
-                    localStatus.text = if (localPaused) "键鼠已暂停 · 已禁用 ${state.optInt("touch_devices")} / 已识别 ${state.optInt("touch_detected",state.optInt("touch_devices"))} 个触屏 · 本机组合键或手机可恢复" else "本机输入已恢复"
+                    localStatus.text = if (localPaused) pauseSummary(state)+" · 本机组合键或手机可恢复" else "本机输入已恢复"
                     status(localStatus.text.toString())
                 } finally { localPause.isEnabled = localLease === lease && touchPauseSupported }
             }
         }
         if (localPaused) { apply("release"); return }
         AlertDialog.Builder(this).setTitle("暂停电脑本机输入")
-            .setMessage("暂停键盘、鼠标及标准 HID 触屏，手机仍可控制。触屏暂停需要管理员权限；无法暂停触屏时返回失败。\n\n本机解除：A、R、T、E、X + Ctrl + Delete；或 Ctrl+Alt+Del。\n\n退出共享或心跳中断 12 秒恢复。独立恢复进程会在接收端退出或失去心跳后重新启用触屏；驱动恢复可能稍有延迟。")
+            .setMessage("暂停键盘、鼠标及已识别的标准 HID 触屏，手机仍可控制。触屏暂停需要管理员权限，结果显示实际识别与禁用数量；未识别的厂商触控设备不能保证锁定。\n\n本机解除：A、R、T、E、X + Ctrl + Delete；或 Ctrl+Alt+Del。\n\n退出共享或心跳中断 12 秒恢复。独立恢复进程会在接收端退出或失去心跳后重新启用触屏；驱动恢复可能稍有延迟。")
             .setPositiveButton("开始暂停（手动解除）") { _, _ -> apply("pause") }
             .setNegativeButton("取消", null).show()
+    }
+
+    private fun pauseSummary(state:JSONObject):String {
+        val disabled=state.optInt("touch_devices")
+        val detected=state.optInt("touch_detected",disabled)
+        val original=state.optInt("touch_already_disabled")
+        return if(detected==0)"键鼠已暂停 · 未识别到标准 HID 触屏"
+        else "键鼠已暂停 · 触屏确认禁用 ${disabled+original}/$detected（本次 $disabled，原已禁用 $original）"
     }
 
     private fun execute() {

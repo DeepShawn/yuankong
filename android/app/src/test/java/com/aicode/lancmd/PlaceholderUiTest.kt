@@ -151,6 +151,25 @@ class PlaceholderUiTest {
         } }
     }
 
+    @Test fun fileDeletionResultStaysInTheConfirmationInsteadOfTheTopOfThePage() {
+        Stub().use { stub->
+            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get();val root=activity.window.decorView
+            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="reserve.dat" } }
+            StorageActivity::class.java.getDeclaredMethod("fileActions",JSONObject::class.java,View::class.java).apply { isAccessible=true }
+                .invoke(activity,JSONObject().put("name","reserve.dat").put("dir",false),root)
+            val menu=org.robolectric.shadows.ShadowPopupMenu.getLatestPopupMenu()!!
+            val item=(0 until menu.menu.size()).map { menu.menu.getItem(it) }.single { it.title=="删除" }
+            org.robolectric.shadow.api.Shadow.extract<org.robolectric.shadows.ShadowPopupMenu>(menu).onMenuItemClickListener!!.onMenuItemClick(item)
+            shadowOf(Looper.getMainLooper()).idle();val confirmation=latest()
+            assertFalse(stub.requests.any { it.optString("cmd")=="rm" })
+            confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitFor { all(confirmation.window!!.decorView).filterIsInstance<TextView>().any { it.text.contains("删除完成") } }
+            assertTrue(confirmation.isShowing)
+            assertEquals("E:\\reserve.dat",stub.requests.single { it.optString("cmd")=="rm" }.getString("path"))
+            confirmation.dismiss();menu.dismiss();controller.pause().stop().destroy()
+        }
+    }
+
     private class Stub:Closeable {
         private val server=ServerSocket(0);private val client=AgentClient("127.0.0.1",server.localPort)
         val requests=CopyOnWriteArrayList<JSONObject>();private var jobState="";private var disconnected=false

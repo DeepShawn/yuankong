@@ -355,7 +355,7 @@ class DesktopUiTest {
             controller.get().findViewById<View>(R.id.desktopStart).performClick()
             waitUntil { controller.get().findViewById<RemoteScreenView>(R.id.desktopScreen).drawable!=null }
             controller.pause().stop();shadowOf(Looper.getMainLooper()).idleFor(1000,TimeUnit.MILLISECONDS)
-            waitUntil { stub.requests.count { it.second.optString("action")=="end" }==2 }
+            waitUntil { stub.requests.count { it.second.optString("action")=="end" }==2 && controller.get().findViewById<View>(R.id.desktopStart).isEnabled }
             assertTrue(controller.get().findViewById<View>(R.id.desktopStart).isEnabled)
             controller.destroy()
         }
