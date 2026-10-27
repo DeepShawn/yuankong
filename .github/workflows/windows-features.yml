@@ -72,6 +72,8 @@ jobs:
         run: python -m unittest discover -s tools -p test_privacy_recovery.py -v
       - name: Application lock and privacy device recovery edge checks
         run: python -m unittest discover -s tools -p test_privacy_lock_edges.py -v
+      - name: Fast allocation, safe fallback and USB pending configuration recovery
+        run: python -m unittest discover -s tools -p test_fast_placeholder_usb.py -v
       - name: Allocated placeholder files, cancellation and crash cleanup
         run: python -m unittest discover -s tools -p test_placeholder_files.py -v
       - name: Delayed file actions, document revisions and Windows defaults

@@ -88,6 +88,7 @@ class PlaceholderUiTest {
             waitFor { buttons(root).any { it.text=="取消创建" } && buttons(root).single { it.text=="刷新占位任务" }.isEnabled }
             val request=stub.requests.single { it.optString("action")=="create" }
             assertEquals(500_000_000_000L,request.getLong("size"));assertEquals("E:\\LanCmd-placeholder.dat",request.getString("path"))
+            assertTrue(all(root).filterIsInstance<android.widget.ProgressBar>().any { it.isIndeterminate })
             render(root,"placeholder-files")
             buttons(root).single { it.text=="取消创建" }.performClick()
             waitFor { all(root).filterIsInstance<TextView>().any { it.text=="已取消并清理" } }
@@ -182,7 +183,7 @@ class PlaceholderUiTest {
                         "storage"->result.put("home","E:\\").put("drives",JSONArray())
                         "ls"->result.put("path","E:\\").put("items",JSONArray().put(JSONObject().put("name","reserve.dat").put("dir",false).put("size",128).put("hidden",true).put("system",true)))
                         "placeholders"->{
-                            when(q.optString("action")){"create"->jobState="writing";"cancel"->jobState="cancelled"}
+                            when(q.optString("action")){"create"->jobState="allocating";"cancel"->jobState="cancelled"}
                             result.put("items",JSONArray().apply { if(jobState.isNotEmpty())put(JSONObject().put("id","placeholder-job").put("path","E:\\LanCmd-placeholder.dat").put("size",500_000_000_000L).put("written",12).put("status",jobState)) })
                         }
                         "devices"->{

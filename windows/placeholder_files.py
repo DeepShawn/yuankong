@@ -19,6 +19,14 @@ RESERVE_BYTES = 1_000_000_000
 CHUNK_BYTES = 4 * 1024 * 1024
 
 
+class FastAllocationUnsupported(Exception):
+    pass
+
+
+class FastAllocationCancelled(Exception):
+    pass
+
+
 def target_path(value):
     if not isinstance(value, str) or not value.strip() or len(value) > 32700 or "\0" in value:
         raise ValueError("请输入占位文件的完整路径")
@@ -124,6 +132,29 @@ class NativeAllocation:
 
     def write(self, data):
         return self.stream.write(data)
+
+    def reserve(self,size,progress=lambda amount:None,cancelled=lambda:False):
+        """Reserve real clusters in bounded steps; keep Windows zero-read semantics."""
+        if type(size) is not int or not 0<=size<=MAX_BYTES:raise ValueError("占位大小无效")
+        if size==0:return
+        def set_info(info_class,value):
+            amount=ctypes.c_longlong(value)
+            if not self.kernel.SetFileInformationByHandle(self.handle,info_class,ctypes.byref(amount),ctypes.sizeof(amount)):
+                code=ctypes.get_last_error()
+                if code in (1,50,87,120):raise FastAllocationUnsupported("文件系统不支持快速实际分配")
+                raise ctypes.WinError(code)
+        # No SetFileValidData and no sparse marking. Windows returns zeros for
+        # bytes beyond valid-data length, while ordinary clusters are reserved.
+        step=16*1024**3
+        for start in range(0,size,step):
+            if cancelled():raise FastAllocationCancelled()
+            target=min(size,start+step)
+            set_info(5,max(4096,target))  # FileAllocationInfo
+            actual=self.inspect()["allocated"]
+            if actual<target:raise FastAllocationUnsupported("文件系统未确认实际空间预分配")
+            progress(min(size,actual))
+        if cancelled():raise FastAllocationCancelled()
+        set_info(6,size)  # FileEndOfFileInfo; does not bypass valid-data protection.
 
     def flush(self):
         self.stream.flush()
@@ -254,8 +285,31 @@ class PlaceholderFiles:
                 data["status"] = "cancelled"
                 return
             allocation = self.backend.create(path)
-            data["status"] = "writing"
-            block = bytes(CHUNK_BYTES)
+            reserve=getattr(allocation,"reserve",None)
+            data.update(status="allocating" if callable(reserve) else "writing",method="preallocate" if callable(reserve) else "stream")
+            if callable(reserve):
+                try:
+                    if data["size"] and self.backend.free(path)-data["size"]<RESERVE_BYTES:
+                        raise ValueError("空间已变化，快速分配后无法保留 1 GB，已取消")
+                    def progress(amount):
+                        data["written"]=min(amount,data["size"])
+                        if data["size"] and self.backend.free(path)<RESERVE_BYTES:
+                            raise ValueError("分配后剩余空间不足 1 GB，已取消并清理")
+                    reserve(data["size"],progress,job["cancel"].is_set)
+                    info=allocation.inspect()
+                    if info["size"]!=data["size"] or info["allocated"]<data["size"]:
+                        raise FastAllocationUnsupported("未确认快速实际分配，改用逐块写入")
+                    data["written"]=data["size"]
+                except FastAllocationUnsupported:
+                    # Delete-pending cleanup releases any partial reservation before
+                    # starting the conservative writer with a fresh exclusive file.
+                    allocation.close();allocation=None
+                    if job["cancel"].is_set():data["status"]="cancelled";return
+                    if data["size"] and self.backend.free(path)-data["size"]<RESERVE_BYTES:
+                        raise ValueError("空间不足，无法回退写入；未完成文件已清理")
+                    allocation=self.backend.create(path)
+                    data.update(status="writing",method="stream",written=0)
+            block = bytes(CHUNK_BYTES) if data["written"]<data["size"] else b""
             while data["written"] < data["size"]:
                 if job["cancel"].is_set():
                     data["status"] = "cancelled"
@@ -281,6 +335,8 @@ class PlaceholderFiles:
                     return
                 allocation.commit()
                 data.update(allocated=info["allocated"], status="completed")
+        except FastAllocationCancelled:
+            data["status"]="cancelled"
         except Exception as exc:
             data.update(status="failed", error=str(exc)[:1600])
         finally:
