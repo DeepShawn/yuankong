@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import ctypes
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -171,6 +173,116 @@ class DeviceTest(unittest.TestCase):
         with mock.patch.object(agent, "IS_WIN", True):
             self.assertIn("devices", agent.remote_capabilities()["features"])
         self.assertIn("devices", agent.HANDLERS)
+
+    def usb_backend(self):
+        self.items[0].update(kind="storage", paths=["E:\\"])
+        self.usb_state = {"enabled": True, "problem": 0}
+        backend = mock.Mock()
+        backend.status.side_effect = lambda instance: dict(self.usb_state)
+        backend.set_enabled.side_effect = lambda instance, enabled: self.usb_state.update(enabled=enabled, problem=0 if enabled else 22)
+        self.manager.connection = backend
+        return backend
+
+    def test_force_disconnect_requires_explicit_risk_confirmation_and_admin(self):
+        backend = self.usb_backend()
+        with self.assertRaisesRegex(agent.RpcError, "单独确认"):
+            self.request(action="force_disconnect", device_id=self.items[0]["id"])
+        self.admin.return_value = False
+        with self.assertRaisesRegex(agent.RpcError, "管理员权限"):
+            self.request(action="force_disconnect", device_id=self.items[0]["id"], confirm_data_loss=True)
+        backend.set_enabled.assert_not_called()
+        self.assertFalse(self.manager.disconnect_path.exists())
+
+    def test_force_disconnect_journals_before_mutation_and_restores_after_restart(self):
+        backend = self.usb_backend()
+        change = backend.set_enabled.side_effect
+        def checked(instance, enabled):
+            records = json.loads(self.manager.disconnect_path.read_text(encoding="utf-8"))
+            self.assertIn(instance, records)
+            change(instance, enabled)
+        backend.set_enabled.side_effect = checked
+        self.request(action="force_disconnect", device_id=self.items[0]["id"], confirm_data_loss=True)
+        self.assertEqual(22, self.request()["disconnected"][0]["problem"])
+        self.manager = dm.DeviceManager(self.manager.path, self.admin, self.registry, self.enumerate, self.eject, backend)
+        self.request(action="restore_connection", device_id=self.items[0]["id"])
+        self.assertTrue(self.usb_state["enabled"])
+        self.assertEqual({}, json.loads(self.manager.disconnect_path.read_text(encoding="utf-8")))
+        self.eject.assert_not_called()
+
+    def test_force_disconnect_never_targets_system_portable_or_stale_devices(self):
+        backend = self.usb_backend()
+        for change in ({"protected": True}, {"protected": False, "kind": "portable"}, {"kind": "storage", "ejectable": False}):
+            self.items[0].update(change)
+            with self.assertRaises(agent.RpcError):
+                self.request(action="force_disconnect", device_id=self.items[0]["id"], confirm_data_loss=True)
+        self.items.clear()
+        with self.assertRaises(agent.RpcError):
+            self.request(action="force_disconnect", device_id="USBSTOR\\DISK\\A", confirm_data_loss=True)
+        backend.set_enabled.assert_not_called()
+
+    def test_preparation_and_journal_failure_do_not_disable_any_device(self):
+        backend = self.usb_backend()
+        self.manager.before_disconnect = mock.Mock(side_effect=ValueError("正在清理"))
+        with self.assertRaisesRegex(agent.RpcError, "正在清理"):
+            self.request(action="force_disconnect", device_id=self.items[0]["id"], confirm_data_loss=True)
+        backend.set_enabled.assert_not_called()
+        self.manager.before_disconnect = lambda device: None
+        with mock.patch.object(self.manager, "_save_disconnected", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(agent.RpcError, "disk full"):
+                self.request(action="force_disconnect", device_id=self.items[0]["id"], confirm_data_loss=True)
+        backend.set_enabled.assert_not_called()
+
+    def test_external_device_change_after_preparation_is_not_overwritten(self):
+        backend = self.usb_backend()
+        self.manager.before_disconnect = lambda device: self.items[0].update(protected=True)
+        with self.assertRaises(agent.RpcError):
+            self.request(action="force_disconnect", device_id=self.items[0]["id"], confirm_data_loss=True)
+        backend.set_enabled.assert_not_called()
+
+    def test_unconfirmed_state_never_claims_force_success_and_recovery_record_remains(self):
+        backend = self.usb_backend()
+        backend.set_enabled.side_effect = None
+        with mock.patch.object(dm.time, "monotonic", side_effect=[0, 3]):
+            with self.assertRaisesRegex(agent.RpcError, "未确认设备状态"):
+                self.request(action="force_disconnect", device_id=self.items[0]["id"], confirm_data_loss=True)
+        self.assertIn(self.items[0]["id"], json.loads(self.manager.disconnect_path.read_text(encoding="utf-8")))
+        self.request(action="restore_connection", device_id=self.items[0]["id"])
+        with self.assertRaises(agent.RpcError):
+            self.request(action="restore_connection", device_id="USBSTOR\\UNRECORDED")
+        self.assertEqual(1, backend.set_enabled.call_count)
+
+    def test_receiver_and_recovery_drive_cannot_be_disconnected(self):
+        with mock.patch.object(agent, "_capture_dir", "E:\\LanCmd"), mock.patch.object(agent, "APP_DIR", "C:\\LanCmd"):
+            with self.assertRaisesRegex(ValueError, "接收端或恢复记录"):
+                agent.prepare_usb_disconnect({"paths": ["e:\\"]})
+
+    def test_native_usb_control_validates_disk_class_and_never_disables_parent_hub(self):
+        from ctypes import wintypes as w
+        backend = dm.UsbHardware.__new__(dm.UsbHardware)
+        backend.w = w
+        backend.node = mock.Mock(return_value=w.DWORD(17))
+        backend.cm = mock.Mock()
+        def property_(node, prop, kind, buffer, length, flags):
+            self.assertEqual(9, prop)
+            buffer.value = "{4d36e967-e325-11ce-bfc1-08002be10318}"
+            return 0
+        def identifier(node, buffer, length, flags):
+            buffer.value = "USBSTOR\\DISK\\A"
+            return 0
+        backend.cm.CM_Get_DevNode_Registry_PropertyW.side_effect = property_
+        backend.cm.CM_Get_Device_IDW.side_effect = identifier
+        backend.cm.CM_Disable_DevNode.return_value = 0
+        backend.cm.CM_Enable_DevNode.return_value = 0
+        backend.set_enabled("USBSTOR\\DISK\\A", False)
+        call = backend.cm.CM_Disable_DevNode.call_args.args
+        self.assertEqual(17, call[0].value);self.assertEqual(4, call[1])
+        backend.cm.CM_Get_Parent.assert_not_called()
+        backend.set_enabled("USBSTOR\\DISK\\A", True)
+        self.assertEqual(0, backend.cm.CM_Enable_DevNode.call_args.args[1])
+        backend.cm.CM_Get_DevNode_Registry_PropertyW.side_effect = lambda *a: 1
+        with self.assertRaisesRegex(RuntimeError, "磁盘设备"):
+            backend.set_enabled("USBSTOR\\DISK\\A", False)
+        self.assertEqual(1, backend.cm.CM_Disable_DevNode.call_count)
 
 
 @unittest.skipUnless(os.name == "nt", "Windows native API")

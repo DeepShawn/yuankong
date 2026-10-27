@@ -40,9 +40,9 @@ class StorageActivity : FeatureActivity() {
         if (sourceChanged || origin == null || origin?.closed == true || runCatching { ConnectionManager.sessionClient() }.getOrNull() !== origin)
             throw java.io.IOException("电脑连接已改变，请重新打开文件管理；未向新电脑发送操作")
     }
-    private suspend fun storageCall(command: String, params: JSONObject = JSONObject()): JSONObject {
+    private suspend fun storageCall(command: String, params: JSONObject = JSONObject(), timeout: Long = 30_000): JSONObject {
         checkSource()
-        return pinnedCall(origin, command, params)
+        return pinnedCall(origin, command, params, timeout)
     }
     private fun sourceReady(): Boolean = try { checkSource(); true } catch(e: Exception) { status(e.message ?: "连接已改变",true); false }
 
@@ -135,7 +135,10 @@ class StorageActivity : FeatureActivity() {
             actions.addView(button(name, callback).apply { minWidth = 0; textSize = 12f }, LinearLayout.LayoutParams(0, -2, 1f))
         }
         body.addView(actions)
-        body.addView(button("脚本任务 · 运行记录") { if(sourceReady())ScriptJobsDialog.show(this,origin) })
+        val tools = LinearLayout(this)
+        tools.addView(button("脚本任务 · 运行记录") { if(sourceReady())ScriptJobsDialog.show(this,origin) }.apply { textSize=12f;minWidth=0 },LinearLayout.LayoutParams(0,-2,1f))
+        tools.addView(button("U盘弹出 / 断开") { usbActions() }.apply { textSize=12f;minWidth=0 },LinearLayout.LayoutParams(0,-2,1f))
+        body.addView(tools)
         search = EditText(this).apply {
             hint = "搜索当前目录"
             setSingleLine(true)
@@ -195,7 +198,7 @@ class StorageActivity : FeatureActivity() {
         disks.addView(box, LinearLayout.LayoutParams(dp(208), -2).apply { marginEnd = dp(10) })
     }
 
-    private fun load(target: String) {
+    private fun load(target: String, notice: String? = null) {
         loading?.cancel()
         loading = task {
             status("正在读取目录…")
@@ -207,7 +210,7 @@ class StorageActivity : FeatureActivity() {
             search.setText("")
             crumbs()
             filter()
-            status(if (entries.isEmpty()) "此目录为空" else "${entries.size} 项 · 长按目录可管理")
+            status(listOfNotNull(notice,if (entries.isEmpty()) "此目录为空" else "${entries.size} 项 · 长按目录可管理").joinToString(" · "))
         }
     }
 
@@ -322,10 +325,14 @@ class StorageActivity : FeatureActivity() {
 
     private fun newItem() {
         if (!sourceReady()) return
-        val names = listOf("文件夹","文本文档 (.txt)","批处理 (.bat)","VBScript (.vbs)","命令脚本 (.cmd)","PowerShell (.ps1)","Markdown (.md)","JSON (.json)","配置文件 (.ini)","其他文本文件")
+        val names = listOf("文件夹","文本文档 (.txt)","批处理 (.bat)","VBScript (.vbs)","命令脚本 (.cmd)","PowerShell (.ps1)","Markdown (.md)","JSON (.json)","配置文件 (.ini)","其他文本文件","隐藏系统占位文件 · 0–500 GB")
         val suffixes = listOf("","txt","bat","vbs","cmd","ps1","md","json","ini","")
         AlertDialog.Builder(this).setTitle("新建").setItems(names.toTypedArray()) { _, index ->
             if (index == 0) { renameOrCreate(null); return@setItems }
+            if (index == names.lastIndex) {
+                if(sourceReady())startActivity(android.content.Intent(this,PlaceholderFilesActivity::class.java).putExtra("directory",path))
+                return@setItems
+            }
             val client = origin
             val base = path
             val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18),0,dp(18),0) }
@@ -352,6 +359,53 @@ class StorageActivity : FeatureActivity() {
             } }
             dialog.show()
         }.show()
+    }
+
+    private fun usbActions() {
+        if(!sourceReady())return
+        AlertDialog.Builder(this).setTitle("U盘连接管理")
+            .setItems(arrayOf("安全弹出 U盘","强制断开 U盘（禁用设备）","恢复已断开的设备")) { _,index->
+                if(index==2)startActivity(android.content.Intent(this,DevicesActivity::class.java))
+                else ejectUsb(index==1)
+            }.setNegativeButton("取消",null).show()
+    }
+
+    private fun ejectUsb(force:Boolean=false) {
+        if (!sourceReady()) return
+        if (transfer?.isCompleted == false) { status("请先等待文件传输完成或取消传输",true);return }
+        val client=origin
+        task {
+            status("正在读取 USB 存储…")
+            val result=pinnedCall(client,"devices",timeout=45_000)
+            if (!result.optBoolean("admin")) { status("安全弹出需要管理员接收端，请在电脑 Start.exe 选择管理员启动 / 重启",true);return@task }
+            val list=result.getJSONArray("devices")
+            val items=(0 until list.length()).map { list.getJSONObject(it) }.filter { it.optString("kind")=="storage" && it.optBoolean("ejectable") && !it.optBoolean("protected") }
+            if (items.isEmpty()) { status("没有可安全弹出的 USB 存储设备");return@task }
+            val labels=items.map { device ->
+                val paths=device.optJSONArray("paths")
+                device.optString("name","U盘")+if(paths==null) "" else " · "+(0 until paths.length()).joinToString(" / ") { paths.optString(it) }
+            }
+            status("请选择要弹出的 U盘；同一设备的所有分区会一起弹出")
+            AlertDialog.Builder(this@StorageActivity).setTitle(if(force)"选择要强制断开的 U盘" else "安全弹出 U盘").setItems(labels.toTypedArray()) { _, index ->
+                val selected=items[index]
+                AlertDialog.Builder(this@StorageActivity).setTitle(if(force)"强制断开 ${labels[index]}？" else "安全弹出 ${labels[index]}？")
+                    .setMessage(if(force)"强制禁用整个 USB 存储设备，会中断所有分区访问。正在写入时可能丢失数据、损坏文件或文件系统。设备可能仍有供电；之后可在设备管理恢复启用。建议先使用安全弹出。" else "请保存文件并关闭使用此设备的程序，等待占位文件创建和文件传输结束。此设备的所有分区都会弹出；设备忙时在安卓返回错误，不强制卸载。")
+                    .setNegativeButton("取消",null).setPositiveButton(if(force)"仍然强制断开" else "弹出") { _,_->
+                        task {
+                            checkSource()
+                            if(transfer?.isCompleted==false)throw java.io.IOException("文件正在传输，请先完成或取消")
+                            val response=pinnedCall(client,"devices",JSONObject().put("action",if(force)"force_disconnect" else "eject").put("device_id",selected.getString("id")).apply {
+                                if(force)put("confirm_data_loss",true)
+                            },if(force)120_000 else 45_000)
+                            val storage=pinnedCall(client,"storage")
+                            disks.removeAllViews()
+                            val drives=storage.getJSONArray("drives")
+                            for(i in 0 until drives.length())disk(drives.getJSONObject(i))
+                            load(storage.optString("home"),response.optString("notice","设备已安全弹出"))
+                        }
+                    }.show()
+            }.setNegativeButton("取消",null).show()
+        }
     }
 
     private fun validName(name: String) = name.isNotBlank() && name !in listOf(".", "..") &&
@@ -404,6 +458,8 @@ class StorageActivity : FeatureActivity() {
             holder.icon.setImageResource(if (item.optBoolean("dir")) R.drawable.ic_folder else R.drawable.ic_file)
             val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(item.optLong("mtime") * 1000))
             holder.detail.text = (if (item.optBoolean("dir")) "文件夹" else FileTransfer.humanSize(item.optLong("size"))) + " · $date"
+            if(item.optBoolean("hidden"))holder.detail.append(" · 隐藏")
+            if(item.optBoolean("system"))holder.detail.append(" · 系统")
             holder.row.setOnClickListener { if (item.optBoolean("dir")) load(joinPath(path, item.getString("name"))) else fileActions(item, holder.more) }
             holder.row.setOnLongClickListener { fileActions(item, holder.more); true }
             holder.more.setOnClickListener { fileActions(item, holder.more) }
