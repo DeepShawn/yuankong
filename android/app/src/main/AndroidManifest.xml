@@ -46,6 +46,7 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/office_file_paths" />
         </provider>
         <activity android:name=".OfficeDocumentActivity" android:exported="false" />
+        <activity android:name=".FileSearchActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".StorageActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".PlaceholderFilesActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".DevicesActivity" android:exported="false" />

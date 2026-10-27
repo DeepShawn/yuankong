@@ -4,6 +4,7 @@ The helper never changes Windows privacy permissions or device indicators.
 Closing its stdin asks it to finalize, including when this receiver exits.
 """
 import atexit
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -24,6 +25,7 @@ class Recordings:
         self.lock = threading.RLock()
         self.jobs = {}
         self.loaded = False
+        self.blocked_resources=set()
         atexit.register(self.close)
 
     def _load(self):
@@ -118,6 +120,8 @@ class Recordings:
         for name, value, low, high in (("时长", seconds, 1, 3600), ("麦克风", microphone, -1, 1023), ("摄像头", camera, 0, 31)):
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(name + "参数无效；录制时长为 1–3600 秒")
+        if mode=="camera" and "camera" in self.blocked_resources or audio and "microphone" in self.blocked_resources:
+            raise ValueError("设备正在启停，请稍后重新开始录制")
         active = [j["data"] for j in self.jobs.values() if j["data"]["status"] in ACTIVE]
         if len(active) >= 3 or any(d["mode"] == mode or (d["audio"] and audio) for d in active):
             raise ValueError("录制资源正在使用，请先停止使用相同画面或麦克风的录制")
@@ -212,6 +216,24 @@ class Recordings:
                     job["data"]["error"] = "设备未及时停止，已终止采集；文件可能不完整"
                 proc.kill()
         threading.Thread(target=force_if_blocked, daemon=True).start()
+
+    @contextmanager
+    def device_guard(self,kind):
+        with self.lock:
+            self.blocked_resources.add(kind)
+            jobs=[j for j in self.jobs.values() if j["data"]["status"] in ACTIVE and
+                (j["data"]["mode"]=="camera" if kind=="camera" else j["data"].get("audio",False))]
+            for job in jobs:self._stop(job)
+        try:
+            deadline=time.monotonic()+18
+            for job in jobs:
+                process=job.get("process")
+                if process:
+                    try:process.wait(timeout=max(.01,deadline-time.monotonic()))
+                    except subprocess.TimeoutExpired:raise ValueError("录制仍未释放设备，未停用硬件，请稍后重试")
+            yield {"recordings":len(jobs)}
+        finally:
+            with self.lock:self.blocked_resources.discard(kind)
 
     def close(self):
         with self.lock:

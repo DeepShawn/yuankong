@@ -183,7 +183,8 @@ class ManagementUiTest {
                 val before=stub.requests.count { it.optString("cmd")=="scripts" && it.optString("action")=="run" }
                 actions.invoke(activity,JSONObject().put("name","test.$extension").put("dir",false),root)
                 val menu=org.robolectric.shadows.ShadowPopupMenu.getLatestPopupMenu()!!
-                val item=(0 until menu.menu.size()).map { menu.menu.getItem(it) }.single { it.title=="运行 ${extension.uppercase()}" }
+                val advanced=(0 until menu.menu.size()).map { menu.menu.getItem(it) }.single { it.title=="高级操作" }.subMenu!!
+                val item=(0 until advanced.size()).map { advanced.getItem(it) }.single { it.title=="运行 ${extension.uppercase()}" }
                 val shadow=org.robolectric.shadow.api.Shadow.extract<org.robolectric.shadows.ShadowPopupMenu>(menu)
                 shadow.onMenuItemClickListener!!.onMenuItemClick(item);shadowOf(Looper.getMainLooper()).idle()
                 assertEquals(before,stub.requests.count { it.optString("cmd")=="scripts" && it.optString("action")=="run" })

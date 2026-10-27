@@ -40,7 +40,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "2.7.0"
+VERSION = "2.8.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1130,6 +1130,7 @@ from privacy_devices import PrivacyDevices
 from placeholder_files import PlaceholderFiles
 from file_jobs import FileJobs, file_token
 from file_schedule import FileSchedule
+from file_search import FileSearch
 
 _capture_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 
@@ -1143,6 +1144,7 @@ def prepare_usb_disconnect(device):
     _placeholders.stop_for_device(device)
     _file_schedule.stop_for_device(device)
     _file_jobs.stop_for_device(device)
+    _file_search.stop_for_device(device)
 
 _remote = RemoteFeatures(RpcError, log, os.path.join(_capture_dir, "LanCmdCapture.exe"))
 _devices = DeviceManager(os.path.join(APP_DIR, "device-policy.json"), is_admin,
@@ -1154,16 +1156,28 @@ _app_locks = AppLocks(os.path.join(APP_DIR,"app-locks.json"),protected=(_capture
 _registry = RegistryEditor(os.path.join(APP_DIR,"registry-backups"))
 _tasks = TaskManager(protected=(_capture_dir,))
 _scripts = ScriptRunner()
-_privacy_devices = PrivacyDevices(is_admin)
+from contextlib import contextmanager, nullcontext
+
+@contextmanager
+def privacy_device_guard(item):
+    kind=item["kind"]
+    with _remote.camera_guard() if kind=="camera" else nullcontext({}) as shared:
+        with _recordings.device_guard(kind) as recorded:
+            yield dict(shared,**recorded)
+
+_privacy_devices = PrivacyDevices(is_admin,device_guard=privacy_device_guard)
 _placeholders = PlaceholderFiles()
 _file_jobs = FileJobs(os.path.join(APP_DIR,"file-jobs.json"),protected=(_capture_dir,APP_DIR,os.environ.get("SystemRoot")))
+
+
+_file_search = FileSearch(os.path.join(APP_DIR,"file-search"))
 
 
 def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures"])
-        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents"])
+        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1201,6 +1215,7 @@ HANDLERS = {
     "scripts": lambda q, st: _scripts.request(q,st,RpcError),
     "privacy_devices": lambda q, st: _privacy_devices.request(q,RpcError),
     "placeholders": lambda q, st: _placeholders.request(q,st,RpcError),
+    "file_search": lambda q,st: _file_search.request(q,st,RpcError),
     "file_jobs": lambda q, st: _file_jobs.request(q,st,RpcError),
     "message": _remote.message,
     "info": lambda q, st: cmd_info(),

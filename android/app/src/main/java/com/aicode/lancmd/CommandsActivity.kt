@@ -42,7 +42,7 @@ class CommandsActivity : FeatureActivity() {
         recipes = runCatching { JSONArray(prefs.getString("lists", "[]")) }.getOrElse { JSONArray() }
         if (recipes.length() == 0) recipes.put(newRecipe("命令列表 1"))
         val saved = panel()
-        selector = Spinner(this)
+        selector = styleSpinner(Spinner(this))
         saved.addView(selector)
         val manage = LinearLayout(this)
         listOf("新列表" to { nameDialog(false) }, "重命名" to { nameDialog(true) }, "删除列表" to { deleteRecipe() }).forEach { (name, run) ->
@@ -80,7 +80,7 @@ class CommandsActivity : FeatureActivity() {
 
     private fun nameDialog(rename: Boolean) {
         if (!rename && recipes.length() >= 30) { status("最多保存 30 个列表", true); return }
-        val input = EditText(this).apply { setSingleLine(); filters = arrayOf(InputFilter.LengthFilter(60)); if (rename) setText(recipe().optString("name")) }
+        val input = styleInput(EditText(this)).apply { setSingleLine(); filters = arrayOf(InputFilter.LengthFilter(60)); if (rename) setText(recipe().optString("name")) }
         val dialog = AlertDialog.Builder(this).setTitle(if (rename) "列表名称" else "新命令列表").setView(input)
             .setNegativeButton("取消", null).setPositiveButton("保存", null).create()
         dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -126,19 +126,19 @@ class CommandsActivity : FeatureActivity() {
         if (index == null && items.length() >= 50) { status("每个列表最多 50 条命令", true); return }
         val existing = index?.let { items.getJSONObject(it) }
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), 0) }
-        val shell = Spinner(this).apply {
+        val shell = styleSpinner(Spinner(this)).apply {
             adapter = ArrayAdapter(this@CommandsActivity, android.R.layout.simple_spinner_dropdown_item, listOf("CMD", "PowerShell"))
             setSelection(if ((existing?.optString("shell") ?: seedShell) == "powershell") 1 else 0)
         }
         box.addView(shell)
-        val line = EditText(this).apply {
+        val line = styleInput(EditText(this)).apply {
             hint = "输入命令"; minLines = 3; maxLines = 6; setText(existing?.optString("line") ?: seed)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             filters = arrayOf(InputFilter.LengthFilter(8192))
         }
         box.addView(line)
         box.addView(label("等待秒数 · 第一条从启动计时，后续从上一条结束计时", 12f, R.color.dim))
-        val seconds = EditText(this).apply {
+        val seconds = styleInput(EditText(this)).apply {
             inputType = InputType.TYPE_CLASS_NUMBER; setSingleLine(); setText((existing?.optInt("delay") ?: 0).toString())
             filters = arrayOf(InputFilter.LengthFilter(5))
         }

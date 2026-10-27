@@ -6,6 +6,8 @@ import subprocess
 import threading
 import re
 import time
+import uuid
+from contextlib import nullcontext
 from touch_guard import TouchDevices
 from system_controls import endpoint_audio
 
@@ -70,14 +72,71 @@ class PrivacyHardware(TouchDevices):
         # Explicit persistent device disable, unlike the temporary touch guard.
         result=self.cm.CM_Enable_DevNode(node,0) if enabled else self.cm.CM_Disable_DevNode(node,CM_DISABLE_UI_NOT_OK|CM_DISABLE_PERSIST)
         if result:
-            if result==0x17:raise RuntimeError("驱动拒绝停用设备 (0x17 / CR_REMOVE_VETOED)。请先停止摄像头共享、录制并关闭占用软件后重试；驱动仍拒绝时本次未禁用，不能通过禁用父控制器替代")
+            if result in (0x17,0x28,0x13):
+                try:
+                    return self.property_change(instance,enabled)
+                except (OSError,ValueError,RuntimeError) as exc:
+                    name="CR_REMOVE_VETOED" if result==0x17 else "设备驱动拒绝"
+                    raise RuntimeError("常规接口被驱动拒绝 (0x%X / %s)，设备属性变更接口也未完成：%s。请关闭其他应用的设备占用后重试；未报告停用成功"%(result,name,exc))
             if result==0x33:raise RuntimeError("设备启停权限不足 (0x33)，请使用管理员接收端")
-            if result==0x28:raise RuntimeError("此设备驱动不支持停用 (0x28)，本次未更改")
             raise RuntimeError("设备驱动拒绝启停 (0x%X)，请刷新检查状态和驱动支持"%result)
+        return {"method":"cfgmgr32","reboot_required":False}
+
+    def property_change(self,instance,enabled):
+        """Device Manager's property-change path, for the exact selected device only."""
+        from ctypes import wintypes as w
+        if not isinstance(instance,str) or not instance or len(instance)>512 or "\0" in instance:
+            raise ValueError("设备编号无效")
+        class DeviceInfo(ctypes.Structure):
+            _fields_=[("cbSize",w.DWORD),("ClassGuid",w.BYTE*16),("DevInst",w.DWORD),("Reserved",ctypes.c_size_t)]
+        class InstallParams(ctypes.Structure):
+            _fields_=[("cbSize",w.DWORD),("Flags",w.DWORD),("FlagsEx",w.DWORD),("hwndParent",w.HWND),
+                ("InstallMsgHandler",ctypes.c_void_p),("InstallMsgHandlerContext",ctypes.c_void_p),
+                ("FileQueue",ctypes.c_void_p),("ClassInstallReserved",ctypes.c_size_t),("Reserved",w.DWORD),("DriverPath",w.WCHAR*260)]
+        class Header(ctypes.Structure):
+            _fields_=[("cbSize",w.DWORD),("InstallFunction",w.DWORD)]
+        class Change(ctypes.Structure):
+            _fields_=[("ClassInstallHeader",Header),("StateChange",w.DWORD),("Scope",w.DWORD),("HwProfile",w.DWORD)]
+        api=ctypes.WinDLL("setupapi",use_last_error=True)
+        api.SetupDiCreateDeviceInfoList.argtypes=[ctypes.c_void_p,w.HWND];api.SetupDiCreateDeviceInfoList.restype=w.HANDLE
+        signatures={
+            "SetupDiOpenDeviceInfoW":[w.HANDLE,w.LPCWSTR,w.HWND,w.DWORD,ctypes.POINTER(DeviceInfo)],
+            "SetupDiGetDeviceInstallParamsW":[w.HANDLE,ctypes.POINTER(DeviceInfo),ctypes.POINTER(InstallParams)],
+            "SetupDiSetDeviceInstallParamsW":[w.HANDLE,ctypes.POINTER(DeviceInfo),ctypes.POINTER(InstallParams)],
+            "SetupDiSetClassInstallParamsW":[w.HANDLE,ctypes.POINTER(DeviceInfo),ctypes.POINTER(Change),w.DWORD],
+            "SetupDiCallClassInstaller":[w.DWORD,w.HANDLE,ctypes.POINTER(DeviceInfo)],
+            "SetupDiDestroyDeviceInfoList":[w.HANDLE]}
+        for name,args in signatures.items():
+            function=getattr(api,name);function.argtypes=args;function.restype=w.BOOL
+        handle=api.SetupDiCreateDeviceInfoList(None,None)
+        if not handle or handle==ctypes.c_void_p(-1).value:raise ctypes.WinError(ctypes.get_last_error())
+        def checked(value):
+            if not value:raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            info=DeviceInfo();info.cbSize=ctypes.sizeof(info)
+            checked(api.SetupDiOpenDeviceInfoW(handle,instance,None,0,ctypes.byref(info)))
+            device_class=str(uuid.UUID(bytes_le=bytes(info.ClassGuid)))
+            allowed={"ca3e7ab9-b4c3-4ae6-8251-579ef933890f","6bdd1fc6-810f-11d0-bec7-08002be2092f","c166523c-fe0c-4a94-a586-f1a80cfbbf3e"}
+            if device_class not in allowed or device_class=="c166523c-fe0c-4a94-a586-f1a80cfbbf3e" and capture_endpoint(instance) is None:
+                raise ValueError("设备类别已变化，未操作；不会停用父控制器或扬声器")
+            params=InstallParams();params.cbSize=ctypes.sizeof(params)
+            checked(api.SetupDiGetDeviceInstallParamsW(handle,ctypes.byref(info),ctypes.byref(params)))
+            params.Flags|=0x00800000  # DI_QUIETINSTALL: no installer-generated dialogs.
+            params.hwndParent=None
+            checked(api.SetupDiSetDeviceInstallParamsW(handle,ctypes.byref(info),ctypes.byref(params)))
+            change=Change();change.ClassInstallHeader=Header(ctypes.sizeof(Header),0x12)
+            change.StateChange=1 if enabled else 2;change.Scope=1  # DICS_ENABLE/DISABLE, GLOBAL.
+            checked(api.SetupDiSetClassInstallParamsW(handle,ctypes.byref(info),ctypes.byref(change),ctypes.sizeof(change)))
+            checked(api.SetupDiCallClassInstaller(0x12,handle,ctypes.byref(info)))
+            checked(api.SetupDiGetDeviceInstallParamsW(handle,ctypes.byref(info),ctypes.byref(params)))
+            return {"method":"setupapi","reboot_required":bool(params.Flags&0x180)}
+        finally:
+            api.SetupDiDestroyDeviceInfoList(handle)
 
 
 class PrivacyDevices:
-    def __init__(self,admin,backend=None,audio=endpoint_audio):self.admin=admin;self.backend=backend;self.audio=audio;self.lock=threading.RLock()
+    def __init__(self,admin,backend=None,audio=endpoint_audio,device_guard=None):
+        self.admin=admin;self.backend=backend;self.audio=audio;self.lock=threading.RLock();self.device_guard=device_guard
     @staticmethod
     def _endpoint(item):
         endpoint=item.get("endpoint")
@@ -112,15 +171,21 @@ class PrivacyDevices:
                     if item.get("error") or item.get("problem") not in (0,22) or not isinstance(item.get("enabled"),bool):
                         raise ValueError("设备状态异常或未知，未执行启停，请刷新检查驱动")
                     if item.get("enabled")==enabled and (enabled or item.get("problem")==22):return {"unchanged":True}
-                    self.backend.set_enabled(item["id"],enabled)
-                    deadline=time.monotonic()+1.5
-                    while True:
-                        state=self.backend.status(item["id"])
-                        confirmed=state.get("enabled") is enabled and state.get("problem")== (0 if enabled else 22)
-                        if confirmed:break
-                        if time.monotonic()>=deadline:raise ValueError("Windows 已接受请求，但状态尚未完成切换，请刷新；驱动可能需要重新插拔或重启")
-                        time.sleep(.1)
-                    return dict(state,changed=True)
+                    with self.device_guard(item) if self.device_guard and not enabled else nullcontext({}) as released:
+                        result=self.backend.set_enabled(item["id"],enabled)
+                        metadata=result if isinstance(result,dict) else {}
+                        deadline=time.monotonic()+3
+                        while True:
+                            state=self.backend.status(item["id"])
+                            confirmed=state.get("enabled") is enabled and state.get("problem")== (0 if enabled else 22)
+                            if confirmed:break
+                            if time.monotonic()>=deadline:
+                                if metadata.get("reboot_required"):
+                                    return dict(state,changed=False,pending_reboot=True,notice="驱动要求重启才能完成启停；当前状态尚未改变，请手动重启后刷新")
+                                raise ValueError("Windows 已接受请求，但未确认设备切换；请刷新检查，驱动可能需要重新插拔或重启")
+                            time.sleep(.1)
+                        return dict(state,changed=True,method=metadata.get("method","driver"),released=released or {},
+                            notice="已确认设备"+("启用" if enabled else "停用")+("；驱动另要求重启" if metadata.get("reboot_required") else ""))
                 if action=="mute":
                     if item["kind"]!="microphone" or not item.get("enabled"):raise ValueError("请先启用目标麦克风")
                     muted=q.get("muted")

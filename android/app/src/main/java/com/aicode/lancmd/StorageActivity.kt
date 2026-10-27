@@ -53,6 +53,8 @@ class StorageActivity : FeatureActivity() {
     private fun sourceReady(): Boolean = try { checkSource(); true } catch(e: Exception) { status(e.message ?: "连接已改变",true); false }
 
     private var path = ""
+    private val highlightName by lazy { intent.getStringExtra("highlight").orEmpty() }
+    private val highlightFolder by lazy { intent.getStringExtra("path").orEmpty() }
     private var pendingDownload = ""
     private var uploadTarget = ""
     private var entries = listOf<JSONObject>()
@@ -283,6 +285,11 @@ class StorageActivity : FeatureActivity() {
             search.setText("")
             crumbs()
             filter()
+            if(path==highlightFolder && highlightName.isNotBlank()) {
+                val position=visible.indexOfFirst { it.optString("name")==highlightName }
+                if(position>=0)list.post { list.scrollToPosition(position) }
+                if(lastResult==null && notice==null)lastResult=if(position>=0)"已定位：$highlightName" else "所选文件可能已移动或删除，请更新搜索索引"
+            }
             if(notice!=null)lastResult=notice
             status(lastResult ?: if(entries.isEmpty())"此目录为空" else "${entries.size} 项 · 长按多选，⋮ 单项操作",lastError)
         }
@@ -317,22 +324,29 @@ class StorageActivity : FeatureActivity() {
         if(operationsBusy){status("文件操作进行中，请等待完成或取消",true);return}
         val menu = PopupMenu(this, anchor)
         val client = origin
-        menu.menu.add("在电脑打开")
-        if (!item.optBoolean("dir")) menu.menu.add("预览")
+        val open=menu.menu.addSubMenu("打开与预览")
+        open.add("在电脑打开")
+        if(!item.optBoolean("dir"))open.add("预览")
         val office=OfficeDocumentActivity.supports(item.optString("name"))
-        if (!item.optBoolean("dir")) menu.menu.add(if(office)"手机 WPS 预览 / 编辑" else "编辑文本")
-        if(office)menu.menu.add("电脑 WPS 打开")
-        menu.menu.add("在当前窗口下方打开")
-        menu.menu.add("修改日期")
+        if(office)open.add("电脑 WPS 打开")
+        open.add("在当前窗口下方打开")
+        val edit=menu.menu.addSubMenu("编辑与属性")
+        if(!item.optBoolean("dir"))edit.add(if(office)"手机 WPS 预览 / 编辑" else "编辑文本")
+        edit.add("最后修改日期");edit.add("文件属性")
+        val organize=menu.menu.addSubMenu("传输与整理")
+        if(!item.optBoolean("dir"))organize.add("下载到手机")
+        organize.add("重命名")
+        if(!item.optBoolean("dir") && item.optString("name").endsWith(".zip",true))organize.add("解压 ZIP")
         val scriptType=item.optString("name").substringAfterLast('.',"").lowercase()
-        if (!item.optBoolean("dir") && scriptType in listOf("bat","cmd","vbs")) menu.menu.add("运行 ${scriptType.uppercase()}")
-        if (!item.optBoolean("dir") && item.optString("name").endsWith(".exe",true)) menu.menu.add("应用锁")
-        if (!item.optBoolean("dir") && item.optString("name").endsWith(".zip", true)) menu.menu.add("解压 ZIP")
-        if (!item.optBoolean("dir")) menu.menu.add("下载到手机")
-        menu.menu.add("重命名")
+        if(!item.optBoolean("dir") && (scriptType in listOf("bat","cmd","vbs") || scriptType=="exe")) {
+            val advanced=menu.menu.addSubMenu("高级操作")
+            if(scriptType in listOf("bat","cmd","vbs"))advanced.add("运行 ${scriptType.uppercase()}")
+            if(scriptType=="exe")advanced.add("应用锁")
+        }
         menu.menu.add("删除")
         val selected = joinPath(path, item.getString("name"))
         menu.setOnMenuItemClickListener {
+            if(it.hasSubMenu())return@setOnMenuItemClickListener false
             when (it.title.toString()) {
                 "在电脑打开" -> AlertDialog.Builder(this).setTitle("在电脑打开？")
                     .setMessage("$selected\n\n应用程序会在电脑启动，文件将使用电脑默认应用打开。")
@@ -346,7 +360,10 @@ class StorageActivity : FeatureActivity() {
                     val response=FileDelay.call(this@StorageActivity,client,"files",JSONObject().put("action","open").put("path",selected).put("application",if(it.title=="电脑 WPS 打开")"wps" else "default").put("background",it.title=="在当前窗口下方打开")) { status(it) }
                     status(response.optString("notice","已向电脑发送打开请求"))
                 }
-                "修改日期" -> modifyDate(item,selected)
+                "最后修改日期" -> modifyDate(item,selected)
+                "文件属性" -> AlertDialog.Builder(this).setTitle(item.optString("name")).setMessage(
+                    "$selected\n\n${if(item.optBoolean("dir"))"文件夹" else FileTransfer.humanSize(item.optLong("size"))}\n最后修改：${DateFormat.getDateTimeInstance().format(Date(item.optLong("mtime")*1000))}\n隐藏：${item.optBoolean("hidden")} · 系统：${item.optBoolean("system")}")
+                    .setPositiveButton("修改最后修改日期") { _,_->modifyDate(item,selected) }.setNegativeButton("关闭",null).show()
                 "编辑文本" -> task { checkSource(); startActivity(android.content.Intent(this@StorageActivity,TextEditorActivity::class.java).putExtra("path",selected)) }
                 "运行 BAT","运行 CMD","运行 VBS" -> ScriptJobsDialog.show(this,client,selected)
                 "应用锁" -> task { checkSource(); startActivity(android.content.Intent(this@StorageActivity,AppLocksActivity::class.java).putExtra("path",selected)) }
@@ -579,19 +596,16 @@ class StorageActivity : FeatureActivity() {
     private fun newItem() {
         if (!sourceReady()) return
         if(operationsBusy){status("请先等待或取消文件操作",true);return}
-        val names = listOf("文件夹","文本文档 (.txt)","批处理 (.bat)","VBScript (.vbs)","命令脚本 (.cmd)","PowerShell (.ps1)","Markdown (.md)","JSON (.json)","配置文件 (.ini)","其他文本文件","隐藏系统占位文件 · 0–500 GB")
-        val suffixes = listOf("","txt","bat","vbs","cmd","ps1","md","json","ini","")
-        AlertDialog.Builder(this).setTitle("新建").setItems(names.toTypedArray()) { _, index ->
-            if (index == 0) { renameOrCreate(null); return@setItems }
-            if (index == names.lastIndex) {
-                openPlaceholder()
-                return@setItems
-            }
+        AlertDialog.Builder(this).setTitle("新建").setItems(arrayOf("文件夹","文本与配置文件","脚本文件")) { _,kind->
+            if(kind==0){renameOrCreate(null);return@setItems}
+            val choices=if(kind==1)listOf("文本文档 (.txt)","Markdown (.md)","JSON (.json)","配置文件 (.ini)","其他文本文件") else listOf("批处理 (.bat)","VBScript (.vbs)","命令脚本 (.cmd)","PowerShell (.ps1)")
+            val suffixes=if(kind==1)listOf("txt","md","json","ini","") else listOf("bat","vbs","cmd","ps1")
+            AlertDialog.Builder(this).setTitle(if(kind==1)"新建文本文件" else "新建脚本文件").setItems(choices.toTypedArray()) { _,index->
             val client = origin
             val base = path
             val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18),0,dp(18),0) }
-            val name = EditText(this).apply { setSingleLine(); setText(if (suffixes[index].isEmpty()) "新文件.txt" else "新建文件.${suffixes[index]}"); contentDescription = "新文件名称" }
-            val format = android.widget.Spinner(this).apply {
+            val name = styleInput(EditText(this)).apply { setSingleLine(); setText(if (suffixes[index].isEmpty()) "新文件.txt" else "新建文件.${suffixes[index]}"); contentDescription = "新文件名称" }
+            val format = styleSpinner(android.widget.Spinner(this)).apply {
                 adapter = android.widget.ArrayAdapter(this@StorageActivity,android.R.layout.simple_spinner_dropdown_item,TextEditorActivity.ENCODING_NAMES)
                 setSelection(when(suffixes[index]) { "bat","cmd" -> 2; "vbs" -> 4; else -> 0 })
             }
@@ -612,7 +626,8 @@ class StorageActivity : FeatureActivity() {
                 } finally { dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true } }
             } }
             dialog.show()
-        }.show()
+            }.setNegativeButton("取消",null).show()
+        }.setNegativeButton("取消",null).show()
     }
 
     private fun openOffice(selected:String,version:String) {
@@ -621,8 +636,24 @@ class StorageActivity : FeatureActivity() {
     private fun modifyDate(item:JSONObject,selected:String) {
         val format=java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",java.util.Locale.getDefault()).apply { isLenient=false }
         val value=styleInput(EditText(this).apply { setSingleLine();setText(format.format(Date(item.optLong("mtime")*1000)));contentDescription="文件修改日期" })
-        val dialog=AlertDialog.Builder(this).setTitle("修改文件日期").setMessage("电脑文件的最后修改时间，按手机本地时区输入。格式 yyyy-MM-dd HH:mm:ss。操作延迟 ${FileDelay.seconds(this)} 秒。")
-            .setView(value).setNegativeButton("取消",null).setPositiveButton("保存",null).create()
+        value.addTextChangedListener(object:TextWatcher {
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
+            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){value.error=null}
+            override fun afterTextChanged(s:Editable?){}
+        })
+        val editor=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(18),0,dp(18),0);addView(value) }
+        val choices=LinearLayout(this)
+        fun calendar()=java.util.Calendar.getInstance().apply { time=runCatching { format.parse(value.text.toString()) }.getOrNull() ?: Date(item.optLong("mtime")*1000) }
+        choices.addView(button("选择日期") {
+            val current=calendar()
+            android.app.DatePickerDialog(this,{_,year,month,day->current.set(year,month,day);value.setText(format.format(current.time))},current.get(java.util.Calendar.YEAR),current.get(java.util.Calendar.MONTH),current.get(java.util.Calendar.DAY_OF_MONTH)).apply { datePicker.minDate=0;datePicker.maxDate=4_102_444_800_000L }.show()
+        },LinearLayout.LayoutParams(0,-2,1f))
+        choices.addView(button("选择时间") {
+            val current=calendar()
+            android.app.TimePickerDialog(this,{_,hour,minute->current.set(java.util.Calendar.HOUR_OF_DAY,hour);current.set(java.util.Calendar.MINUTE,minute);value.setText(format.format(current.time))},current.get(java.util.Calendar.HOUR_OF_DAY),current.get(java.util.Calendar.MINUTE),android.text.format.DateFormat.is24HourFormat(this)).show()
+        },LinearLayout.LayoutParams(0,-2,1f));editor.addView(choices)
+        val dialog=AlertDialog.Builder(this).setTitle("最后修改日期").setMessage("电脑文件的最后修改时间，按手机本地时区输入。格式 yyyy-MM-dd HH:mm:ss。操作延迟 ${FileDelay.seconds(this)} 秒。")
+            .setView(editor).setNegativeButton("取消",null).setPositiveButton("保存",null).create()
         dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val date=runCatching { val pos=java.text.ParsePosition(0);val d=format.parse(value.text.toString(),pos);check(pos.index==value.length());d }.getOrNull()
             if(date==null || date.time !in 0L..4_102_444_800_000L){value.error="请输入 1970–2100 年的有效日期";return@setOnClickListener}
@@ -756,6 +787,7 @@ class StorageActivity : FeatureActivity() {
         }
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val item = visible[position]
+            holder.row.backgroundTintList=android.content.res.ColorStateList.valueOf(color(if(path==highlightFolder && item.optString("name")==highlightName)R.color.accent_dim else R.color.surface_variant))
             holder.name.text = item.optString("name")
             holder.icon.setImageResource(if (item.optBoolean("dir")) R.drawable.ic_folder else R.drawable.ic_file)
             val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(item.optLong("mtime") * 1000))

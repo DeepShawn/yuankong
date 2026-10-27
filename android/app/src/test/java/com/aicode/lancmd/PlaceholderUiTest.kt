@@ -100,7 +100,7 @@ class PlaceholderUiTest {
             stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get();val root=activity.window.decorView
             waitFor { all(root).filterIsInstance<TextView>().any { it.text=="reserve.dat" } }
             assertTrue(all(root).filterIsInstance<TextView>().any { it.text.contains("隐藏") && it.text.contains("系统") })
-            buttons(root).single { it.text=="新建" }.performClick();shadowOf(Looper.getMainLooper()).idle();choose(10)
+            buttons(root).single { it.text=="占位文件" }.performClick();shadowOf(Looper.getMainLooper()).idle()
             val opened=shadowOf(activity).nextStartedActivity
             assertEquals(PlaceholderFilesActivity::class.java.name,opened.component!!.className)
             assertEquals("E:\\",opened.getStringExtra("directory"))
