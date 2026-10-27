@@ -28,9 +28,11 @@ class TouchDevices:
     def inventory():
         script = r"""
 $ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
-$ids = @(Get-PnpDevice -PresentOnly -Class HIDClass | Where-Object { $_.Status -eq 'OK' } | ForEach-Object {
+$ids = @(Get-PnpDevice -PresentOnly | Where-Object { $_.Class -eq 'HIDClass' } | ForEach-Object {
   $compatible = @(Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_CompatibleIds' -ErrorAction SilentlyContinue).Data
-  if ($compatible -contains 'HID_DEVICE_UP:000D_U:0004') { [string]$_.InstanceId }
+  $hardware = @(Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_HardwareIds' -ErrorAction SilentlyContinue).Data
+  $all = @($compatible) + @($hardware)
+  if ($all -contains 'HID_DEVICE_UP:000D_U:0004' -or $all -contains 'HID_DEVICE_SYSTEM_TOUCH') { [string]$_.InstanceId }
 })
 ConvertTo-Json -InputObject @($ids) -Compress
 """
@@ -42,9 +44,20 @@ ConvertTo-Json -InputObject @($ids) -Compress
         if result.returncode:
             raise RuntimeError("无法识别触屏设备，请检查管理员权限与 HID 驱动")
         ids = json.loads(result.stdout.decode("utf-8-sig"))
-        if not isinstance(ids, list) or not ids:
-            raise RuntimeError("检测到触屏，但未找到可安全暂停的标准 HID 触屏；未进入输入暂停")
+        if not isinstance(ids, list) or any(not isinstance(i,str) or not i or len(i)>512 or "\0" in i for i in ids):
+            raise RuntimeError("触屏设备列表格式无效，未进入输入暂停")
         return ids
+
+    @staticmethod
+    def touch_expected():
+        user=ctypes.WinDLL("user32")
+        return bool(user.GetSystemMetrics(94) & 3 or user.GetSystemMetrics(95)>0)
+
+    def status(self, instance):
+        status,problem=self.w.ULONG(),self.w.ULONG()
+        result=self.cm.CM_Get_DevNode_Status(ctypes.byref(status),ctypes.byref(problem),self.node(instance),0)
+        if result:raise RuntimeError("读取触屏状态失败 (0x%X)，未确认锁定"%result)
+        return bool(status.value&8),problem.value
 
     def node(self, instance):
         node = self.w.DWORD()
@@ -54,22 +67,39 @@ ConvertTo-Json -InputObject @($ids) -Compress
         return node
 
     def pause(self, stopping):
-        for instance in self.inventory():
+        devices=self.inventory()
+        self.detected=len(devices);self.already_disabled=0
+        self.originally_disabled=[]
+        if not devices and self.touch_expected():
+            raise RuntimeError("Windows 报告触控设备，但无法识别标准 HID 触屏；未降级为仅暂停键鼠，请检查驱动")
+        for instance in devices:
             if stopping.is_set():
                 raise RuntimeError("输入暂停已取消")
             node = self.node(instance)
-            status, problem = self.w.ULONG(), self.w.ULONG()
-            result = self.cm.CM_Get_DevNode_Status(ctypes.byref(status), ctypes.byref(problem), node, 0)
-            if result or not status.value & 8:  # DN_STARTED; leave pre-disabled devices untouched.
+            active,problem=self.status(instance)
+            if not active and problem==22:
+                self.already_disabled+=1
+                self.originally_disabled.append(instance)
                 continue
+            if not active or problem:
+                raise RuntimeError("触屏状态异常，未确认锁定；请检查管理员权限和驱动")
             # CM_DISABLE_UI_NOT_OK; deliberately omit CM_DISABLE_PERSIST.
             result = self.cm.CM_Disable_DevNode(node, 4)
             if result:
                 raise RuntimeError("Windows 拒绝暂停触屏，需要管理员权限 (0x%X)" % result)
             self.disabled.append(instance)
-        if not self.disabled:
-            raise RuntimeError("没有可暂停的运行中触屏设备")
+            deadline=time.monotonic()+2
+            while True:
+                if self.status(instance)==(False,22):break
+                if time.monotonic()>=deadline:
+                    raise RuntimeError("驱动未确认触屏已禁用，已请求恢复，未报告锁定成功")
+                time.sleep(.1)
         return len(self.disabled)
+
+    def verify(self):
+        for instance in self.disabled+getattr(self,"originally_disabled",[]):
+            if self.status(instance)!=(False,22):
+                raise RuntimeError("触屏状态已被外部更改，正在解除本机输入暂停")
 
     def restore(self):
         errors = []
@@ -79,6 +109,11 @@ ConvertTo-Json -InputObject @($ids) -Compress
                 result = self.cm.CM_Enable_DevNode(node, 0)
                 if result:
                     raise RuntimeError("触屏恢复失败 (0x%X)" % result)
+                deadline=time.monotonic()+2
+                while True:
+                    if self.status(instance)==(True,0):break
+                    if time.monotonic()>=deadline:raise RuntimeError("触屏驱动尚未确认恢复，恢复进程将重试")
+                    time.sleep(.1)
                 self.disabled.remove(instance)
             except Exception as exc:
                 errors.append(str(exc))
@@ -104,10 +139,12 @@ def recovery_worker(devices, input_stream, output_stream, watchdog=6):
         if stop.is_set():
             raise RuntimeError("原接收端已结束，恢复触屏")
         seen[0] = time.monotonic()
-        output_stream.write(json.dumps({"ok": True, "count": count}) + "\n"); output_stream.flush()
+        output_stream.write(json.dumps({"ok": True, "count": count,"detected":getattr(devices,"detected",count),
+                                      "already_disabled":getattr(devices,"already_disabled",0)}) + "\n"); output_stream.flush()
         while not stop.wait(0.2):
             if time.monotonic() - seen[0] > watchdog:
                 break
+            if hasattr(devices,"verify"):devices.verify()
     except Exception as exc:
         output_stream.write(json.dumps({"ok": False, "error": str(exc)}) + "\n"); output_stream.flush()
     finally:
@@ -136,15 +173,20 @@ def worker_main():
 class TouchPause:
     def __init__(self):
         self.process = None
+        self.recovering = None
         self.count = 0
+        self.detected = 0
+        self.already_disabled = 0
         self.last_ping = 0
 
     def start(self):
+        if self.recovering is not None:
+            if self.recovering.poll() is None:
+                raise RuntimeError("上次触屏暂停仍在恢复，请稍后重试；未重新锁定输入")
+            self.recovering.stdout.close()
+            self.recovering=None
         self.stop()
-        user = ctypes.WinDLL("user32")
-        if not user.GetSystemMetrics(94) & 3:  # SM_DIGITIZER, integrated/external touch.
-            self.count = 0
-            return
+        # Probe HID even when desktop metrics are zero (external touchscreens).
         if getattr(sys, "frozen", False):
             command = [sys.executable, "--touch-worker"]
         else:
@@ -166,6 +208,12 @@ class TouchPause:
             if not result.get("ok"):
                 raise RuntimeError(result.get("error", "触屏暂停失败"))
             self.count = result["count"]
+            self.detected=result.get("detected",self.count)
+            self.already_disabled=result.get("already_disabled",0)
+            if not self.count and not self.detected:
+                detected,already=self.detected,self.already_disabled
+                self.stop();self.detected=detected;self.already_disabled=already
+                return
             self.ping()
         except Exception:
             self.stop(); raise
@@ -174,7 +222,13 @@ class TouchPause:
         if self.process is None:
             return
         if self.process.poll() is not None:
-            raise RuntimeError("触屏恢复进程已结束，将解除本机输入暂停")
+            detail="触屏恢复进程已结束，将解除本机输入暂停"
+            try:
+                for line in self.process.stdout:
+                    result=json.loads(line)
+                    if result.get("error"):detail=str(result["error"])
+            except (OSError,ValueError):pass
+            raise RuntimeError(detail)
         if time.monotonic() - self.last_ping >= 0.5:
             self.process.stdin.write('{"action":"ping"}\n'); self.process.stdin.flush()
             self.last_ping = time.monotonic()
@@ -182,6 +236,8 @@ class TouchPause:
     def stop(self):
         process, self.process = self.process, None
         self.count = 0
+        self.detected = 0
+        self.already_disabled = 0
         if process is None:
             return
         try:
@@ -194,6 +250,7 @@ class TouchPause:
             try:
                 code = process.wait(timeout=12)
             except subprocess.TimeoutExpired:
+                self.recovering=process
                 raise RuntimeError("触屏驱动仍在恢复，独立恢复进程会继续重试；请勿结束该进程")
             if code:
                 raise RuntimeError("触屏驱动恢复失败，请重新连接设备或重启 Windows")

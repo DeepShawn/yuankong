@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import queue
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -19,7 +20,7 @@ import lan_command_agent as agent
 from file_actions import file_request, extract_zip, preview
 from desktop_apps import apps_request, DesktopApps
 from command_queue import CommandQueue
-from touch_guard import recovery_worker, TouchDevices
+from touch_guard import recovery_worker, TouchDevices, TouchPause
 from input_guard import NativeInputGuard
 
 
@@ -197,11 +198,66 @@ class TouchRecoveryTest(unittest.TestCase):
         devices.w=SimpleNamespace(DWORD=ctypes.c_ulong,ULONG=ctypes.c_ulong)
         devices.disabled=[]; devices.inventory=lambda:["active","already-disabled"]
         devices.node=lambda instance:1 if instance=="active" else 2
-        def status(status,problem,node,flags): status._obj.value=8 if node==1 else 0; return 0
-        devices.cm=SimpleNamespace(CM_Get_DevNode_Status=status,CM_Disable_DevNode=mock.Mock(return_value=0),CM_Enable_DevNode=mock.Mock(return_value=0))
+        states={1:(True,0),2:(False,22)}
+        def status(status,problem,node,flags):
+            status._obj.value=8 if states[node][0] else 0
+            problem._obj.value=states[node][1]
+            return 0
+        devices.cm=SimpleNamespace(CM_Get_DevNode_Status=status,
+            CM_Disable_DevNode=mock.Mock(side_effect=lambda node,flags:states.update({node:(False,22)}) or 0),
+            CM_Enable_DevNode=mock.Mock(side_effect=lambda node,flags:states.update({node:(True,0)}) or 0))
         self.assertEqual(1,devices.pause(threading.Event()))
         devices.cm.CM_Disable_DevNode.assert_called_once_with(1,4)
         self.assertEqual([],devices.restore()); devices.cm.CM_Enable_DevNode.assert_called_once_with(1,0)
+
+    def test_touch_metrics_do_not_override_recognized_devices_and_missing_touch_fails_closed(self):
+        devices=TouchDevices.__new__(TouchDevices)
+        devices.disabled=[];devices.inventory=lambda:[]
+        devices.touch_expected=lambda:False
+        self.assertEqual(0,devices.pause(threading.Event()))
+        devices.touch_expected=lambda:True
+        with self.assertRaisesRegex(RuntimeError,"未降级"):
+            devices.pause(threading.Event())
+
+    def test_unconfirmed_touch_disable_is_tracked_for_recovery(self):
+        devices=TouchDevices.__new__(TouchDevices)
+        devices.disabled=[];devices.inventory=lambda:["touch"];devices.node=lambda instance:17
+        devices.status=lambda instance:(True,0)
+        devices.cm=SimpleNamespace(CM_Disable_DevNode=mock.Mock(return_value=0))
+        with mock.patch("touch_guard.time.monotonic",side_effect=[0,3]):
+            with self.assertRaisesRegex(RuntimeError,"未报告锁定成功"):
+                devices.pause(threading.Event())
+        self.assertEqual(["touch"],devices.disabled)
+
+    def test_external_touch_enable_ends_worker_and_restores_all_owned_devices(self):
+        stream=Pipe();output=io.StringIO();restored=threading.Event()
+        devices=SimpleNamespace(pause=lambda stop:1,verify=mock.Mock(side_effect=RuntimeError("外部变更")),
+            restore=lambda:restored.set() or [])
+        thread=threading.Thread(target=recovery_worker,args=(devices,stream,output,2),daemon=True);thread.start()
+        self.assertTrue(restored.wait(2));stream.lines.put(None);thread.join(2)
+        self.assertEqual("外部变更",json.loads(output.getvalue().splitlines()[-1])["error"])
+
+    def test_parent_probes_hid_even_when_desktop_touch_metrics_are_zero(self):
+        process=SimpleNamespace(stdin=mock.Mock(),stdout=io.StringIO('{"ok":true,"count":1,"detected":1}\n'))
+        done=[False]
+        process.poll=lambda:0 if done[0] else None
+        process.wait=lambda timeout:done.__setitem__(0,True) or 0
+        touch=TouchPause()
+        with mock.patch("touch_guard.subprocess.Popen",return_value=process) as launch, \
+             mock.patch("touch_guard.ctypes.WinDLL",create=True) as library:
+            library.return_value.GetSystemMetrics.return_value=0
+            touch.start();self.assertEqual(1,touch.count);launch.assert_called_once()
+            touch.stop()
+
+    def test_pending_recovery_prevents_relocking_before_driver_restore_finishes(self):
+        touch=TouchPause()
+        process=SimpleNamespace(stdin=mock.Mock(),stdout=mock.Mock(),poll=lambda:None,
+            wait=mock.Mock(side_effect=subprocess.TimeoutExpired("recovery",12)))
+        touch.process=process
+        with self.assertRaisesRegex(RuntimeError,"仍在恢复"):touch.stop()
+        with mock.patch("touch_guard.subprocess.Popen") as launch:
+            with self.assertRaisesRegex(RuntimeError,"仍在恢复"):touch.start()
+            launch.assert_not_called()
 
 
 @unittest.skipUnless(os.name=="nt","Windows API")

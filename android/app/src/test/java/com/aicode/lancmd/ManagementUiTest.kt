@@ -255,9 +255,12 @@ class ManagementUiTest {
                 render(activity.window.decorView,"management-home-$height",height=height)
                 val cards=activity.findViewById<ViewGroup>(R.id.managementCards)
                 assertEquals(4,cards.childCount);assertTrue(activity.findViewById<View>(R.id.btnSend).bottom>0)
+                val tools=activity.findViewById<android.widget.ScrollView>(R.id.homeTools)
+                tools.scrollTo(0,cards.top);shadowOf(Looper.getMainLooper()).idle()
                 val visible=android.graphics.Rect()
                 assertTrue(cards.getGlobalVisibleRect(visible));assertEquals("Management cards must not be clipped",cards.height,visible.height())
                 assertTrue(activity.findViewById<View>(R.id.scroll).height>0)
+                tools.scrollTo(0,0)
             }
             home.pause().stop().destroy()
         }

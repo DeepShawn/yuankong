@@ -330,6 +330,37 @@ class DesktopUiTest {
         }
     }
 
+    @Test fun internalChildNavigationKeepsDesktopLeasesAndResumesFramesWithoutRestarting() {
+        Stub().use { stub->
+            stub.install()
+            val parent=Robolectric.buildActivity(DesktopActivity::class.java).setup();val activity=parent.get()
+            activity.findViewById<View>(R.id.desktopStart).performClick()
+            waitUntil { activity.findViewById<RemoteScreenView>(R.id.desktopScreen).drawable!=null }
+            val child=Robolectric.buildActivity(android.app.Activity::class.java).setup()
+            parent.pause().stop()
+            shadowOf(Looper.getMainLooper()).idleFor(1500,TimeUnit.MILLISECONDS)
+            assertFalse(stub.requests.any { it.second.optString("action")=="end" })
+            val before=stub.requests.count { it.second.optString("cmd")=="screen" }
+            child.pause().stop().destroy();parent.restart().start().resume()
+            waitUntil { stub.requests.count { it.second.optString("cmd")=="screen" }>before }
+            assertEquals(2,stub.requests.count { it.second.optString("cmd")=="session" && it.second.optString("action").isEmpty() })
+            assertFalse(activity.findViewById<View>(R.id.desktopStart).isEnabled)
+            parent.pause().stop().destroy()
+        }
+    }
+
+    @Test fun leavingApplicationEndsSharingAndReleasesInputAfterHandoffGrace() {
+        Stub().use { stub->
+            stub.install();val controller=Robolectric.buildActivity(DesktopActivity::class.java).setup()
+            controller.get().findViewById<View>(R.id.desktopStart).performClick()
+            waitUntil { controller.get().findViewById<RemoteScreenView>(R.id.desktopScreen).drawable!=null }
+            controller.pause().stop();shadowOf(Looper.getMainLooper()).idleFor(1000,TimeUnit.MILLISECONDS)
+            waitUntil { stub.requests.count { it.second.optString("action")=="end" }==2 }
+            assertTrue(controller.get().findViewById<View>(R.id.desktopStart).isEnabled)
+            controller.destroy()
+        }
+    }
+
     private class Stub(private val pointerSupported: Boolean = true, private val localSupported: Boolean = false) : Closeable {
         private val server = ServerSocket(0)
         private val clients = CopyOnWriteArrayList<Socket>()

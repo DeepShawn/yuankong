@@ -82,10 +82,12 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
     private var localLease: RemoteLease? = null
     private var localRequest: Job? = null
     private var localPaused = false
+    private var pageVisible = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setup("远程桌面", "屏幕、触控、键鼠与终端 · 点击开始共享连接电脑")
+        AppVisibility.observe(this) { if(sessionJob?.isActive==true)stopSession() }
         toolbarView = (body.parent as android.view.ViewGroup).getChildAt(0)
         statusText.id = R.id.desktopStatus
         sessionRow = LinearLayout(this)
@@ -300,7 +302,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
         body.setPadding(if (value) 0 else dp(16), 0, if (value) 0 else dp(16), if (value) 0 else dp(12))
         exitFullscreen.visibility = if (value) View.VISIBLE else View.GONE
         sessionRow.visibility = if (value) View.GONE else View.VISIBLE
-        statusText.visibility = if (value) View.GONE else View.VISIBLE
+        hideInlineFeedback(value)
         modeButtons.forEach { it.visibility = if (value) View.GONE else View.VISIBLE }
         fullscreenButton.text = if (value) "退出全屏" else "全屏"
         val controller = WindowCompat.getInsetsController(window, window.decorView)
@@ -346,7 +348,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
     private fun begin() {
         if (sessionJob?.isActive == true) return
         start.isEnabled = false; stop.isEnabled = true
-        sessionJob = lifecycleScope.launch {
+        sessionJob = lifecycleScope.launch(feedbackContext()) {
             val owned = ArrayList<AgentClient>()
             var screenLease: RemoteLease? = null
             var inputLease: RemoteLease? = null
@@ -380,16 +382,18 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
                 activeControls.forEach { it.isEnabled = true }
                 screen.touchEnabled = touchSwitch.isChecked
                 coroutineScope {
-                    if (hasLocalInput) launch {
+                    launch {
                         while (isActive) {
                             checkOrigin(source)
+                            if(!hasLocalInput) { controls.keepAlive();delay(3000);continue }
                             val state = controls.call("local_input")
                             localPaused = state.optBoolean("paused")
                             localPause.text = if (localPaused) "恢复本机输入" else "暂停本机输入"
                             localStatus.text = if (localPaused) {
-                                "已暂停键鼠 · ${state.optInt("touch_devices")} 个触屏" +
+                                "键鼠已暂停 · 已禁用 ${state.optInt("touch_devices")} / 已识别 ${state.optInt("touch_detected",state.optInt("touch_devices"))} 个触屏" +
                                     "\n本机解除：A R T E X + Ctrl + Delete，或 Ctrl+Alt+Del"
-                            } else if (touchPauseSupported) "本机输入可用 · 包含标准 HID 触屏暂停，断线自动恢复" else "触屏暂停需完整更新 Windows 1.9.0"
+                            } else if(state.optString("warning").isNotBlank()) "已恢复本机输入：${state.optString("warning")}"
+                            else if (touchPauseSupported) "本机输入可用 · 校验 HID 触屏实际状态，断线自动恢复" else "触屏暂停需完整更新 Windows 接收端"
                             delay(3000)
                         }
                     }
@@ -401,6 +405,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
                     }
                     while (isActive) {
                         checkOrigin(source)
+                        if(!pageVisible) { preview.keepAlive();delay(1000);continue }
                         val result = preview.call("screen")
                         val bitmap = withContext(Dispatchers.Default) {
                             val bytes = android.util.Base64.decode(result.getString("data"), android.util.Base64.DEFAULT)
@@ -444,10 +449,11 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
             localRequest = task {
                 try {
                     // Explicit zero keeps manual mode when connected to a 1.7.0/1.7.1 receiver.
-                    val state = lease.call("local_input", JSONObject().put("action", action).put("seconds", 0), 45_000)
+                    val state = lease.call("local_input", JSONObject().put("action", action).put("seconds", 0), 75_000)
                     localPaused = state.optBoolean("paused")
                     localPause.text = if (localPaused) "恢复本机输入" else "暂停本机输入"
-                    localStatus.text = if (localPaused) "已暂停键鼠与 ${state.optInt("touch_devices")} 个触屏 · 本机组合键或手机可恢复" else "本机输入已恢复"
+                    localStatus.text = if (localPaused) "键鼠已暂停 · 已禁用 ${state.optInt("touch_devices")} / 已识别 ${state.optInt("touch_detected",state.optInt("touch_devices"))} 个触屏 · 本机组合键或手机可恢复" else "本机输入已恢复"
+                    status(localStatus.text.toString())
                 } finally { localPause.isEnabled = localLease === lease && touchPauseSupported }
             }
         }
@@ -494,6 +500,7 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
 
     override fun onStart() {
         super.onStart()
+        pageVisible=true
         ConnectionManager.addListener(this)
     }
 
@@ -508,9 +515,9 @@ class DesktopActivity : FeatureActivity(), ConnectionManager.Listener {
 
     override fun onStop() {
         ConnectionManager.removeListener(this)
+        pageVisible=false
         screen.cancelGesture()
-        sessionJob?.cancel(); terminalJob?.cancel()
-        localRequest?.cancel()
+        if(isFinishing) { sessionJob?.cancel();terminalJob?.cancel();localRequest?.cancel() }
         super.onStop()
     }
 }

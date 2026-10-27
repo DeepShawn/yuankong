@@ -15,11 +15,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import com.aicode.lancmd.net.ConnectionManager
 import org.json.JSONObject
 import kotlin.coroutines.coroutineContext
 
@@ -32,6 +34,8 @@ class MediaActivity : FeatureActivity() {
     private var stream: Job? = null
     private var frame: ByteArray? = null
     private var saveFrame: ByteArray? = null
+    private var pageVisible = false
+    private val frameMutex=Mutex()
     private var deviceIds = listOf(0)
     private val camera get() = intent.getStringExtra("kind") == "camera"
     private val saveDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("image/jpeg")) { uri ->
@@ -47,10 +51,11 @@ class MediaActivity : FeatureActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setup(if (camera) "摄像头" else "电脑屏幕", "点击开始查看建立预览，关闭页面结束共享")
+        setup(if (camera) "摄像头" else "电脑屏幕", "应用内进入子页面保留共享，返回后继续预览")
+        AppVisibility.observe(this) { stream?.cancel() }
         val help = panel()
         help.addView(label("随时停止共享", 16f))
-        help.addView(label("关闭本页会结束预览，也可点击下方「停止查看」。", 12f, R.color.dim))
+        help.addView(label("进入应用内子页面时暂停取帧，返回继续；退出本页、离开应用或切换电脑会结束共享。", 12f, R.color.dim))
         selector = Spinner(this)
         selector.isEnabled = false
         selector.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("开始后选择摄像头"))
@@ -76,12 +81,9 @@ class MediaActivity : FeatureActivity() {
         listOf(start, stop).forEach { buttons.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
         body.addView(buttons)
         body.addView(save)
-        if(camera)body.addView(button("摄像头 / 麦克风设备管理") { startActivity(android.content.Intent(this,PrivacyDevicesActivity::class.java)) })
+        if(camera)body.addView(button("摄像头 / 麦克风设备管理") { openChild(android.content.Intent(this,PrivacyDevicesActivity::class.java)) })
         body.addView(button(if (camera) "录制摄像头视频" else "录制屏幕视频") {
-            task {
-                stream?.cancelAndJoin()
-                startActivity(android.content.Intent(this@MediaActivity, RecordingsActivity::class.java).putExtra("kind", if (camera) "camera" else "screen"))
-            }
+            openChild(android.content.Intent(this, RecordingsActivity::class.java).putExtra("kind", if (camera) "camera" else "screen"))
         })
     }
 
@@ -89,20 +91,22 @@ class MediaActivity : FeatureActivity() {
         if (stream?.isActive == true) return
         start.isEnabled = false
         stop.isEnabled = true
-        stream = lifecycleScope.launch {
+        stream = lifecycleScope.launch(feedbackContext()) {
             var lease: RemoteLease? = null
             try {
                 val kind = if (camera) "camera" else "screen"
-                val caps = request("capabilities").optJSONArray("features")
+                val source=ConnectionManager.sessionClient()
+                val caps = pinnedCall(source,"capabilities").optJSONArray("features")
                 if (caps == null || (0 until caps.length()).none { caps.optString(it) == kind }) {
                     error("请完整安装 Windows 1.5.0 接收端及采集组件")
                 }
-                lease = RemoteLease(kind)
+                val current = RemoteLease(kind,source)
+                lease = current
                 status("正在建立${if (camera) "摄像头" else "屏幕"}预览…")
-                lease.open()
+                current.open()
                 coroutineContext.ensureActive()
                 if (camera) {
-                    val devices = lease.call("camera", JSONObject().put("action", "list")).getJSONArray("devices")
+                    val devices = current.call("camera", JSONObject().put("action", "list")).getJSONArray("devices")
                     if (devices.length() == 0) error("电脑上没有可用摄像头，请检查系统隐私权限和设备连接")
                     deviceIds = (0 until devices.length()).map { devices.getJSONObject(it).getInt("id") }
                     selector.adapter = ArrayAdapter(this@MediaActivity, android.R.layout.simple_spinner_dropdown_item,
@@ -110,9 +114,21 @@ class MediaActivity : FeatureActivity() {
                     selector.isEnabled = true
                 }
                 while (isActive) {
+                    check(ConnectionManager.sessionClient()===source && !source.closed) { "电脑连接已切换，请重新开始预览" }
+                    if(!pageVisible) { current.keepAlive();delay(1000);continue }
+                    if(camera && (0 until caps.length()).any { caps.optString(it)=="recordings" }) {
+                        val records=current.call("recordings").optJSONArray("recordings")
+                        if(records!=null && (0 until records.length()).any {
+                            val item=records.getJSONObject(it)
+                            item.optString("mode")=="camera" && item.optString("status") in listOf("starting","recording","stopping")
+                        }) {
+                            status("摄像头正在录制；停止录制后自动继续预览")
+                            current.keepAlive();delay(1500);continue
+                        }
+                    }
                     val started = System.currentTimeMillis()
                     val params = JSONObject().put("device", deviceIds.getOrElse(selector.selectedItemPosition) { 0 })
-                    val result = lease.call(kind, params)
+                    val result = frameMutex.withLock { if(pageVisible)current.call(kind, params) else null } ?: continue
                     val bytes = withContext(Dispatchers.Default) { Base64.decode(result.getString("data"), Base64.DEFAULT) }
                     val bitmap = withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }
                         ?: error("无法解码画面")
@@ -141,8 +157,18 @@ class MediaActivity : FeatureActivity() {
         }
     }
 
+    private fun openChild(intent:android.content.Intent) {
+        pageVisible=false
+        task {
+            try { frameMutex.withLock { startActivity(intent) } }
+            catch(e:Exception) { pageVisible=true;throw e }
+        }
+    }
+
+    override fun onStart() { super.onStart();pageVisible=true }
     override fun onStop() {
-        stream?.cancel()
+        pageVisible=false
+        if(isFinishing)stream?.cancel()
         super.onStop()
     }
 }

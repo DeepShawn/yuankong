@@ -21,16 +21,26 @@ import com.google.android.material.card.MaterialCardView
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.asContextElement
 import org.json.JSONObject
 import java.io.IOException
+import kotlin.coroutines.CoroutineContext
 
 abstract class FeatureActivity : AppCompatActivity() {
     protected lateinit var body: LinearLayout
     protected lateinit var statusText: TextView
+    private data class Feedback(val parent:LinearLayout,val anchor:View,val index:Int,val result:TextView,var title:String)
+    private data class FeedbackScope(val target:Feedback?)
+    private val feedbacks=java.util.IdentityHashMap<View,Feedback>()
+    private val feedbackOwner=ThreadLocal<FeedbackScope?>()
+    private var lastFeedback:Feedback?=null
+    private var feedbackHidden=false
+    private var inlineStatus=false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Themes.apply(this)
         super.onCreate(savedInstanceState)
+        AppVisibility.install(application)
     }
 
     protected fun setup(title: String, description: String, scrollable: Boolean = false) {
@@ -132,7 +142,12 @@ abstract class FeatureActivity : AppCompatActivity() {
             intArrayOf(color(R.color.text), color(R.color.dim))))
         strokeWidth = dp(1)
         strokeColor = android.content.res.ColorStateList.valueOf(color(R.color.outline_soft))
-        setOnClickListener { action() }
+        setOnClickListener {
+            val previous=feedbackOwner.get()
+            val selected=feedbackFor(this)
+            lastFeedback=selected;feedbackOwner.set(FeedbackScope(selected))
+            try { action() } finally { feedbackOwner.set(previous) }
+        }
     }
 
     protected fun primary(button: MaterialButton): MaterialButton = button.apply {
@@ -170,7 +185,37 @@ abstract class FeatureActivity : AppCompatActivity() {
         return result
     }
 
-    protected fun task(block: suspend () -> Unit): Job = lifecycleScope.launch {
+    protected fun feedbackContext():CoroutineContext=feedbackOwner.asContextElement(feedbackOwner.get() ?: FeedbackScope(lastFeedback))
+
+    private fun feedbackFor(button:View):Feedback? {
+        var anchor=button
+        var parent=anchor.parent
+        while(parent is LinearLayout && parent.orientation==LinearLayout.HORIZONTAL) { anchor=parent;parent=anchor.parent }
+        if(parent !is LinearLayout || parent.orientation!=LinearLayout.VERTICAL)return null
+        val existing=feedbacks[button]
+        if(existing!=null) { existing.title=(button as? TextView)?.text.toString();return existing }
+        val label=label("",12f,R.color.accent).apply {
+            visibility=View.GONE;maxLines=4;ellipsize=android.text.TextUtils.TruncateAt.END
+            setPadding(dp(8),dp(6),dp(8),dp(6));setBackgroundResource(R.drawable.status_bg)
+            contentDescription="操作结果";accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE
+            setOnClickListener {
+                androidx.appcompat.app.AlertDialog.Builder(this@FeatureActivity).setTitle("操作结果").setMessage(text).setPositiveButton("关闭",null).show()
+            }
+        }
+        return Feedback(parent,anchor,parent.indexOfChild(anchor),label,(button as? TextView)?.text.toString()).also { feedbacks[button]=it }
+    }
+    protected fun hideInlineFeedback(hidden:Boolean) {
+        feedbackHidden=hidden
+        feedbacks.values.forEach { it.result.visibility=if(hidden || it.result.text.isEmpty())View.GONE else View.VISIBLE }
+        statusText.visibility=if(hidden || inlineStatus)View.GONE else View.VISIBLE
+    }
+    private fun attachedToBody(view:View):Boolean {
+        var current:View?=view
+        while(current!=null) { if(current===body)return true;current=current.parent as? View }
+        return false
+    }
+
+    protected fun task(block: suspend () -> Unit): Job = lifecycleScope.launch(feedbackContext()) {
         try { block() }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { status(e.message ?: "操作失败", true) }
@@ -180,6 +225,19 @@ abstract class FeatureActivity : AppCompatActivity() {
         if (isDestroyed) return
         statusText.text = text
         statusText.setTextColor(color(if (error) R.color.danger else R.color.dim))
+        val feedback=feedbackOwner.get()?.target
+        inlineStatus=feedback!=null && attachedToBody(feedback.parent)
+        statusText.visibility=if(feedbackHidden || inlineStatus)View.GONE else View.VISIBLE
+        if(inlineStatus && feedback!=null) {
+            if(feedback.result.parent!==feedback.parent) {
+                (feedback.result.parent as? ViewGroup)?.removeView(feedback.result)
+                val index=feedback.parent.indexOfChild(feedback.anchor).takeIf { it>=0 } ?: feedback.index
+                feedback.parent.addView(feedback.result,(index+1).coerceIn(0,feedback.parent.childCount),LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(3);bottomMargin=dp(6) })
+            }
+            feedback.result.text="${feedback.title} · $text"
+            feedback.result.setTextColor(color(if(error)R.color.danger else R.color.accent))
+            feedback.result.visibility=if(feedbackHidden)View.GONE else View.VISIBLE
+        }
     }
 
     protected fun color(id: Int): Int = Themes.color(this, id)

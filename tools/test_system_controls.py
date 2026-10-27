@@ -13,7 +13,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "windows"))
 from system_controls import audio_request, endpoint_audio
 from input_guard import InputGuard, NativeInputGuard, escape_pressed, INPUT_TAG
-from remote_features import RemoteFeatures, KEY_CODES
+from remote_features import RemoteFeatures, WindowsBackend, KEY_CODES
 
 
 class RpcError(Exception):
@@ -118,6 +118,22 @@ class GuardTest(unittest.TestCase):
         self.assertTrue(escape_pressed(keys))
         for key in keys:
             self.assertFalse(escape_pressed(keys - {key}))
+
+    def test_long_remote_input_does_not_run_on_or_starve_the_hook_thread(self):
+        self.pause()
+        backend=WindowsBackend("unused")
+        backend.guard=self.guard
+        original=threading.get_ident()
+        with mock.patch.object(self.guard,"invoke",side_effect=AssertionError("must not use hook thread")):
+            self.assertEqual(original,backend._input(threading.get_ident))
+        self.assertTrue(self.guard.status("phone")["paused"])
+
+    def test_touch_worker_error_releases_input_and_remains_reportable(self):
+        self.pause()
+        self.native.pump=lambda:(_ for _ in ()).throw(RuntimeError("触屏状态已变化"))
+        self.wait_released()
+        self.assertTrue(self.guard.thread.is_alive())
+        self.assertIn("触屏状态已变化",self.guard.status("phone")["warning"])
 
 
 class SessionTest(unittest.TestCase):
