@@ -58,6 +58,10 @@ class NavigationDateUiTest {
     }
     @Test fun homeCategoryFiltersToolsAndSurvivesRecreation() {
         val c=Robolectric.buildActivity(MainActivity::class.java).setup();var a=c.get()
+        val categories=all(a.window.decorView).filterIsInstance<Chip>()
+        assertEquals(listOf("命令控制台","共享与控制","文件与设备","系统与应用","录制与自动化"),categories.map { it.text.toString() })
+        assertTrue(categories.single { it.text=="命令控制台" }.isChecked)
+        assertEquals(View.GONE,a.findViewById<View>(R.id.homeTools).visibility)
         all(a.window.decorView).filterIsInstance<Chip>().single { it.text=="文件与设备" }.performClick()
         assertEquals(View.GONE,a.findViewById<View>(R.id.managementCards).visibility)
         assertEquals(View.VISIBLE,a.findViewById<View>(R.id.rowActions2).visibility)
@@ -65,8 +69,12 @@ class NavigationDateUiTest {
         c.recreate();a=c.get()
         assertTrue(all(a.window.decorView).filterIsInstance<Chip>().single { it.text=="文件与设备" }.isChecked)
         assertEquals(View.GONE,a.findViewById<View>(R.id.managementCards).visibility)
-        all(a.window.decorView).filterIsInstance<Chip>().single { it.text=="全部" }.performClick()
+        all(a.window.decorView).filterIsInstance<Chip>().single { it.text=="系统与应用" }.performClick()
         assertEquals(View.VISIBLE,a.findViewById<View>(R.id.managementCards).visibility)
+        assertEquals(View.VISIBLE,a.findViewById<View>(R.id.homeTools).visibility)
+        all(a.window.decorView).filterIsInstance<Chip>().single { it.text=="命令控制台" }.performClick()
+        c.recreate();a=c.get()
+        assertEquals(View.GONE,a.findViewById<View>(R.id.homeTools).visibility)
         c.pause().stop().destroy()
     }
     @Test fun sharedToolSearchFindsDateWorkflowAndOpensFileManager() {

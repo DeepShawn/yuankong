@@ -92,7 +92,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     override fun onCreate(savedInstanceState: Bundle?) {
         Themes.apply(this)
         super.onCreate(savedInstanceState)
-        homeCategory=savedInstanceState?.getString("homeCategory") ?: "全部"
+        homeCategory=savedInstanceState?.getString("homeCategory")?.takeIf { it in listOf("命令控制台","共享与控制","文件与设备","系统与应用","录制与自动化") } ?: "命令控制台"
         try {
             setContentView(R.layout.activity_main)
         } catch (t: Throwable) {
@@ -175,7 +175,8 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
-            findViewById<View>(R.id.homeTools).visibility=if(insets.isVisible(WindowInsetsCompat.Type.ime()))View.GONE else View.VISIBLE
+            keyboardVisible=insets.isVisible(WindowInsetsCompat.Type.ime())
+            updateHomeToolsVisibility()
             view.setPadding(padding[0] + bars.left, padding[1] + bars.top, padding[2] + bars.right,
                 padding[3] + maxOf(bars.bottom, ime.bottom))
             insets
@@ -230,7 +231,13 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     }
 
     private var prefsShell = "cmd"
-    private var homeCategory="全部"
+    private var homeCategory="命令控制台"
+    private var keyboardVisible=false
+
+    private fun updateHomeToolsVisibility() {
+        findViewById<View>(R.id.homeTools).visibility =
+            if (homeCategory == "命令控制台" || keyboardVisible) View.GONE else View.VISIBLE
+    }
 
     // ------------------------------------------------------------ 快捷操作
 
@@ -314,7 +321,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         ))
         sections.addView(hints,LinearLayout.LayoutParams(-1,dp(48)).apply { topMargin=dp(8) })
         val chips=com.google.android.material.chip.ChipGroup(this).apply { isSingleSelection=true;isSelectionRequired=true;setSingleLine(true);chipSpacingHorizontal=dp(6);contentDescription="首页工具分类" }
-        val labels=listOf("全部","共享与控制","文件与设备","系统与应用","录制与自动化")
+        val labels=listOf("命令控制台","共享与控制","文件与设备","系统与应用","录制与自动化")
         val chipBg=android.content.res.ColorStateList(
             arrayOf(intArrayOf(android.R.attr.state_checked),intArrayOf()),
             intArrayOf(Themes.color(this,R.color.accent_dim),Themes.color(this,R.color.surface_variant)))
@@ -329,10 +336,11 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                 id=View.generateViewId();text=category;isCheckable=true;isChecked=category==homeCategory;setEnsureMinTouchTargetSize(true)
                 chipBackgroundColor=chipBg;setTextColor(chipText);chipStrokeColor=chipStroke;chipStrokeWidth=dp(1).toFloat()
                 isCheckedIconVisible=false;chipMinHeight=dp(34).toFloat();setChipCornerRadius(dp(17).toFloat());rippleColor=android.content.res.ColorStateList.valueOf(Themes.color(this@MainActivity,R.color.accent_glow))
-                setOnCheckedChangeListener { _,checked->if(checked){homeCategory=category;categorized.forEach { (name,views)->views.forEach { it.visibility=if(category=="全部" || category==name)View.VISIBLE else View.GONE } };this@MainActivity.findViewById<android.widget.ScrollView>(R.id.homeTools).scrollTo(0,0)} }
+                setOnCheckedChangeListener { _,checked->if(checked){homeCategory=category;updateHomeToolsVisibility();categorized.forEach { (name,views)->views.forEach { it.visibility=if(category==name)View.VISIBLE else View.GONE } };this@MainActivity.findViewById<android.widget.ScrollView>(R.id.homeTools).scrollTo(0,0)} }
             })
         }
-        categorized.forEach { (name,views)->views.forEach { it.visibility=if(homeCategory=="全部" || homeCategory==name)View.VISIBLE else View.GONE } }
+        categorized.forEach { (name,views)->views.forEach { it.visibility=if(homeCategory==name)View.VISIBLE else View.GONE } }
+        updateHomeToolsVisibility()
         val toolScroll=findViewById<android.widget.ScrollView>(R.id.homeTools)
         val parent=toolScroll.parent as LinearLayout
         parent.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled=false;addView(chips) },parent.indexOfChild(toolScroll),LinearLayout.LayoutParams(-1,dp(48)))
