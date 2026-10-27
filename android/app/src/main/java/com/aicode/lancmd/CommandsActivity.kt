@@ -111,8 +111,8 @@ class CommandsActivity : FeatureActivity() {
         for (i in 0 until items.length()) {
             val item = items.getJSONObject(i)
             if (i > 0) editor.addView(divider(), Ui.dividerParams(this))
-            editor.addView(listRow("${i + 1}. ${item.optString("line")}",
-                "${item.optString("shell").uppercase()} · 等待 ${item.optInt("delay")} 秒"))
+            editor.addView(listRow(item.optString("line"),
+                "第 ${i + 1} 条 · ${item.optString("shell").uppercase()} · 等待 ${item.optInt("delay")} 秒"))
             val keys = listOf("编辑" to { editCommand(i) }, "上移" to {
                 if (i > 0) { val previous = items.get(i - 1); items.put(i - 1, item); items.put(i, previous); save(); renderEditor() }
             }, "删除" to { items.remove(i); save(); renderEditor() }).map { (title, run) ->
