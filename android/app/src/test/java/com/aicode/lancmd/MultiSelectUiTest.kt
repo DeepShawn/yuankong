@@ -78,7 +78,7 @@ class MultiSelectUiTest {
                 val q=stub.requests.last { it.optString("action")=="create" }
                 assertEquals(operation,q.getString("operation"));assertEquals("C:\\data",q.getString("destination"))
                 assertEquals(2,q.getJSONArray("items").length())
-                assertEquals("a".repeat(64),q.getJSONArray("items").getJSONObject(0).getString("file_id"))
+                assertEquals(setOf("a".repeat(64),"b".repeat(64)),(0..1).map { q.getJSONArray("items").getJSONObject(it).getString("file_id") }.toSet())
                 preview(root,"file-batch-result")
                 search.setText("");button(root,"全选结果").performClick()
             }

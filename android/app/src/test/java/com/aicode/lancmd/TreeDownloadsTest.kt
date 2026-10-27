@@ -2,6 +2,9 @@ package com.aicode.lancmd
 
 import android.app.Application
 import android.content.pm.ProviderInfo
+import android.content.ContentProvider
+import android.content.ContentValues
+import android.os.Bundle
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
@@ -36,32 +39,47 @@ import java.util.concurrent.CopyOnWriteArrayList
 @Config(sdk=[33],application=Application::class)
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class TreeDownloadsTest {
-    class Provider:DocumentsProvider() {
+    class Provider:ContentProvider() {
         lateinit var root:File;var failOpen=false
         override fun onCreate()=true
         private val columns=arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME,DocumentsContract.Document.COLUMN_MIME_TYPE)
         private fun file(id:String)=if(id=="root")root else File(root,id.removePrefix("root/"))
         private fun id(file:File)="root/"+file.relativeTo(root).invariantSeparatorsPath
         private fun row(cursor:MatrixCursor,file:File) { cursor.addRow(arrayOf(id(file),file.name,if(file.isDirectory)DocumentsContract.Document.MIME_TYPE_DIR else "application/octet-stream")) }
-        override fun queryRoots(projection:Array<out String>?)=MatrixCursor(arrayOf(DocumentsContract.Root.COLUMN_ROOT_ID))
-        override fun queryDocument(documentId:String,projection:Array<out String>?)=MatrixCursor(columns).apply { row(this,file(documentId)) }
-        override fun queryChildDocuments(parentDocumentId:String,projection:Array<out String>?,sortOrder:String?):Cursor = MatrixCursor(projection ?: columns).apply {
+        override fun getType(uri:Uri)="application/octet-stream"
+        override fun insert(uri:Uri,values:ContentValues?):Uri?=null
+        override fun delete(uri:Uri,selection:String?,selectionArgs:Array<out String>?)=0
+        override fun update(uri:Uri,values:ContentValues?,selection:String?,selectionArgs:Array<out String>?)=0
+        override fun query(uri:Uri,projection:Array<out String>?,selection:String?,selectionArgs:Array<out String>?,sortOrder:String?):Cursor =
+            queryChildDocuments(DocumentsContract.getDocumentId(uri),projection,sortOrder)
+        override fun call(method:String,arg:String?,extras:Bundle?):Bundle {
+            val uri=extras!!.getParcelable<Uri>("uri")!!
+            val document=DocumentsContract.getDocumentId(uri)
+            return when(method) {
+                "android:createDocument"->Bundle().apply { putParcelable("uri",DocumentsContract.buildDocumentUriUsingTree(uri,createDocument(document,extras.getString("mime_type")!!,extras.getString("_display_name")!!))) }
+                "android:deleteDocument"->{deleteDocument(document);Bundle()}
+                else->throw UnsupportedOperationException(method)
+            }
+        }
+        override fun openFile(uri:Uri,mode:String)=openDocument(DocumentsContract.getDocumentId(uri),mode,null)
+        fun queryDocument(documentId:String,projection:Array<out String>?)=MatrixCursor(columns).apply { row(this,file(documentId)) }
+        fun queryChildDocuments(parentDocumentId:String,projection:Array<out String>?,sortOrder:String?):Cursor = MatrixCursor(projection ?: columns).apply {
             file(parentDocumentId).listFiles().orEmpty().forEach { child->
                 addRow(columnNames.map { when(it){DocumentsContract.Document.COLUMN_DOCUMENT_ID->id(child);DocumentsContract.Document.COLUMN_DISPLAY_NAME->child.name;else->"application/octet-stream"} }.toTypedArray())
             }
         }
-        override fun createDocument(parentDocumentId:String,mimeType:String,displayName:String):String {
+        fun createDocument(parentDocumentId:String,mimeType:String,displayName:String):String {
             val new=File(file(parentDocumentId),displayName)
             if(new.exists())throw IOException("existing target")
             if(mimeType==DocumentsContract.Document.MIME_TYPE_DIR)new.mkdir() else new.createNewFile()
             return id(new)
         }
-        override fun deleteDocument(documentId:String) { file(documentId).deleteRecursively() }
-        override fun openDocument(documentId:String,mode:String,signal:CancellationSignal?):ParcelFileDescriptor {
+        fun deleteDocument(documentId:String) { file(documentId).deleteRecursively() }
+        fun openDocument(documentId:String,mode:String,signal:CancellationSignal?):ParcelFileDescriptor {
             if(failOpen)throw IOException("provider unavailable")
             return ParcelFileDescriptor.open(file(documentId),ParcelFileDescriptor.MODE_READ_WRITE)
         }
-        override fun isChildDocument(parentDocumentId:String,documentId:String)=documentId.startsWith(parentDocumentId+"/")
+        fun isChildDocument(parentDocumentId:String,documentId:String)=documentId.startsWith(parentDocumentId+"/")
     }
     private lateinit var app:Application
     private lateinit var provider:Provider
@@ -82,7 +100,7 @@ class TreeDownloadsTest {
             stub.install();val downloader=TreeDownloads(app,stub.client)
             runBlocking { downloader.download("C:\\folder",item("folder",true),tree){_,_->} }
             assertEquals("abc",File(provider.root,"folder/a.txt").readText())
-            assertEquals(0,File(provider.root,"folder/empty.txt").length())
+            assertEquals(0L,File(provider.root,"folder/empty.txt").length())
             assertTrue(stub.requests.filter { it.optString("action")=="begin" }.all { it.optString("file_id")=="selected-token" })
             assertThrows(IOException::class.java) { runBlocking { downloader.download("C:\\folder",item("folder",true),tree){_,_->} } }
             assertEquals("abc",File(provider.root,"folder/a.txt").readText())
