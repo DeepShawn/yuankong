@@ -69,7 +69,10 @@ object Ui {
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
             val available = MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
             val visible = (0 until childCount).map { getChildAt(it) }.filter { it.visibility != GONE }
-            val minimum = dp(context, (136 * resources.configuration.fontScale.coerceAtLeast(1f)).toInt())
+            val minimum = visible.maxOfOrNull { child ->
+                val textWidth = if (child is TextView) child.paint.measureText(child.text.toString()).toInt() else 0
+                maxOf(dp(context, 96), minOf(dp(context, 200), textWidth + child.paddingLeft + child.paddingRight + dp(context, 24)))
+            } ?: 0
             val stacked = available > 0 && visible.size * minimum > available
             orientation = if (stacked) VERTICAL else HORIZONTAL
             visible.forEachIndexed { index, child ->

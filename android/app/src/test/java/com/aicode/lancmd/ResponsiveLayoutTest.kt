@@ -35,7 +35,7 @@ class ResponsiveLayoutTest {
         val context=RuntimeEnvironment.getApplication()
         val row=Ui.ActionRow(context)
         repeat(3) { row.addView(TextView(context).apply { text="操作 $it"; minHeight=48 },LinearLayout.LayoutParams(0,-2,1f)) }
-        layout(row,320)
+        layout(row,240)
         assertEquals(LinearLayout.VERTICAL,row.orientation)
         assertTrue(row.getChildAt(1).top >= row.getChildAt(0).bottom)
         layout(row,600)
