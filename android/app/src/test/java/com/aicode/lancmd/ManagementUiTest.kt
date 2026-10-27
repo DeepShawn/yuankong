@@ -255,17 +255,39 @@ class ManagementUiTest {
                 render(activity.window.decorView,"management-home-$height",height=height)
                 val cards=activity.findViewById<ViewGroup>(R.id.managementCards)
                 assertEquals(4,cards.childCount);assertTrue(activity.findViewById<View>(R.id.btnSend).bottom>0)
+                val tools=activity.findViewById<android.widget.ScrollView>(R.id.homeTools)
+                tools.scrollTo(0,cards.top);shadowOf(Looper.getMainLooper()).idle()
                 val visible=android.graphics.Rect()
                 assertTrue(cards.getGlobalVisibleRect(visible));assertEquals("Management cards must not be clipped",cards.height,visible.height())
                 assertTrue(activity.findViewById<View>(R.id.scroll).height>0)
+                tools.scrollTo(0,0)
             }
             home.pause().stop().destroy()
         }
     }
 
+    @Test fun endingProcessKeepsItsResultInTheConfirmationBesideTheAction() {
+        Stub().use { stub->
+            stub.taskCanTerminate=true;stub.install()
+            val controller=Robolectric.buildActivity(TaskManagerActivity::class.java).setup();val activity=controller.get()
+            waitFor { all(activity.window.decorView).filterIsInstance<TextView>().any { it.text.contains("1 个进程") } }
+            TaskManagerActivity::class.java.getDeclaredMethod("details",JSONObject::class.java).apply { isAccessible=true }
+                .invoke(activity,JSONObject().put("pid",777).put("created","100").put("name","test.exe").put("can_terminate",true))
+            shadowOf(Looper.getMainLooper()).idle()
+            (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick();shadowOf(Looper.getMainLooper()).idle()
+            val confirmation=ShadowDialog.getLatestDialog() as AlertDialog
+            assertFalse(stub.requests.any { it.optString("action")=="terminate" })
+            confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitFor { all(confirmation.window!!.decorView).filterIsInstance<TextView>().any { it.text.contains("已结束 test.exe") } }
+            assertTrue(confirmation.isShowing)
+            assertEquals(777,stub.requests.single { it.optString("action")=="terminate" }.getInt("pid"))
+            confirmation.dismiss();controller.pause().stop().destroy()
+        }
+    }
+
     private class Stub:Closeable {
         private val server=ServerSocket(0);private val client=AgentClient("127.0.0.1",server.localPort)
-        val requests=CopyOnWriteArrayList<JSONObject>();var conflict=false;var failRead=false;var showScriptJob=false
+        val requests=CopyOnWriteArrayList<JSONObject>();var conflict=false;var failRead=false;var showScriptJob=false;var taskCanTerminate=false
         private var lockState="";private var recordingState="recording"
         private val worker=Thread {
             try { server.accept().use { socket->
@@ -284,7 +306,7 @@ class ManagementUiTest {
                         }
                         "privacy_devices"->result.put("admin",true).put("items",JSONArray().put(JSONObject().put("id","mic").put("kind","microphone").put("name","Test microphone").put("enabled",true).put("problem",0).put("muted",false)))
                         "registry"->if(q.optString("action")=="history")result.put("items",JSONArray().put(JSONObject().put("id","backup-entry").put("root","HKCU").put("path","Software").put("name","Test").put("view",64).put("created",1))) else result.put("root","HKCU").put("path",q.optString("path")).put("view",64).put("keys",JSONArray().put("Software")).put("values",JSONArray()).put("key_count",1).put("value_count",0).put("key_offset",0).put("value_offset",0)
-                        "tasks"->result.put("items",JSONArray().put(JSONObject().put("pid",777).put("name","test.exe").put("path","C:\\Apps\\test.exe").put("created","100").put("memory",1048576).put("cpu",1.5).put("can_terminate",false)))
+                        "tasks"->result.put("items",JSONArray().put(JSONObject().put("pid",777).put("name","test.exe").put("path","C:\\Apps\\test.exe").put("created","100").put("memory",1048576).put("cpu",1.5).put("can_terminate",taskCanTerminate)))
                         "browser"->result.put("items",JSONArray().put(JSONObject().put("id","edge").put("name","Microsoft Edge")))
                         "storage"->result.put("drives",JSONArray()).put("home","C:\\notes")
                         "ls"->result.put("path","C:\\notes").put("items",JSONArray().put(JSONObject().put("name","test.bat").put("dir",false)).put(JSONObject().put("name","test.vbs").put("dir",false)))

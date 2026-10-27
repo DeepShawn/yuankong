@@ -97,7 +97,8 @@ class FeatureUiTest {
             val tiles = rows.flatMap { row -> (0 until row.childCount).map { row.getChildAt(it) } }
             activity.findViewById<View>(R.id.cardDesktop).performClick()
             assertEquals(DesktopActivity::class.java.name, shadowOf(activity).nextStartedActivity.component!!.className)
-            val expected = mapOf("屏幕" to DesktopActivity::class.java, "摄像头" to MediaActivity::class.java,
+            assertFalse("Screen is consolidated into the desktop card",tiles.any { it.contentDescription=="屏幕" })
+            val expected = mapOf("摄像头" to MediaActivity::class.java,
                 "按键" to ControlActivity::class.java, "消息" to ControlActivity::class.java, "存储" to StorageActivity::class.java)
             expected.forEach { (label, type) ->
                 tiles.single { it.contentDescription == label }.performClick()
@@ -177,6 +178,7 @@ class FeatureUiTest {
             waitUntil { controls.single { it.text == "发送文字" }.isEnabled }
             assertEquals("input", stub.requests.single { it.optString("cmd") == "session" }.optString("scope"))
             controller.pause().stop()
+            shadowOf(Looper.getMainLooper()).idleFor(1,java.util.concurrent.TimeUnit.SECONDS)
             waitUntil { stub.requests.any { it.optString("cmd") == "session" && it.optString("action") == "end" } }
             assertEquals("approved-test-session", stub.requests.single { it.optString("action") == "end" }.optString("sid"))
             waitUntil { !controls.single { it.text == "发送文字" }.isEnabled }
@@ -184,10 +186,36 @@ class FeatureUiTest {
         }
     }
 
+    @Test fun cameraPreviewSurvivesInternalChildAndWaitsForCameraRecordingToFinish() {
+        stopConnection()
+        StubAgent().use { stub->
+            stub.install()
+            val parent=Robolectric.buildActivity(MediaActivity::class.java,Intent(RuntimeEnvironment.getApplication(),MediaActivity::class.java).putExtra("kind","camera")).setup()
+            val activity=parent.get();val root=activity.findViewById<View>(android.R.id.content)
+            buttons(root).single { it.text=="开始查看" }.performClick()
+            waitUntil { buttons(root).single { it.text=="保存当前帧" }.isEnabled }
+            val child=Robolectric.buildActivity(android.app.Activity::class.java).setup()
+            parent.pause().stop();stub.recordingActive=true
+            shadowOf(Looper.getMainLooper()).idleFor(1500,java.util.concurrent.TimeUnit.MILLISECONDS)
+            assertFalse(stub.requests.any { it.optString("action")=="end" })
+            child.pause().stop().destroy();parent.restart().start().resume()
+            waitUntil { allTexts(root).any { it.contains("摄像头正在录制") } }
+            assertFalse(stub.requests.any { it.optString("action")=="end" })
+            val before=stub.requests.count { it.optString("cmd")=="camera" && it.optString("action")!="list" }
+            stub.recordingActive=false
+            waitUntil { stub.requests.count { it.optString("cmd")=="camera" && it.optString("action")!="list" }>before }
+            assertEquals(1,stub.requests.count { it.optString("cmd")=="session" && it.optString("action").isEmpty() })
+            parent.pause().stop().destroy()
+        }
+    }
+
+    private fun allTexts(view:View):List<String> = (if(view is TextView)listOf(view.text.toString()) else emptyList())+
+        if(view is android.view.ViewGroup)(0 until view.childCount).flatMap { allTexts(view.getChildAt(it)) } else emptyList()
+
     private fun waitUntil(condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 8000
         while (System.currentTimeMillis() < deadline) {
-            shadowOf(Looper.getMainLooper()).idle()
+            shadowOf(Looper.getMainLooper()).idleFor(10,java.util.concurrent.TimeUnit.MILLISECONDS)
             if (condition()) return
             Thread.sleep(20)
         }
@@ -198,6 +226,10 @@ class FeatureUiTest {
         val server = ServerSocket(0)
         val client = AgentClient("127.0.0.1", server.localPort)
         val requests = java.util.concurrent.CopyOnWriteArrayList<JSONObject>()
+        @Volatile var recordingActive=false
+        private val jpeg=java.io.ByteArrayOutputStream().also { out->
+            Bitmap.createBitmap(64,32,Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.JPEG,80,out)
+        }.toByteArray()
         private val worker = Thread {
             try {
                 server.accept().use { socket ->
@@ -209,7 +241,10 @@ class FeatureUiTest {
                         requests.add(request)
                         val result = JSONObject().put("ok", true).put("id", request.getInt("id"))
                         when (request.optString("cmd")) {
-                            "capabilities" -> result.put("features", JSONArray().put("input"))
+                            "capabilities" -> result.put("features", JSONArray(listOf("input","screen","camera","recordings")))
+                            "camera" -> if(request.optString("action")=="list")result.put("devices",JSONArray().put(JSONObject().put("id",0).put("name","Test camera"))) else result.put("data",android.util.Base64.encodeToString(jpeg,android.util.Base64.NO_WRAP))
+                            "screen" -> result.put("data",android.util.Base64.encodeToString(jpeg,android.util.Base64.NO_WRAP))
+                            "recordings" -> result.put("recordings",JSONArray().apply { if(recordingActive)put(JSONObject().put("mode","camera").put("status","recording")) })
                             "session" -> result.put("sid", "approved-test-session").put("active", true)
                             "storage" -> result.put("home", "C:\\Users\\Public").put("drives", JSONArray()
                                 .put(JSONObject().put("path", "C:\\").put("total", 256L * 1024 * 1024 * 1024)

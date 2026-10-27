@@ -53,8 +53,10 @@ class WindowsBackend:
         self.guard_lock = threading.Lock()
 
     def _input(self, callback):
-        guard = self.guard
-        return guard.invoke(callback) if guard is not None and guard.thread.is_alive() else callback()
+        # Tagged SendInput is accepted from every RPC thread. Long text must not
+        # occupy the low-level hook thread, or Windows silently removes hooks
+        # after LowLevelHooksTimeout while local input appears to remain paused.
+        return callback()
 
     def local_input(self, action, owner, allowed):
         if action == "pause":

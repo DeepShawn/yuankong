@@ -291,15 +291,36 @@ class StorageActivity : FeatureActivity() {
                     if (transfer?.isCompleted != false) { pendingDownload = selected; save.launch(item.getString("name")) }
                 }
                 "重命名" -> renameOrCreate(item)
-                "删除" -> AlertDialog.Builder(this).setTitle("删除${if (item.optBoolean("dir")) "目录" else "文件"}？")
-                    .setMessage("$selected\n\n${if (item.optBoolean("dir")) "目录中的全部内容也会删除。" else ""}此操作无法撤销。")
-                    .setNegativeButton("取消", null).setPositiveButton("删除") { _, _ -> task {
-                        storageCall("rm", JSONObject().put("path", selected)); load(path)
-                    } }.show()
+                "删除" -> deleteItem(item,selected)
             }
             true
         }
         menu.show()
+    }
+
+    private fun deleteItem(item:JSONObject,selected:String) {
+        val base=path
+        val dialog=AlertDialog.Builder(this).setTitle("删除${if(item.optBoolean("dir"))"目录" else "文件"}？")
+            .setMessage("$selected\n\n${if(item.optBoolean("dir"))"目录中的全部内容也会删除。" else ""}此操作无法撤销。")
+            .setNegativeButton("取消",null).setPositiveButton("删除",null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled=false
+                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).text="关闭"
+                dialog.setMessage("正在删除：$selected")
+                task {
+                    try {
+                        storageCall("rm",JSONObject().put("path",selected))
+                        dialog.setMessage("删除完成：$selected")
+                        if(path==base)load(base)
+                    } catch(e:Exception) {
+                        if(e is CancellationException)throw e
+                        dialog.setMessage("删除失败：${e.message}\n$selected")
+                    } finally { dialog.getButton(AlertDialog.BUTTON_POSITIVE).visibility=View.GONE }
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun renameOrCreate(item: JSONObject?) {

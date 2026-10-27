@@ -17,6 +17,7 @@ class InputGuard:
         self.native = native
         self.queue = queue.Queue()
         self.owner = None
+        self.last_error = ""
         self.ready = Future()
         self.thread = threading.Thread(target=self._run, name="lancmd-local-input", daemon=True)
         self.thread.start()
@@ -29,7 +30,7 @@ class InputGuard:
             raise RuntimeError("本机输入控制线程已结束")
         future = Future()
         self.queue.put((callback, future))
-        return future.result(timeout=35)
+        return future.result(timeout=60)
 
     def _release(self):
         try:
@@ -50,9 +51,10 @@ class InputGuard:
                 self.native.block(False)
                 raise RuntimeError("启动暂停期间会话已失效，已恢复本机输入，请重试")
             self.owner = owner
+            self.last_error = ""
             self.allowed = allowed
             return {"paused": True, "remaining": None,
-                    "touch_devices": getattr(getattr(self.native, "touch", None), "count", 0)}
+                    **self._details()}
         return self.invoke(start)
 
     def release(self, owner):
@@ -65,7 +67,13 @@ class InputGuard:
     def status(self, owner):
         return self.invoke(lambda: {"paused": self.owner == owner,
             "remaining": None if self.owner == owner else 0,
-            "touch_devices": getattr(getattr(self.native, "touch", None), "count", 0) if self.owner == owner else 0})
+            **(self._details() if self.owner == owner else {"touch_devices":0}),
+            "warning":self.last_error})
+
+    def _details(self):
+        touch=getattr(self.native,"touch",None)
+        return {"keyboard_mouse":True,"touch_devices":getattr(touch,"count",0),
+                "touch_detected":getattr(touch,"detected",0),"touch_already_disabled":getattr(touch,"already_disabled",0)}
 
     def _run(self):
         try:
@@ -77,11 +85,15 @@ class InputGuard:
         try:
             while True:
                 if self.owner is not None:
-                    if not self.allowed() or self.native.escape.is_set():
-                        self._release()
-                    else:
-                        # Low-level hooks need a message pump even without a UI.
-                        self.native.pump()
+                    try:
+                        if not self.allowed() or self.native.escape.is_set():
+                            self._release()
+                        else:
+                            self.native.pump()
+                    except Exception as exc:
+                        self.last_error=str(exc)
+                        try:self._release()
+                        except Exception as restore:self.last_error+="；"+str(restore)
                 try:
                     callback, future = self.queue.get(timeout=0.05)
                 except queue.Empty:
@@ -100,7 +112,7 @@ class InputGuard:
     def close(self):
         future = Future()
         self.queue.put((None, future))
-        future.result(timeout=35)
+        future.result(timeout=60)
         self.thread.join(timeout=2)
 
 

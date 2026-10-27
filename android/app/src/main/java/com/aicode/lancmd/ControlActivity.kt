@@ -6,6 +6,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import androidx.lifecycle.lifecycleScope
 import com.aicode.lancmd.net.RemoteLease
+import com.aicode.lancmd.net.ConnectionManager
 import com.google.android.material.textfield.TextInputLayout
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -26,6 +27,7 @@ class ControlActivity : FeatureActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppVisibility.observe(this) { sessionJob?.cancel() }
         if (intent.getStringExtra("kind") == "message") messageUi() else keyboardUi()
     }
 
@@ -118,19 +120,24 @@ class ControlActivity : FeatureActivity() {
         if (sessionJob?.isActive == true) return
         start.isEnabled = false
         stop.isEnabled = true
-        sessionJob = lifecycleScope.launch {
+        sessionJob = lifecycleScope.launch(feedbackContext()) {
             var current: RemoteLease? = null
             try {
-                val features = request("capabilities").getJSONArray("features")
+                val source=ConnectionManager.sessionClient()
+                val features = pinnedCall(source,"capabilities").getJSONArray("features")
                 if ((0 until features.length()).none { features.optString(it) == "input" }) error("请更新 Windows 接收端至 1.5.0")
-                current = RemoteLease("input")
+                current = RemoteLease("input",source)
                 status("正在开始键盘控制…")
                 current.open()
                 coroutineContext.ensureActive()
                 lease = current
                 controlled.forEach { it.isEnabled = true }
                 status("控制已开始，按键将发送到电脑当前前台窗口")
-                while (isActive) { delay(8000); current.keepAlive() }
+                while (isActive) {
+                    delay(3000)
+                    check(ConnectionManager.sessionClient()===source && !source.closed) { "电脑连接已切换，请重新开始键盘控制" }
+                    current.keepAlive()
+                }
             } catch (e: CancellationException) { status("键盘控制已停止"); throw e }
             catch (e: Exception) { status(e.message ?: "无法开始控制", true) }
             finally {
@@ -146,7 +153,7 @@ class ControlActivity : FeatureActivity() {
     }
 
     override fun onStop() {
-        sessionJob?.cancel()
+        if(isFinishing)sessionJob?.cancel()
         super.onStop()
     }
 }

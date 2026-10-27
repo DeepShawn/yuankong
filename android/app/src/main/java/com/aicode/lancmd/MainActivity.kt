@@ -233,53 +233,70 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
 
     private fun buildActions() {
         val management=findViewById<LinearLayout>(R.id.managementCards)
-        listOf(
-            Action(R.drawable.ic_process,"任务管理器") { openFeature(TaskManagerActivity::class.java) },
-            Action(R.drawable.ic_terminal,"注册表编辑器") { openFeature(RegistryActivity::class.java) },
-            Action(R.drawable.ic_browser,"浏览器") { openFeature(BrowserActivity::class.java) },
-            Action(R.drawable.ic_lock,"应用锁") { openFeature(AppLocksActivity::class.java) }
-        ).forEach { action->
-            val item=layoutInflater.inflate(R.layout.view_action,management,false)
-            item.findViewById<ImageView>(R.id.ivIcon).setImageResource(action.icon)
-            item.findViewById<TextView>(R.id.tvLabel).text=action.label
-            item.contentDescription=action.label
-            item.setOnClickListener { if(ConnectionManager.isConnected())action.body() else toast("请先连接电脑") }
-            management.addView(item)
+        val shared=findViewById<LinearLayout>(R.id.rowActions1)
+        val files=findViewById<LinearLayout>(R.id.rowActions2)
+        val desktop=findViewById<View>(R.id.cardDesktop)
+        val hints=findViewById<View>(R.id.btnCommands)
+        val sections=management.parent as LinearLayout
+        (hints.parent as android.view.ViewGroup).removeView(hints)
+        sections.removeAllViews()
+        fun section(title:String) {
+            sections.addView(TextView(this).apply {
+                text=title;textSize=12f;setTextColor(Themes.color(this@MainActivity,R.color.accent))
+                setPadding(dp(4),dp(14),dp(4),dp(5));typeface=android.graphics.Typeface.DEFAULT_BOLD
+                androidx.core.view.ViewCompat.setAccessibilityHeading(this,true)
+            })
         }
-        findViewById<View>(R.id.cardDesktop).setOnClickListener {
-            if (!ConnectionManager.isConnected()) {
-                toast("未连接，正在重连…")
-                ConnectionManager.retryNow()
-            } else openFeature(DesktopActivity::class.java)
-        }
-        val row1 = findViewById<LinearLayout>(R.id.rowActions1)
-        val row2 = findViewById<LinearLayout>(R.id.rowActions2)
-        val actions = listOf(
-            Action(R.drawable.ic_screenshot, "屏幕") { openFeature(DesktopActivity::class.java) },
-            Action(R.drawable.ic_camera, "摄像头") { openFeature(MediaActivity::class.java, "camera") },
-            Action(R.drawable.ic_keyboard, "按键") { openFeature(ControlActivity::class.java, "input") },
-            Action(R.drawable.ic_message, "消息") { openFeature(ControlActivity::class.java, "message") },
-            Action(R.drawable.ic_folder, "存储") { openFeature(StorageActivity::class.java) },
-            Action(R.drawable.ic_process, getString(R.string.q_ps)) { showProcesses() },
-            Action(R.drawable.ic_clipboard, getString(R.string.q_clip)) { showClipboard() },
-            Action(R.drawable.ic_info, getString(R.string.q_info)) { showInfo() }
-        )
-        actions.forEachIndexed { i, a ->
-            val parent = if (i < 4) row1 else row2
-            val item = layoutInflater.inflate(R.layout.view_action, parent, false)
-            item.findViewById<ImageView>(R.id.ivIcon).setImageResource(a.icon)
-            item.findViewById<TextView>(R.id.tvLabel).text = a.label
-            item.contentDescription = a.label
-            item.setOnClickListener {
-                if (!ConnectionManager.isConnected()) {
-                    toast("未连接，正在重连…")
-                    ConnectionManager.retryNow()
-                    return@setOnClickListener
+        fun tiles(row:LinearLayout,actions:List<Pair<Int,Action>>) {
+            row.removeAllViews()
+            actions.forEach { (viewId,action)->
+                val item=layoutInflater.inflate(R.layout.view_action,row,false)
+                if(viewId!=0)item.id=viewId
+                item.findViewById<ImageView>(R.id.ivIcon).setImageResource(action.icon)
+                item.findViewById<TextView>(R.id.tvLabel).text=action.label
+                item.contentDescription=action.label
+                item.setOnClickListener {
+                    if(ConnectionManager.isConnected())action.body()
+                    else { toast("未连接，正在重连…");ConnectionManager.retryNow() }
                 }
-                a.body()
+                row.addView(item)
             }
-            parent.addView(item)
+            sections.addView(row,LinearLayout.LayoutParams(-1,-2))
         }
+        section("共享与控制")
+        sections.addView(desktop)
+        desktop.setOnClickListener {
+            if(ConnectionManager.isConnected())openFeature(DesktopActivity::class.java)
+            else { toast("未连接，正在重连…");ConnectionManager.retryNow() }
+        }
+        tiles(shared,listOf(
+            0 to Action(R.drawable.ic_camera,"摄像头") { openFeature(MediaActivity::class.java,"camera") },
+            0 to Action(R.drawable.ic_keyboard,"按键") { openFeature(ControlActivity::class.java,"input") },
+            0 to Action(R.drawable.ic_message,"消息") { openFeature(ControlActivity::class.java,"message") },
+            0 to Action(R.drawable.ic_clipboard,"剪贴板") { showClipboard() }
+        ))
+        section("文件与设备")
+        tiles(files,listOf(
+            0 to Action(R.drawable.ic_folder,"存储") { openFeature(StorageActivity::class.java) },
+            R.id.btnDevices to Action(R.drawable.ic_usb,"U盘与设备") { openFeature(DevicesActivity::class.java) },
+            0 to Action(R.drawable.ic_camera,"隐私设备") { openFeature(PrivacyDevicesActivity::class.java) },
+            0 to Action(R.drawable.ic_info,"电脑信息") { showInfo() }
+        ))
+        section("系统与应用")
+        tiles(management,listOf(
+            0 to Action(R.drawable.ic_process,"任务管理器") { openFeature(TaskManagerActivity::class.java) },
+            0 to Action(R.drawable.ic_terminal,"注册表编辑器") { openFeature(RegistryActivity::class.java) },
+            0 to Action(R.drawable.ic_browser,"浏览器") { openFeature(BrowserActivity::class.java) },
+            0 to Action(R.drawable.ic_lock,"应用锁") { openFeature(AppLocksActivity::class.java) }
+        ))
+        section("录制与自动化")
+        tiles(LinearLayout(this),listOf(
+            0 to Action(R.drawable.ic_camera,"录音 / 录屏") { openFeature(RecordingsActivity::class.java) },
+            0 to Action(R.drawable.ic_keyboard,"手势回放") { openFeature(GesturesActivity::class.java) },
+            R.id.btnPlans to Action(R.drawable.ic_history,"延迟命令") { openFeature(CommandsActivity::class.java) },
+            R.id.btnVolume to Action(R.drawable.ic_volume,"电脑音量") { AudioDialog(this).show() }
+        ))
+        sections.addView(hints,LinearLayout.LayoutParams(-1,dp(48)).apply { topMargin=dp(8) })
     }
 
     private class Action(val icon: Int, val label: String, val body: () -> Unit)
@@ -861,22 +878,20 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
 
     private fun showMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)
-        popup.menu.add(0, 1, 0, getString(R.string.menu_retry))
-        popup.menu.add(0, 2, 1, getString(R.string.menu_manual))
-        popup.menu.add(0, 3, 2, getString(R.string.menu_disconnect))
-        popup.menu.add(0, 4, 3, getString(R.string.menu_forget))
-        popup.menu.add(0, 5, 4, getString(R.string.menu_clear))
-        popup.menu.add(0, 6, 5, getString(R.string.menu_about))
-        popup.menu.add(0, 30, 5, "外观主题")
-        popup.menu.add(0, 31, 5, "录音 / 录屏 / 摄像头录制")
-        popup.menu.add(0, 32, 5, "手势记录 / 延迟播放")
-        popup.menu.add(0, 33, 5, "隐私设备 · 摄像头 / 麦克风")
-        popup.menu.add(0, 9, 6, "查看崩溃日志")
-        popup.menu.add(0, 8, 7, getString(R.string.menu_send_file))
-        popup.menu.add(0, 7, 7, if (LanCmdService.isRunning) "关闭后台常驻" else "开启后台常驻")
-        popup.menu.add(0, 20, 8, "锁定电脑")
-        popup.menu.add(0, 21, 9, "重启电脑")
-        popup.menu.add(0, 22, 10, "关闭电脑")
+        val connection=popup.menu.addSubMenu("连接管理")
+        connection.add(0,1,0,getString(R.string.menu_retry))
+        connection.add(0,2,1,getString(R.string.menu_manual))
+        connection.add(0,3,2,getString(R.string.menu_disconnect))
+        connection.add(0,4,3,getString(R.string.menu_forget))
+        val settings=popup.menu.addSubMenu("应用设置")
+        settings.add(0,30,0,"外观主题")
+        settings.add(0,7,1,if(LanCmdService.isRunning)"关闭后台常驻" else "开启后台常驻")
+        settings.add(0,9,2,"查看崩溃日志")
+        settings.add(0,6,3,getString(R.string.menu_about))
+        val power=popup.menu.addSubMenu("电脑电源")
+        power.add(0,20,0,"锁定电脑")
+        power.add(0,21,1,"重启电脑")
+        power.add(0,22,2,"关闭电脑")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> ConnectionManager.retryNow()
