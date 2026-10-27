@@ -63,6 +63,37 @@ object Ui {
         }
     }
 
+    /** Reflow operation groups when narrow screens or large fonts need more room. */
+    class ActionRow(context: Context) : LinearLayout(context) {
+        init { orientation = HORIZONTAL }
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val available = MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
+            val visible = (0 until childCount).map { getChildAt(it) }.filter { it.visibility != GONE }
+            val minimum = visible.maxOfOrNull { child ->
+                val textWidth = if (child is TextView) child.paint.measureText(child.text.toString()).toInt() else 0
+                maxOf(dp(context, 96), minOf(dp(context, 200), textWidth + child.paddingLeft + child.paddingRight + dp(context, 24)))
+            } ?: 0
+            val stacked = available > 0 && visible.size * minimum > available
+            orientation = if (stacked) VERTICAL else HORIZONTAL
+            visible.forEachIndexed { index, child ->
+                val params = child.layoutParams as LayoutParams
+                val targetWidth = if (stacked) LayoutParams.MATCH_PARENT else 0
+                val targetWeight = if (stacked) 0f else 1f
+                val gap = if (index == 0) 0 else dp(context, 8)
+                if (params.width != targetWidth || params.weight != targetWeight ||
+                    params.topMargin != (if (stacked) gap else 0) ||
+                    params.marginStart != (if (stacked) 0 else gap) || params.marginEnd != 0) {
+                    params.width = targetWidth; params.weight = targetWeight
+                    params.leftMargin = 0; params.rightMargin = 0
+                    params.marginStart = if (stacked) 0 else gap; params.marginEnd = 0
+                    params.topMargin = if (stacked) gap else 0
+                    child.layoutParams = params
+                }
+            }
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        }
+    }
+
     /** 统一的文字外观：按字号套用行距、字重和颜色，避免逐处手写。 */
     fun text(context: Context, value: CharSequence, size: Float, colorId: Int): TextView =
         TextView(context).apply {

@@ -139,7 +139,7 @@ abstract class FeatureActivity : AppCompatActivity() {
 
     /** 并排的操作按钮组，自动等分并留出间距。 */
     protected fun actions(vararg items: MaterialButton): LinearLayout {
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val row = Ui.ActionRow(this)
         items.forEach { row.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
         return row
     }
@@ -183,7 +183,7 @@ abstract class FeatureActivity : AppCompatActivity() {
     /** 并排等分的按钮自动留出间距，避免相邻按钮贴在一起。 */
     private class SpacedButton(context: android.content.Context) : MaterialButton(context) {
         override fun setLayoutParams(params: ViewGroup.LayoutParams?) {
-            if (params is LinearLayout.LayoutParams && params.width == 0 && params.weight > 0f &&
+            if (parent !is Ui.ActionRow && params is LinearLayout.LayoutParams && params.width == 0 && params.weight > 0f &&
                 params.leftMargin == 0 && params.rightMargin == 0) {
                 val gap = (3 * resources.displayMetrics.density).toInt()
                 params.leftMargin = gap; params.rightMargin = gap

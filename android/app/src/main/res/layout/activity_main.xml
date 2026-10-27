@@ -139,7 +139,7 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <ScrollView android:id="@+id/homeTools" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1.5" android:fillViewport="false">
+    <ScrollView android:id="@+id/homeTools" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="3" android:fillViewport="false">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/cardDesktop"
@@ -183,16 +183,16 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <LinearLayout android:id="@+id/managementCards" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="horizontal" />
+    <com.aicode.lancmd.ToolGrid android:id="@+id/managementCards" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="horizontal" />
 
-    <LinearLayout
+    <com.aicode.lancmd.ToolGrid
         android:id="@+id/rowActions1"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
         android:orientation="horizontal" />
 
-    <LinearLayout
+    <com.aicode.lancmd.ToolGrid
         android:id="@+id/rowActions2"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
