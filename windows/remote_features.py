@@ -9,6 +9,7 @@ import secrets
 import subprocess
 import threading
 import time
+from contextlib import contextmanager
 
 
 SCOPES = {"screen": "屏幕共享", "camera": "摄像头共享", "input": "远程键盘"}
@@ -229,6 +230,8 @@ class RemoteFeatures:
         self.pointer_lock = threading.RLock()
         self.pointer_owners = {}
         self.playback_owner = None
+        self.camera_lock=threading.RLock()
+        self.camera_sessions={}
 
     def _check(self, state):
         if not self.supported:
@@ -263,6 +266,8 @@ class RemoteFeatures:
         session.on_close = lambda: self._close_session(session)
         session.approved_at = time.time()
         state.remote_sessions[session.sid] = session
+        if scope=="camera":
+            with self.camera_lock:self.camera_sessions[session.sid]=session
         self.log.info("开始共享 %s peer=%s client=%s", scope, state.peer, state.client_id)
         return {"sid": session.sid, "scope": scope, "expires_in": None}
 
@@ -275,7 +280,20 @@ class RemoteFeatures:
             session.last_active = time.monotonic()
         return session
 
+    @contextmanager
+    def camera_guard(self):
+        # Wait for an in-flight capture to release its handle, then reject old leases.
+        with self.camera_lock:
+            sessions=list(self.camera_sessions.values())
+            for session in sessions:session.close()
+            yield {"camera_sessions":len(sessions)}
+
     def frame(self, q, state, scope):
+        if scope=="camera":
+            with self.camera_lock:return self._frame(q,state,scope)
+        return self._frame(q,state,scope)
+
+    def _frame(self, q, state, scope):
         self.active(q, state, scope)
         action = q.get("action", "frame")
         if scope == "camera" and action == "list":
@@ -321,6 +339,8 @@ class RemoteFeatures:
             lambda: session.alive() and time.monotonic() - session.last_active < 12)
 
     def _close_session(self, session):
+        if session.scope=="camera":
+            with self.camera_lock:self.camera_sessions.pop(session.sid,None)
         self._release_pointer(session)
         release = getattr(self.backend, "release_local_input", None)
         if release:

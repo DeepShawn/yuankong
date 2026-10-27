@@ -92,6 +92,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     override fun onCreate(savedInstanceState: Bundle?) {
         Themes.apply(this)
         super.onCreate(savedInstanceState)
+        homeCategory=savedInstanceState?.getString("homeCategory") ?: "全部"
         try {
             setContentView(R.layout.activity_main)
         } catch (t: Throwable) {
@@ -206,6 +207,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("homeCategory",homeCategory)
         super.onSaveInstanceState(outState)
         if (!::tvLog.isInitialized) return
         val log = tvLog.text
@@ -228,6 +230,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     }
 
     private var prefsShell = "cmd"
+    private var homeCategory="全部"
 
     // ------------------------------------------------------------ 快捷操作
 
@@ -240,12 +243,16 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         val sections=management.parent as LinearLayout
         (hints.parent as android.view.ViewGroup).removeView(hints)
         sections.removeAllViews()
+        val categorized=linkedMapOf<String,MutableList<View>>()
+        var activeGroup=""
         fun section(title:String) {
+            activeGroup=title
+            categorized[title]=mutableListOf()
             sections.addView(TextView(this).apply {
                 text=title;textSize=12f;setTextColor(Themes.color(this@MainActivity,R.color.accent))
                 setPadding(dp(4),dp(14),dp(4),dp(5));typeface=android.graphics.Typeface.DEFAULT_BOLD
                 androidx.core.view.ViewCompat.setAccessibilityHeading(this,true)
-            })
+            }.also { categorized.getValue(title).add(it) })
         }
         fun tiles(row:LinearLayout,actions:List<Pair<Int,Action>>) {
             row.removeAllViews()
@@ -261,10 +268,10 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                 }
                 row.addView(item)
             }
-            sections.addView(row,LinearLayout.LayoutParams(-1,-2))
+            sections.addView(row,LinearLayout.LayoutParams(-1,-2));categorized.getValue(activeGroup).add(row)
         }
         section("共享与控制")
-        sections.addView(desktop)
+        sections.addView(desktop);categorized.getValue(activeGroup).add(desktop)
         desktop.setOnClickListener {
             if(ConnectionManager.isConnected())openFeature(DesktopActivity::class.java)
             else { toast("未连接，正在重连…");ConnectionManager.retryNow() }
@@ -297,6 +304,19 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             R.id.btnVolume to Action(R.drawable.ic_volume,"电脑音量") { AudioDialog(this).show() }
         ))
         sections.addView(hints,LinearLayout.LayoutParams(-1,dp(48)).apply { topMargin=dp(8) })
+        val chips=com.google.android.material.chip.ChipGroup(this).apply { isSingleSelection=true;isSelectionRequired=true;setSingleLine(true);contentDescription="首页工具分类" }
+        val labels=listOf("全部","共享与控制","文件与设备","系统与应用","录制与自动化")
+        labels.forEach { category->
+            chips.addView(com.google.android.material.chip.Chip(this).apply {
+                id=View.generateViewId();text=category;isCheckable=true;isChecked=category==homeCategory;setEnsureMinTouchTargetSize(true)
+                setOnCheckedChangeListener { _,checked->if(checked){homeCategory=category;categorized.forEach { (name,views)->views.forEach { it.visibility=if(category=="全部" || category==name)View.VISIBLE else View.GONE } };findViewById<android.widget.ScrollView>(R.id.homeTools).scrollTo(0,0)} }
+            })
+        }
+        categorized.forEach { (name,views)->views.forEach { it.visibility=if(homeCategory=="全部" || homeCategory==name)View.VISIBLE else View.GONE } }
+        val toolScroll=findViewById<android.widget.ScrollView>(R.id.homeTools)
+        val parent=toolScroll.parent as LinearLayout
+        parent.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled=false;addView(chips) },parent.indexOfChild(toolScroll),LinearLayout.LayoutParams(-1,dp(48)))
+
     }
 
     private class Action(val icon: Int, val label: String, val body: () -> Unit)
@@ -882,6 +902,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
 
     private fun showMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)
+        popup.menu.add(0,40,0,"全部工具 · 搜索")
         val connection=popup.menu.addSubMenu("连接管理")
         connection.add(0,1,0,getString(R.string.menu_retry))
         connection.add(0,2,1,getString(R.string.menu_manual))
@@ -913,6 +934,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                 7 -> toggleResident()
                 8 -> startPickFiles()
                 9 -> showCrashLog()
+                40 -> ToolNavigator.show(this)
                 30 -> ThemeDialog(this).show()
                 31 -> openFeature(RecordingsActivity::class.java)
                 32 -> openFeature(GesturesActivity::class.java)

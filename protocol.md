@@ -333,3 +333,10 @@ Android internal Activity transitions preserve pinned sharing sessions and send 
 `files.open` 可带 `application=default|wps,background=bool`，请求后台时使用 SW_SHOWNOACTIVATE 并将新建且同 PID 的窗口置于原前台窗口下方；单实例复用和应用自行激活不保证遵守。`files.mtime` 含 `modified` Unix秒，范围1970–2100，保留 atime，可带 file_id。
 
 `upload.begin` 可带 `file_id`，只允许覆盖该版本，`end` 提交前再次检查；冲突删除临时上传，保留电脑原件。成功返回新的 file_id。手机 Office 副本通过受限 FileProvider 的 content URI 向办公应用授权读写，明确确认后回传。
+
+
+## 2.8 隐私设备恢复与状态确认
+
+`capabilities.features` 增加 `privacy_device_recovery`。`privacy_devices.set_enabled(false)` 在硬件变更前释放 LanCmd 相关摄像头会话和录制并等待；不处理其他应用。常规 CM 接口在 0x17/0x28/0x13 时尝试所选设备的 SetupAPI DIF_PROPERTYCHANGE，验证 Camera/Image/捕获 AudioEndpoint 类别并设置 DI_QUIETINSTALL，不操作父设备。权限不足不进入备用流程。
+
+成功返回 `changed=true,method,enabled,problem,released={camera_sessions?,recordings?},notice`，状态必须已确认。驱动要求重启且尚未切换时返回 `changed=false,pending_reboot=true,notice`，不会自动重启。释放或驱动操作失败返回错误，安卓刷新核对状态并在原设备卡片保留结果。

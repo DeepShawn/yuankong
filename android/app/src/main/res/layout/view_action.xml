@@ -9,7 +9,7 @@
     android:focusable="true"
     android:gravity="center"
     android:orientation="vertical"
-    android:minHeight="74dp"
+    android:minHeight="88dp"
     android:paddingHorizontal="2dp"
     android:paddingVertical="9dp">
 

@@ -65,8 +65,8 @@ class TextEditorActivity : FeatureActivity() {
         pathLabel = label(path, 12f, R.color.dim).apply { setTextIsSelectable(true); maxLines = 3 }
         body.addView(pathLabel)
         val formats = LinearLayout(this)
-        encoding = Spinner(this).apply { adapter = ArrayAdapter(this@TextEditorActivity, android.R.layout.simple_spinner_dropdown_item, ENCODING_NAMES) }
-        newline = Spinner(this).apply { adapter = ArrayAdapter(this@TextEditorActivity, android.R.layout.simple_spinner_dropdown_item, listOf("保留换行", "Windows CRLF", "Unix LF", "Mac CR")) }
+        encoding = styleSpinner(Spinner(this)).apply { adapter = ArrayAdapter(this@TextEditorActivity, android.R.layout.simple_spinner_dropdown_item, ENCODING_NAMES) }
+        newline = styleSpinner(Spinner(this)).apply { adapter = ArrayAdapter(this@TextEditorActivity, android.R.layout.simple_spinner_dropdown_item, listOf("保留换行", "Windows CRLF", "Unix LF", "Mac CR")) }
         formats.addView(encoding, LinearLayout.LayoutParams(0,-2,1f)); formats.addView(newline, LinearLayout.LayoutParams(0,-2,1f)); body.addView(formats)
         text = EditText(this).apply {
             gravity = android.view.Gravity.TOP or android.view.Gravity.START

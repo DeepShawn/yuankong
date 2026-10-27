@@ -60,6 +60,8 @@ abstract class FeatureActivity : AppCompatActivity() {
             setNavigationIcon(R.drawable.ic_back)
             setNavigationIconTint(color(R.color.text))
             setNavigationOnClickListener { navigateBack() }
+            menu.add("全部工具").apply { setIcon(R.drawable.ic_more);setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS) }
+            setOnMenuItemClickListener { ToolNavigator.show(this@FeatureActivity);true }
         }
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(56)))
         body = LinearLayout(this).apply {
@@ -138,6 +140,10 @@ abstract class FeatureActivity : AppCompatActivity() {
         this.text = text
         isAllCaps = false
         minHeight = dp(48)
+        minWidth=0
+        setPadding(dp(12),paddingTop,dp(12),paddingBottom)
+        maxLines=2
+        ellipsize=android.text.TextUtils.TruncateAt.END
         cornerRadius = dp(14)
         typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
         rippleColor = android.content.res.ColorStateList.valueOf(color(R.color.accent_glow))
@@ -205,7 +211,10 @@ abstract class FeatureActivity : AppCompatActivity() {
             setPadding(dp(8),dp(6),dp(8),dp(6));setBackgroundResource(R.drawable.status_bg)
             contentDescription="操作结果";accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE
             setOnClickListener {
-                androidx.appcompat.app.AlertDialog.Builder(this@FeatureActivity).setTitle("操作结果").setMessage(text).setPositiveButton("关闭",null).show()
+                val expanded=maxLines==Int.MAX_VALUE
+                maxLines=if(expanded)4 else Int.MAX_VALUE
+                ellipsize=if(expanded)android.text.TextUtils.TruncateAt.END else null
+                announceForAccessibility(if(expanded)"结果已收起" else "结果已展开")
             }
         }
         return Feedback(parent,anchor,parent.indexOfChild(anchor),label,(button as? TextView)?.text.toString()).also { feedbacks[button]=it }

@@ -120,6 +120,7 @@ class NativeDefaultsTest(unittest.TestCase):
             apps.kernel.CloseHandle.assert_called_once_with(42)
     def test_privacy_veto_is_distinguished_from_permission_denial(self):
         hardware=PrivacyHardware();hardware.node=mock.Mock(return_value=1)
+        hardware.property_change=mock.Mock(side_effect=OSError("driver refused"))
         with mock.patch.object(hardware.cm,"CM_Disable_DevNode",return_value=0x17):
             with self.assertRaisesRegex(RuntimeError,"CR_REMOVE_VETOED"):hardware.set_enabled("test",False)
         with mock.patch.object(hardware.cm,"CM_Disable_DevNode",return_value=0x33):
