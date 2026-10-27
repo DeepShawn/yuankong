@@ -99,7 +99,7 @@ class FeatureUiTest {
             assertEquals(DesktopActivity::class.java.name, shadowOf(activity).nextStartedActivity.component!!.className)
             assertFalse("Screen is consolidated into the desktop card",tiles.any { it.contentDescription=="屏幕" })
             val expected = mapOf("摄像头" to MediaActivity::class.java,
-                "按键" to ControlActivity::class.java, "消息" to ControlActivity::class.java, "存储" to StorageActivity::class.java)
+                "按键" to ControlActivity::class.java, "消息" to ControlActivity::class.java, "文件管理" to StorageActivity::class.java, "文件搜索" to FileSearchActivity::class.java)
             expected.forEach { (label, type) ->
                 tiles.single { it.contentDescription == label }.performClick()
                 assertEquals(type.name, shadowOf(activity).nextStartedActivity.component!!.className)

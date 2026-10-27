@@ -79,6 +79,7 @@ class FileSearchActivity:FeatureActivity() {
             override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){search(true)}
         }
+        scope.setSelection(state?.getInt("scope",0) ?: 0);kind.setSelection(state?.getInt("filter",0) ?: 0);sorting.setSelection(state?.getInt("sort",0) ?: 0)
         scope.onItemSelectedListener=listener;kind.onItemSelectedListener=listener;sorting.onItemSelectedListener=listener
         input.addTextChangedListener(object:TextWatcher {
             override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
@@ -87,7 +88,7 @@ class FileSearchActivity:FeatureActivity() {
         })
         input.setOnEditorActionListener { _,action,_->if(action==android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH){search(true);true}else false }
     }
-    override fun onSaveInstanceState(out:Bundle) { out.putString("query",input.text.toString());super.onSaveInstanceState(out) }
+    override fun onSaveInstanceState(out:Bundle) { out.putString("query",input.text.toString());out.putInt("scope",scope.selectedItemPosition);out.putInt("filter",kind.selectedItemPosition);out.putInt("sort",sorting.selectedItemPosition);super.onSaveInstanceState(out) }
     override fun onStart() { super.onStart();poll=lifecycleScope.launch { while(isActive){refreshStatus();delay(1500)} } }
     override fun onStop() { poll?.cancel();super.onStop() }
     private suspend fun refreshStatus() {

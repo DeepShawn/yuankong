@@ -77,6 +77,16 @@ class FileSearchTest(unittest.TestCase):
         self.assertEqual("failed",self.manager.job["data"]["status"]);self.assertEqual(5,self.call(action="query")["total"])
     def test_overlapping_roots_do_not_duplicate_results(self):
         self.build([str(self.source),str(self.source/"Reports")]);self.assertEqual(5,self.call(action="query")["total"])
+    def test_device_disconnect_cancels_related_index_and_waits_for_release(self):
+        entered=threading.Event()
+        def hold(roots,job):
+            entered.set();job["cancel"].wait(3)
+            return
+            yield
+        with mock.patch.object(self.manager,"_enumerate",side_effect=hold):
+            self.call(action="build",roots=[str(self.source)]);self.assertTrue(entered.wait(1))
+            self.manager.stop_for_device({"paths":[str(self.source)]})
+        self.assertTrue(self.manager.job["done"].is_set());self.assertEqual("cancelled",self.manager.job["data"]["status"])
     def test_symlinks_and_junctions_are_not_traversed(self):
         alias=self.source/"alias"
         if os.name=="nt":

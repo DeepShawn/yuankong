@@ -92,7 +92,7 @@ class FileSearch:
                         if job["cancel"].is_set():raise SearchCancelled()
                         if Path(entry.path)==self.directory:continue
                         try:
-                            info=entry.stat(follow_symlinks=False)
+                            info=os.lstat(entry.path)
                             if stat.S_ISLNK(info.st_mode) or getattr(info,"st_file_attributes",0)&0x400:skipped+=1;continue
                             directory=stat.S_ISDIR(info.st_mode)
                             if not directory and not stat.S_ISREG(info.st_mode):continue
@@ -201,3 +201,14 @@ class FileSearch:
         with self.lock:
             self.closed=True
             if self.job:self.job["cancel"].set()
+
+    def stop_for_device(self,device):
+        roots=[str(p).replace("/","\\").rstrip("\\").casefold()+"\\" for p in device.get("paths",[]) if p]
+        with self.lock:
+            job=self.job
+            if not job or job["done"].is_set():return
+            if not roots:raise ValueError("设备路径未知，请先停止文件索引")
+            selected=[str(p).replace("/","\\").rstrip("\\").casefold()+"\\" for p in job["data"]["roots"]]
+            if not any(path.startswith(root) for path in selected for root in roots):return
+            job["cancel"].set()
+        if not job["done"].wait(5):raise ValueError("文件索引仍在释放设备，未断开，请稍后重试")

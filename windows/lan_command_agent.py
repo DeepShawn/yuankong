@@ -1144,6 +1144,7 @@ def prepare_usb_disconnect(device):
     _placeholders.stop_for_device(device)
     _file_schedule.stop_for_device(device)
     _file_jobs.stop_for_device(device)
+    _file_search.stop_for_device(device)
 
 _remote = RemoteFeatures(RpcError, log, os.path.join(_capture_dir, "LanCmdCapture.exe"))
 _devices = DeviceManager(os.path.join(APP_DIR, "device-policy.json"), is_admin,
