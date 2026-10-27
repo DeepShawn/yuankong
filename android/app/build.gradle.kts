@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 val keystorePropsFile = rootProject.file("keystore.properties")
@@ -63,6 +64,7 @@ android {
 
     buildFeatures {
         buildConfig = true
+        compose = true
     }
 }
 
@@ -79,6 +81,10 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.core:core-ktx:1.13.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+
+    // MIUI 风格的 Compose 组件库。界面按页逐步迁移到 Compose，
+    // 期间 View 页面与 Compose 页面共存，由 ComposeView 承载。
+    implementation("top.yukonga.miuix.kmp:miuix-android:0.8.8")
 
     testImplementation("junit:junit:4.13.2")
     // Robolectric 自带 conscrypt，而它只打包 linux-x86_64 的 .so，
