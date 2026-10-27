@@ -84,6 +84,52 @@ class FeatureUiTest {
         else -> emptyList()
     }
 
+    @Test fun cameraAndScreenPreviewSupportFullscreen() {
+        stopConnection()
+        listOf("camera" to "camera-fullscreen", "screen" to "screen-fullscreen").forEach { (kind, preview) ->
+            val intent = Intent(RuntimeEnvironment.getApplication(), MediaActivity::class.java).putExtra("kind", kind)
+            val controller = Robolectric.buildActivity(MediaActivity::class.java, intent).setup()
+            val activity = controller.get()
+            val root = activity.findViewById<View>(android.R.id.content)
+            val image = activity.findViewById<View>(android.R.id.content).let { content ->
+                fun find(view: View): View? = when {
+                    view.contentDescription == "摄像头实时画面" || view.contentDescription == "电脑屏幕实时画面" -> view
+                    view is android.view.ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull { find(view.getChildAt(it)) }
+                    else -> null
+                }
+                find(content)!!
+            }
+            val exit = activity.findViewById<MaterialButton>(R.id.mediaExitFullscreen)
+            val toggle = activity.findViewById<MaterialButton>(R.id.mediaFullscreen)
+            assertEquals(View.GONE, exit.visibility)
+
+            toggle.performClick()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals("Exit control must appear in fullscreen", View.VISIBLE, exit.visibility)
+            assertEquals("退出全屏", toggle.text.toString())
+            assertEquals("Start control is hidden in fullscreen", View.GONE,
+                buttons(root).single { it.text == "开始查看" }.visibility)
+            root.measure(View.MeasureSpec.makeMeasureSpec(411, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(891, View.MeasureSpec.EXACTLY))
+            root.layout(0, 0, 411, 891)
+            assertTrue("Fullscreen preview must use the full height, was ${image.height}", image.height > 800)
+            render(activity, preview)
+
+            exit.performClick()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(View.GONE, exit.visibility)
+            assertEquals("全屏", toggle.text.toString())
+            assertEquals(View.VISIBLE, buttons(root).single { it.text == "开始查看" }.visibility)
+
+            toggle.performClick()
+            shadowOf(Looper.getMainLooper()).idle()
+            activity.onBackPressedDispatcher.onBackPressed()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals("Back must leave fullscreen before closing the page", View.GONE, exit.visibility)
+            assertFalse(activity.isFinishing)
+            controller.pause().stop().destroy()
+        }
+    }
+
     @Test fun homeRoutesToScreenCameraKeyboardMessagesAndStorage() {
         val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
         stopConnection()
