@@ -10,6 +10,7 @@ import com.aicode.lancmd.net.ConnectionManager
 import com.aicode.lancmd.net.joinPath
 import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.math.BigDecimal
@@ -47,7 +48,12 @@ class PlaceholderFilesActivity : FeatureActivity() {
 
     override fun onStart() {
         super.onStart()
-        polling=task { while(true) { if(!busy)refreshNow();delay(1500) } }
+        polling=task { while(true) {
+            if(!busy)try { refreshNow() }
+            catch(e:CancellationException) { throw e }
+            catch(e:Exception) { status(e.message ?: "读取占位任务失败",true) }
+            delay(1500)
+        } }
     }
     override fun onStop() { polling?.cancel();polling=null;super.onStop() }
     override fun onSaveInstanceState(outState: Bundle) {

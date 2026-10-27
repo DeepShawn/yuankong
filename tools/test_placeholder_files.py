@@ -105,6 +105,10 @@ class PlaceholderTest(unittest.TestCase):
             alias.symlink_to(self.temp.name, target_is_directory=True)
             with self.assertRaises(Error):
                 self.call(action="create", path=str(alias / "other.dat"), size=10)
+    def test_relative_paths_and_windows_device_aliases_are_rejected(self):
+        for path in ("relative.dat", *[str(Path(self.temp.name) / name) for name in ("NUL.txt", "CON .txt", "COM¹.dat", "CONOUT$", "file.")]):
+            with self.subTest(path=path), self.assertRaises(Error):
+                self.call(action="create", path=path, size=0)
     def test_free_space_preflight_and_runtime_reserve_cleanup(self):
         self.backend.available = RESERVE_BYTES + 9
         with self.assertRaisesRegex(Error, "空间不足"):

@@ -36,7 +36,7 @@ class DevicesActivity : FeatureActivity() {
         if (ConnectionManager.sessionClient() !== client || client.closed) {
             throw IOException("连接已改变，请重新打开设备管理；未向新电脑发送操作")
         }
-        val response = client.call("devices", params, 45_000)
+        val response = client.call("devices", params, if(params.optString("action")=="force_disconnect")120_000 else 45_000)
         if (!response.optBoolean("ok")) {
             val error = response.optString("error", "设备操作失败")
             throw IOException(if (error.contains("未知命令")) "请更新 Windows 接收端至 1.8.0" else error)

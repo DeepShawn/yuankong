@@ -198,7 +198,7 @@ class StorageActivity : FeatureActivity() {
         disks.addView(box, LinearLayout.LayoutParams(dp(208), -2).apply { marginEnd = dp(10) })
     }
 
-    private fun load(target: String) {
+    private fun load(target: String, notice: String? = null) {
         loading?.cancel()
         loading = task {
             status("正在读取目录…")
@@ -210,7 +210,7 @@ class StorageActivity : FeatureActivity() {
             search.setText("")
             crumbs()
             filter()
-            status(if (entries.isEmpty()) "此目录为空" else "${entries.size} 项 · 长按目录可管理")
+            status(listOfNotNull(notice,if (entries.isEmpty()) "此目录为空" else "${entries.size} 项 · 长按目录可管理").joinToString(" · "))
         }
     }
 
@@ -396,13 +396,12 @@ class StorageActivity : FeatureActivity() {
                             if(transfer?.isCompleted==false)throw java.io.IOException("文件正在传输，请先完成或取消")
                             val response=pinnedCall(client,"devices",JSONObject().put("action",if(force)"force_disconnect" else "eject").put("device_id",selected.getString("id")).apply {
                                 if(force)put("confirm_data_loss",true)
-                            },45_000)
+                            },if(force)120_000 else 45_000)
                             val storage=pinnedCall(client,"storage")
                             disks.removeAllViews()
                             val drives=storage.getJSONArray("drives")
                             for(i in 0 until drives.length())disk(drives.getJSONObject(i))
-                            load(storage.optString("home"))
-                            status(response.optString("notice","设备已安全弹出"))
+                            load(storage.optString("home"),response.optString("notice","设备已安全弹出"))
                         }
                     }.show()
             }.setNegativeButton("取消",null).show()

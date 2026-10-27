@@ -22,10 +22,14 @@ CHUNK_BYTES = 4 * 1024 * 1024
 def target_path(value):
     if not isinstance(value, str) or not value.strip() or len(value) > 32700 or "\0" in value:
         raise ValueError("请输入占位文件的完整路径")
-    path = Path(os.path.abspath(os.path.expanduser(value)))
+    expanded = os.path.expanduser(value)
+    if not os.path.isabs(expanded):
+        raise ValueError("请输入占位文件的绝对路径")
+    path = Path(os.path.abspath(expanded))
     name = path.name
     if (not name or name.endswith((".", " ")) or any(ord(c) < 32 or c in ':*?"<>|' for c in name) or
-            name.split(".")[0].upper() in {"CON", "PRN", "AUX", "NUL", *["COM%d" % n for n in range(1, 10)], *["LPT%d" % n for n in range(1, 10)]}):
+            name.split(".")[0].rstrip(" ").upper() in {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+                *["COM%s" % n for n in "123456789¹²³"], *["LPT%s" % n for n in "123456789¹²³"]}):
         raise ValueError("文件名不兼容 Windows")
     for parent in (path.parent, *path.parent.parents):
         info = parent.lstat()
