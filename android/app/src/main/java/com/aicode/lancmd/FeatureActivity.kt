@@ -227,6 +227,8 @@ abstract class FeatureActivity : AppCompatActivity() {
         catch (e: Exception) { status(e.message ?: "操作失败", true) }
     }
 
+    internal fun fileOperationNotice(text:String)=status(text)
+
     protected fun status(text: String, error: Boolean = false) {
         if (isDestroyed) return
         statusText.text = text
@@ -255,11 +257,12 @@ abstract class FeatureActivity : AppCompatActivity() {
             val expand=button("展开逐项结果") {
                 scroll.visibility=if(scroll.visibility==View.VISIBLE)View.GONE else View.VISIBLE
                 topDetailsButton?.text=if(scroll.visibility==View.VISIBLE)"收起逐项结果" else "展开逐项结果"
-            }.apply { textSize=12f;minHeight=dp(36) }
+            }.apply { textSize=12f;minHeight=dp(48) }
             box.addView(expand);box.addView(scroll,LinearLayout.LayoutParams(-1,dp(104)))
             body.addView(box,1)
             topDetails=box;topDetailsText=content;topDetailsScroll=scroll;topDetailsButton=expand
         }
+        topDetailsScroll?.layoutParams=topDetailsScroll?.layoutParams?.apply { height=dp((lines.size*20+12).coerceIn(48,104)) }
         topDetailsText?.text=lines.joinToString("\n").take(100_000)
         topDetails?.visibility=if(lines.isEmpty())View.GONE else View.VISIBLE
         topDetailsScroll?.visibility=if(failed)View.VISIBLE else View.GONE

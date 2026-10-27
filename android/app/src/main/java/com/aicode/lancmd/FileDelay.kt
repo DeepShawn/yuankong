@@ -27,6 +27,7 @@ object FileDelay {
         val count=seconds(context)
         for(left in count downTo 1) { pinnedCall(client,"ping");notice("将在 $left 秒后开始，需要手机保持连接");delay(1000) }
     }
+    private fun announce(context:Context,notice:(String)->Unit,message:String) { notice(message);(context as? FeatureActivity)?.fileOperationNotice(message) }
     suspend fun call(context:Context,client:AgentClient?,command:String,params:JSONObject,timeout:Long=30_000,notice:(String)->Unit={}):JSONObject {
         val count=seconds(context)
         if(count==0)return pinnedCall(client,command,params,timeout)
@@ -38,8 +39,8 @@ object FileDelay {
                 "completed"->return job.getJSONObject("result").put("ok",true)
                 "failed"->throw IOException(job.optString("error","延迟文件操作失败"))
                 "cancelled"->throw IOException("延迟文件操作已取消")
-                "waiting"->notice("电脑将在 ${((job.optDouble("due")*1000-System.currentTimeMillis())/1000).toInt().coerceAtLeast(0)} 秒后执行 · 可在文件计划取消")
-                else->notice("电脑正在执行文件操作…")
+                "waiting"->announce(context,notice,"电脑将在 ${((job.optDouble("due")*1000-System.currentTimeMillis())/1000).toInt().coerceAtLeast(0)} 秒后执行 · 可在文件计划取消")
+                else->announce(context,notice,"电脑正在执行文件操作…")
             }
             delay(800)
         }

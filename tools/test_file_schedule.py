@@ -97,6 +97,27 @@ class NativeDefaultsTest(unittest.TestCase):
         with mock.patch.object(ctypes.windll.user32,"MessageBoxW",side_effect=display):
             WindowsBackend("").message("标题","内容");self.assertTrue(event.wait(3))
         self.assertEqual([("标题","内容")],seen)
+    def test_background_document_uses_no_activation_and_only_repositions_its_new_window(self):
+        from document_open import open_document
+        with tempfile.TemporaryDirectory() as folder:
+            document=Path(folder)/"report & 中文.docx";document.write_bytes(b"office")
+            apps=mock.Mock();shell=mock.Mock();apps.user.GetForegroundWindow.side_effect=[10,20]
+            apps.user.IsWindow.side_effect=[True,False]
+            apps.kernel.GetProcessId.return_value=100
+            apps.windows.side_effect=[[],[{"handle":"20","pid":100},{"handle":"30","pid":200}]]
+            captured=[]
+            def execute(pointer):
+                info=pointer._obj;captured.append((info.lpFile,info.lpParameters,info.nShow,info.fMask));info.hProcess=42;return True
+            shell.ShellExecuteExW.side_effect=execute
+            def thread(**kwargs):
+                result=mock.Mock();result.start.side_effect=kwargs["target"];return result
+            with mock.patch("document_open.wps_executable",return_value=Path(folder)/"wps.exe"),mock.patch("desktop_apps.DesktopApps",return_value=apps),mock.patch("document_open.ctypes.WinDLL",return_value=shell),mock.patch("document_open.threading.Thread",side_effect=thread),mock.patch("document_open.time.sleep"):
+                result=open_document(document,"wps",True)
+            self.assertTrue(result["background_requested"])
+            self.assertEqual(4,captured[0][2]);self.assertIn(str(document),captured[0][1])
+            apps.user.SetWindowPos.assert_called_once_with(20,10,0,0,0,0,0x13)
+            apps.user.SetForegroundWindow.assert_called_once_with(10)
+            apps.kernel.CloseHandle.assert_called_once_with(42)
     def test_privacy_veto_is_distinguished_from_permission_denial(self):
         hardware=PrivacyHardware();hardware.node=mock.Mock(return_value=1)
         with mock.patch.object(hardware.cm,"CM_Disable_DevNode",return_value=0x17):

@@ -53,9 +53,9 @@ class MultiSelectUiTest {
         while(System.currentTimeMillis()<end){shadowOf(Looper.getMainLooper()).idle();if(check())return;Thread.sleep(10)}
         fail("UI did not settle")
     }
-    private fun preview(v:View,name:String) {
-        v.measure(View.MeasureSpec.makeMeasureSpec(411,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(891,View.MeasureSpec.EXACTLY));v.layout(0,0,411,891)
-        val bitmap=Bitmap.createBitmap(411,891,Bitmap.Config.ARGB_8888);v.draw(Canvas(bitmap))
+    private fun preview(v:View,name:String,height:Int=891) {
+        v.measure(View.MeasureSpec.makeMeasureSpec(411,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(height,View.MeasureSpec.EXACTLY));v.layout(0,0,411,height)
+        val bitmap=Bitmap.createBitmap(411,height,Bitmap.Config.ARGB_8888);v.draw(Canvas(bitmap))
         File("build/ui-previews/$name.png").apply { parentFile!!.mkdirs() }.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) };bitmap.recycle()
     }
     @Test fun fileSelectionSurvivesFilteringAndCopyMoveUseFrozenVersions() {
@@ -73,13 +73,15 @@ class MultiSelectUiTest {
                 waitFor { latest().getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled==true }
                 latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick();shadowOf(Looper.getMainLooper()).idle()
                 val confirmation=latest();confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-                waitFor { texts(root).any { it.contains("成功 1，失败 1") } && button(root,"退出多选").isEnabled }
+                waitFor { stub.requests.any { it.optString("action")=="create" && it.optString("operation")==operation } && texts(root).any { it.startsWith("$label：成功 1，失败 1") } && button(root,"退出多选").isEnabled }
                 assertFalse(confirmation.isShowing)
                 val q=stub.requests.last { it.optString("action")=="create" }
                 assertEquals(operation,q.getString("operation"));assertEquals("C:\\data",q.getString("destination"))
                 assertEquals(2,q.getJSONArray("items").length())
                 assertEquals(setOf("a".repeat(64),"b".repeat(64)),(0..1).map { q.getJSONArray("items").getJSONObject(it).getString("file_id") }.toSet())
                 preview(root,"file-batch-result")
+                preview(root,"file-batch-small",640)
+                assertTrue("At least one file row must remain reachable",all(root).filterIsInstance<androidx.recyclerview.widget.RecyclerView>().single().height>=72)
                 search.setText("");button(root,"全选结果").performClick()
             }
             button(root,"反选").performClick();assertTrue(texts(root).any { it.startsWith("已选 0 项") })

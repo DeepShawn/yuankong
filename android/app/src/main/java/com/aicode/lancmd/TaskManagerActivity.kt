@@ -70,7 +70,7 @@ class TaskManagerActivity : FeatureActivity() {
         sort=styleSpinner(Spinner(this).apply { adapter=ArrayAdapter(this@TaskManagerActivity,android.R.layout.simple_spinner_dropdown_item,listOf("内存排序","CPU 排序","名称排序")) })
         controls.addView(sort,LinearLayout.LayoutParams(0,-2,2f))
         controls.addView(button("刷新") { refresh() }.apply { minWidth=0;textSize=12f },LinearLayout.LayoutParams(0,-2,1f))
-        selectMode=button("多选") { if(!batchBusy){multi=!multi;if(!multi)selection.clear();updateSelection();adapter.notifyDataSetChanged()} }.apply { minWidth=0;textSize=12f }
+        selectMode=button("多选") { if(!batchBusy){multi=!multi;if(!multi)selection.clear();updateSelection();adapter.notifyDataSetChanged()} }.apply { minWidth=0;textSize=12f;setPadding(dp(4),0,dp(4),0);setSingleLine() }
         controls.addView(selectMode,LinearLayout.LayoutParams(0,-2,1f));body.addView(controls)
         automatic=styleCheck(CheckBox(this).apply { text="每 3 秒刷新（选择按 PID 和创建时间保留）";isChecked=true });body.addView(automatic)
         selectionBar=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }

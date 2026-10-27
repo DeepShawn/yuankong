@@ -170,10 +170,11 @@ class StorageActivity : FeatureActivity() {
         }
         body.addView(actions)
         val tools = LinearLayout(this)
-        tools.addView(button("占位文件") { openPlaceholder() }.apply { textSize=12f;minWidth=0;contentDescription="创建 0–500 GB 隐藏系统占位文件" },LinearLayout.LayoutParams(0,-2,1f))
+        tools.addView(button("占位文件") { openPlaceholder() }.apply { textSize=12f;minWidth=0;setPadding(dp(6),paddingTop,dp(6),paddingBottom);contentDescription="创建 0–500 GB 隐藏系统占位文件" },LinearLayout.LayoutParams(0,-2,1f))
         tools.addView(button("文件任务") { showFileJobs() }.apply { textSize=12f;minWidth=0 },LinearLayout.LayoutParams(0,-2,1f))
         tools.addView(button("延迟计划") { showFilePlans() }.apply { textSize=12f;minWidth=0 },LinearLayout.LayoutParams(0,-2,1f))
-        tools.addView(button("U盘管理") { usbActions() }.apply { textSize=12f;minWidth=0;contentDescription="U盘弹出 / 断开" },LinearLayout.LayoutParams(0,-2,1f))
+        tools.addView(button("U盘管理") { usbActions() }.apply { textSize=12f;minWidth=0;setPadding(dp(6),paddingTop,dp(6),paddingBottom);contentDescription="U盘弹出 / 断开" },LinearLayout.LayoutParams(0,-2,1f))
+        for(i in 0 until tools.childCount)(tools.getChildAt(i) as? com.google.android.material.button.MaterialButton)?.apply { setPadding(dp(6),paddingTop,dp(6),paddingBottom);setSingleLine() }
         body.addView(tools)
         search = EditText(this).apply {
             hint = "搜索当前目录"
@@ -187,7 +188,7 @@ class StorageActivity : FeatureActivity() {
         }
         val searchRow=LinearLayout(this)
         searchRow.addView(search,LinearLayout.LayoutParams(0,dp(48),1f))
-        multiButton=button("多选") { if(!operationsBusy){multi=!multi;if(!multi)selection.clear();updateSelection();adapter.notifyDataSetChanged()} }.apply { minWidth=0;textSize=12f }
+        multiButton=button("多选") { if(!operationsBusy){multi=!multi;if(!multi)selection.clear();updateSelection();adapter.notifyDataSetChanged()} }.apply { minWidth=0;textSize=12f;setPadding(dp(4),0,dp(4),0);setSingleLine() }
         searchRow.addView(button("延迟 ${FileDelay.seconds(this)}s") { FileDelay.choose(this) { (searchRow.getChildAt(1) as? android.widget.TextView)?.text="延迟 ${FileDelay.seconds(this)}s" } }.apply { minWidth=0;textSize=11f;setPadding(dp(4),0,dp(4),0);contentDescription="设置文件操作延迟" },LinearLayout.LayoutParams(dp(80),dp(48)))
         searchRow.addView(multiButton,LinearLayout.LayoutParams(dp(84),dp(48)))
         body.addView(searchRow, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(4);bottomMargin=dp(4) })
@@ -450,8 +451,10 @@ class StorageActivity : FeatureActivity() {
                     task {
                         checkSource()
                         if(operationsBusy)return@task
+                        operationsBusy=true;lastResult=null;lastError=false;clearTopResults();updateSelection();status("正在提交$title 文件任务…")
                         val specs=JSONArray(targets.map { JSONObject().put("path",joinPath(base,it.getString("name"))).put("file_id",it.getString("file_id")) })
-                        val result=storageCall("file_jobs",JSONObject().put("action","create").put("operation",operation).put("items",specs).apply { if(destination.isNotBlank())put("destination",destination) })
+                        val result=try { storageCall("file_jobs",JSONObject().put("action","create").put("operation",operation).put("items",specs).apply { if(destination.isNotBlank())put("destination",destination) }) }
+                            finally { operationsBusy=false;updateSelection() }
                         trackFileJob(result.getJSONObject("job").getString("id"),operation,base)
                     }
                 }.show()
@@ -686,7 +689,7 @@ class StorageActivity : FeatureActivity() {
                             val response=try { pinnedCall(client,"devices",JSONObject().put("action",if(force)"force_disconnect" else "eject").put("device_id",selected.getString("id")).apply {
                                 if(force)put("confirm_data_loss",true)
                             },if(force)120_000 else 45_000) } catch(e:Exception) {
-                                if(force && (e.message.orEmpty().contains("无效的设备管理操作") || e.message.orEmpty().contains("未知命令")))throw java.io.IOException(usbUpgradeMessage(receiverVersion))
+                                if(force && (e.message.orEmpty().contains("无效的设备管理操作") || e.message.orEmpty().contains("未知命令") || e.message.orEmpty().contains("请完整更新 Windows")))throw java.io.IOException(usbUpgradeMessage(receiverVersion))
                                 throw e
                             }
                             val storage=pinnedCall(client,"storage")
