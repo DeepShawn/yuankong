@@ -260,6 +260,7 @@ class ManagementUiTest {
                 controller.pause().stop().destroy()
             }
             val home=Robolectric.buildActivity(MainActivity::class.java).setup();val activity=home.get()
+            all(activity.window.decorView).filterIsInstance<com.google.android.material.chip.Chip>().single { it.text=="系统与应用" }.performClick()
             for(height in listOf(640,891)) {
                 render(activity.window.decorView,"management-home-$height",height=height)
                 val cards=activity.findViewById<ViewGroup>(R.id.managementCards)
