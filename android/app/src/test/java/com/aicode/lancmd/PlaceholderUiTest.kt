@@ -112,7 +112,7 @@ class PlaceholderUiTest {
             stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val root=controller.get().window.decorView
             waitFor { all(root).filterIsInstance<TextView>().any { it.text=="reserve.dat" } }
             fun select(force:Boolean) {
-                buttons(root).single { it.text=="U盘弹出 / 断开" }.performClick();shadowOf(Looper.getMainLooper()).idle();choose(if(force)1 else 0)
+                buttons(root).single { it.text=="U盘管理" }.performClick();shadowOf(Looper.getMainLooper()).idle();choose(if(force)1 else 0)
                 waitFor { latest().listView?.adapter?.count==1 };choose(0)
             }
             select(false);assertFalse(stub.requests.any { it.optString("action")=="eject" })
@@ -142,7 +142,7 @@ class PlaceholderUiTest {
         Stub().use { first->Stub().use { second->
             first.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val root=controller.get().window.decorView
             waitFor { all(root).filterIsInstance<TextView>().any { it.text=="reserve.dat" } }
-            buttons(root).single { it.text=="U盘弹出 / 断开" }.performClick();shadowOf(Looper.getMainLooper()).idle();choose(1)
+            buttons(root).single { it.text=="U盘管理" }.performClick();shadowOf(Looper.getMainLooper()).idle();choose(1)
             waitFor { latest().listView?.adapter?.count==1 };choose(0)
             second.install();latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("电脑连接已改变") } }
@@ -151,7 +151,7 @@ class PlaceholderUiTest {
         } }
     }
 
-    @Test fun fileDeletionResultStaysInTheConfirmationInsteadOfTheTopOfThePage() {
+    @Test fun fileDeletionResultAppearsAtTopAndDismissesConfirmation() {
         Stub().use { stub->
             stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get();val root=activity.window.decorView
             waitFor { all(root).filterIsInstance<TextView>().any { it.text=="reserve.dat" } }
@@ -163,8 +163,8 @@ class PlaceholderUiTest {
             shadowOf(Looper.getMainLooper()).idle();val confirmation=latest()
             assertFalse(stub.requests.any { it.optString("cmd")=="rm" })
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(confirmation.window!!.decorView).filterIsInstance<TextView>().any { it.text.contains("删除完成") } }
-            assertTrue(confirmation.isShowing)
+            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("删除完成") } }
+            assertFalse(confirmation.isShowing)
             assertEquals("E:\\reserve.dat",stub.requests.single { it.optString("cmd")=="rm" }.getString("path"))
             confirmation.dismiss();menu.dismiss();controller.pause().stop().destroy()
         }
@@ -192,7 +192,7 @@ class PlaceholderUiTest {
                                 .put("devices",JSONArray().put(usb).put(JSONObject().put("id","USBSTOR\\SYSTEM").put("name","System USB").put("kind","storage").put("protected",true).put("ejectable",true)))
                                 .put("disconnected",JSONArray().apply { if(disconnected)put(JSONObject(usb.toString()).put("enabled",false).put("problem",22)) })
                         }
-                        "capabilities"->result.put("features",JSONArray().put("placeholders"))
+                        "capabilities"->result.put("version","2.7.0").put("features",JSONArray().put("placeholders").put("usb_connection"))
                     }
                     requests.add(q);writer.write(result.toString()+"\n");writer.flush()
                 }

@@ -266,7 +266,7 @@ class ManagementUiTest {
         }
     }
 
-    @Test fun endingProcessKeepsItsResultInTheConfirmationBesideTheAction() {
+    @Test fun endingProcessReportsAtTopWithoutAResultDialog() {
         Stub().use { stub->
             stub.taskCanTerminate=true;stub.install()
             val controller=Robolectric.buildActivity(TaskManagerActivity::class.java).setup();val activity=controller.get()
@@ -278,8 +278,8 @@ class ManagementUiTest {
             val confirmation=ShadowDialog.getLatestDialog() as AlertDialog
             assertFalse(stub.requests.any { it.optString("action")=="terminate" })
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(confirmation.window!!.decorView).filterIsInstance<TextView>().any { it.text.contains("已结束 test.exe") } }
-            assertTrue(confirmation.isShowing)
+            waitFor { all(activity.window.decorView).filterIsInstance<TextView>().any { it.text.contains("成功 1") } }
+            assertFalse(confirmation.isShowing)
             assertEquals(777,stub.requests.single { it.optString("action")=="terminate" }.getInt("pid"))
             confirmation.dismiss();controller.pause().stop().destroy()
         }

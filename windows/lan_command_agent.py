@@ -30,6 +30,7 @@ import platform
 import re
 import secrets
 import shutil
+import stat
 import signal
 import socket
 import subprocess
@@ -38,7 +39,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "2.6.0"
+VERSION = "2.7.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -617,6 +618,7 @@ def cmd_ls(path):
         full = os.path.join(target, name)
         try:
             st = os.stat(full)
+            entry_info = os.lstat(full)
             is_dir = os.path.isdir(full)
             items.append(
                 {
@@ -626,11 +628,14 @@ def cmd_ls(path):
                     "mtime": int(st.st_mtime),
                     "hidden": bool(getattr(st, "st_file_attributes", 0) & 2),
                     "system": bool(getattr(st, "st_file_attributes", 0) & 4),
+                    "file_id": file_token(entry_info),
+                    "link": stat.S_ISLNK(entry_info.st_mode) or bool(getattr(entry_info,"st_file_attributes",0)&0x400),
                 }
             )
         except OSError:
             items.append({"name": name, "dir": False, "size": 0, "mtime": 0})
-    return {"path": os.path.abspath(target), "items": items, "parent": os.path.dirname(os.path.abspath(target))}
+    return {"path": os.path.abspath(target), "items": items, "parent": os.path.dirname(os.path.abspath(target)),
+            "file_id": file_token(os.lstat(target))}
 
 
 def cmd_get(path, max_bytes=None):
@@ -857,15 +862,25 @@ def cmd_download(q, st):
         path = os.path.expanduser(str(q.get("path") or ""))
         if not path or not os.path.isfile(path):
             raise RpcError("文件不存在: %s" % path)
-        size = os.path.getsize(path)
-        limit = int(cfg["max_upload_bytes"])
-        if size > limit:
-            raise RpcError("文件 %s 超过上限 %s" % (human_size(size), human_size(limit)), 2)
+        fh = open(path, "rb")
+        try:
+            info = os.fstat(fh.fileno())
+            size = info.st_size
+            expected = q.get("file_id")
+            if expected is not None and (expected != file_token(info) or os.path.islink(path) or getattr(os.lstat(path),"st_file_attributes",0)&0x400):
+                raise RpcError("所选文件已变化或属于链接，请刷新后重新下载")
+            limit = int(cfg["max_upload_bytes"])
+            if size > limit:
+                raise RpcError("文件 %s 超过上限 %s" % (human_size(size), human_size(limit)), 2)
+        except Exception:
+            fh.close()
+            raise
         sid = _new_sid()
         st.downloads[sid] = {
-            "fh": open(path, "rb"),
+            "fh": fh,
             "path": path,
             "size": size,
+            "file_id": expected,
             "ts": time.time(),
         }
         log.info("下载开始 %s (%s) sid=%s", path, human_size(size), sid)
@@ -883,6 +898,9 @@ def cmd_download(q, st):
         raise RpcError("下载会话不存在或已过期", 3)
 
     if action == "chunk":
+        if sess.get("file_id") is not None and file_token(os.fstat(sess["fh"].fileno())) != sess["file_id"]:
+            sess["fh"].close();st.downloads.pop(sid,None)
+            raise RpcError("文件在下载期间已变化，已停止，未报告成功")
         offset = int(q.get("offset") or 0)
         want = int(q.get("len") or cfg["chunk_bytes"])
         if offset < 0 or offset > sess["size"]:
@@ -909,10 +927,12 @@ def cmd_download(q, st):
     raise RpcError("未知下载动作: %s" % action)
 
 
-def cmd_rm(path):
+def cmd_rm(path, expected=None):
     path = os.path.expanduser(path or "")
     if not path or not os.path.exists(path):
         raise RpcError("路径不存在: %s" % path)
+    if expected and file_token(os.lstat(path)) != expected:
+        raise RpcError("所选文件已变化，请刷新后重试")
     if os.path.isdir(path):
         shutil.rmtree(path)
     else:
@@ -1096,6 +1116,7 @@ from browser_control import browser_request
 from script_runner import ScriptRunner
 from privacy_devices import PrivacyDevices
 from placeholder_files import PlaceholderFiles
+from file_jobs import FileJobs, file_token
 
 _capture_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 
@@ -1107,6 +1128,7 @@ def prepare_usb_disconnect(device):
         if any(location.startswith(root) for root in roots):
             raise ValueError("接收端或恢复记录位于此 USB 设备，请移到本机磁盘后再断开")
     _placeholders.stop_for_device(device)
+    _file_jobs.stop_for_device(device)
 
 _remote = RemoteFeatures(RpcError, log, os.path.join(_capture_dir, "LanCmdCapture.exe"))
 _devices = DeviceManager(os.path.join(APP_DIR, "device-policy.json"), is_admin,
@@ -1120,13 +1142,14 @@ _tasks = TaskManager(protected=(_capture_dir,))
 _scripts = ScriptRunner()
 _privacy_devices = PrivacyDevices(is_admin)
 _placeholders = PlaceholderFiles()
+_file_jobs = FileJobs(os.path.join(APP_DIR,"file-jobs.json"),protected=(_capture_dir,APP_DIR,os.environ.get("SystemRoot")))
 
 
 def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures"])
-        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices","placeholders"])
+        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1164,6 +1187,7 @@ HANDLERS = {
     "scripts": lambda q, st: _scripts.request(q,st,RpcError),
     "privacy_devices": lambda q, st: _privacy_devices.request(q,RpcError),
     "placeholders": lambda q, st: _placeholders.request(q,st,RpcError),
+    "file_jobs": lambda q, st: _file_jobs.request(q,st,RpcError),
     "message": _remote.message,
     "info": lambda q, st: cmd_info(),
     "exec": lambda q, st: run_exec(
@@ -1174,7 +1198,7 @@ HANDLERS = {
     "put": lambda q, st: cmd_put(q.get("path", ""), q.get("data", ""), q.get("overwrite", True)),
     "upload": cmd_upload,
     "download": cmd_download,
-    "rm": lambda q, st: cmd_rm(q.get("path", "")),
+    "rm": lambda q, st: cmd_rm(q.get("path", ""), q.get("file_id")),
     "mkdir": lambda q, st: cmd_mkdir(q.get("path", "")),
     "rename": lambda q, st: cmd_rename(q.get("path", ""), q.get("to", "")),
     "screenshot": lambda q, st: _remote.frame(q, st, "screen"),
