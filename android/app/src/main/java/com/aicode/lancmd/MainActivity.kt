@@ -243,6 +243,15 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
         val sections=management.parent as LinearLayout
         (hints.parent as android.view.ViewGroup).removeView(hints)
         sections.removeAllViews()
+        sections.addView(com.google.android.material.button.MaterialButton(this).apply {
+            text = "搜索全部工具与操作"
+            contentDescription = "搜索全部工具与操作"
+            Ui.styleSecondary(this)
+            gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
+            setIconResource(R.drawable.ic_more)
+            iconTint = android.content.res.ColorStateList.valueOf(Themes.color(this@MainActivity,R.color.accent))
+            setOnClickListener { ToolNavigator.show(this@MainActivity) }
+        }, LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(8) })
         val categorized=linkedMapOf<String,MutableList<View>>()
         var activeGroup=""
         fun section(title:String) {
@@ -297,7 +306,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             0 to Action(R.drawable.ic_lock,"应用锁") { openFeature(AppLocksActivity::class.java) }
         ))
         section("录制与自动化")
-        tiles(LinearLayout(this),listOf(
+        tiles(ToolGrid(this),listOf(
             0 to Action(R.drawable.ic_camera,"录音 / 录屏") { openFeature(RecordingsActivity::class.java) },
             0 to Action(R.drawable.ic_keyboard,"手势回放") { openFeature(GesturesActivity::class.java) },
             R.id.btnPlans to Action(R.drawable.ic_history,"延迟命令") { openFeature(CommandsActivity::class.java) },

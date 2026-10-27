@@ -49,7 +49,11 @@ object ToolNavigator {
             for((group,items) in matches.groupBy { it.group }) {
                 list.addView(TextView(activity).apply { text=group;textSize=11.5f;letterSpacing=0.05f;typeface=android.graphics.Typeface.create("sans-serif-medium",android.graphics.Typeface.NORMAL);setTextColor(Themes.color(activity,R.color.accent));setPadding(dp(4),dp(16),0,dp(6));androidx.core.view.ViewCompat.setAccessibilityHeading(this,true) })
                 for(tool in items)list.addView(MaterialButton(activity).apply {
-                    text=tool.title+"\n"+tool.detail;textSize=13f;isAllCaps=false;gravity=android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
+                    text=android.text.SpannableString(tool.title+"\n"+tool.detail).apply {
+                        setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD),0,tool.title.length,0)
+                        setSpan(android.text.style.RelativeSizeSpan(0.85f),tool.title.length+1,length,0)
+                        setSpan(android.text.style.ForegroundColorSpan(Themes.color(activity,R.color.dim)),tool.title.length+1,length,0)
+                    };textSize=15f;isAllCaps=false;gravity=android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
                     minHeight=dp(64);cornerRadius=dp(16);setPadding(dp(14),dp(10),dp(12),dp(10));setIconResource(tool.icon);iconTint=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.accent));iconSize=dp(22)
                     backgroundTintList=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.surface_variant));setTextColor(Themes.color(activity,R.color.text))
                     strokeWidth=dp(1);strokeColor=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.outline_soft));rippleColor=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.accent_glow));contentDescription=tool.title
