@@ -34,7 +34,9 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          # miuix 的依赖含 Java 21 字节码，单元测试在真实 JVM 上加载它们，
+          # JDK 17 会抛 UnsupportedClassVersionError。应用本身仍以 Java 17 为目标。
+          java-version: '21'
       # 不再使用 android-actions/setup-android：
       # 该 action 会执行 `sdkmanager tools`，而 cmdline-tools 16.0 已移除该包，
       # 直接报 "Failed to find package 'tools'" 导致整个 job 失败。
