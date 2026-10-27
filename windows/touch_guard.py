@@ -7,7 +7,8 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import Future
+import uuid
+from concurrent.futures import Future, TimeoutError as WorkerTimeout
 
 
 class TouchDevices:
@@ -26,27 +27,60 @@ class TouchDevices:
 
     @staticmethod
     def inventory():
-        script = r"""
-$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
-$ids = @(Get-PnpDevice -PresentOnly | Where-Object { $_.Class -eq 'HIDClass' } | ForEach-Object {
-  $compatible = @(Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_CompatibleIds' -ErrorAction SilentlyContinue).Data
-  $hardware = @(Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName 'DEVPKEY_Device_HardwareIds' -ErrorAction SilentlyContinue).Data
-  $all = @($compatible) + @($hardware)
-  if ($all -contains 'HID_DEVICE_UP:000D_U:0004' -or $all -contains 'HID_DEVICE_SYSTEM_TOUCH') { [string]$_.InstanceId }
-})
-ConvertTo-Json -InputObject @($ids) -Compress
-"""
-        executable = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
-                                  "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-        result = subprocess.run([executable, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                timeout=12, creationflags=0x08000000)
-        if result.returncode:
-            raise RuntimeError("无法识别触屏设备，请检查管理员权限与 HID 驱动")
-        ids = json.loads(result.stdout.decode("utf-8-sig"))
-        if not isinstance(ids, list) or any(not isinstance(i,str) or not i or len(i)>512 or "\0" in i for i in ids):
-            raise RuntimeError("触屏设备列表格式无效，未进入输入暂停")
-        return ids
+        # Enumerate only present HIDClass nodes. No WMI, PowerShell startup or UI.
+        from ctypes import wintypes as w
+        class DeviceInfo(ctypes.Structure):
+            _fields_ = [("cbSize", w.DWORD), ("ClassGuid", w.BYTE * 16),
+                        ("DevInst", w.DWORD), ("Reserved", ctypes.c_size_t)]
+        api = ctypes.WinDLL("setupapi", use_last_error=True)
+        signatures = {
+            "SetupDiGetClassDevsW": ([ctypes.c_void_p, w.LPCWSTR, w.HWND, w.DWORD], w.HANDLE),
+            "SetupDiEnumDeviceInfo": ([w.HANDLE, w.DWORD, ctypes.POINTER(DeviceInfo)], w.BOOL),
+            "SetupDiGetDeviceRegistryPropertyW": ([w.HANDLE, ctypes.POINTER(DeviceInfo), w.DWORD,
+                ctypes.POINTER(w.DWORD), ctypes.c_void_p, w.DWORD, ctypes.POINTER(w.DWORD)], w.BOOL),
+            "SetupDiGetDeviceInstanceIdW": ([w.HANDLE, ctypes.POINTER(DeviceInfo), w.LPWSTR,
+                w.DWORD, ctypes.POINTER(w.DWORD)], w.BOOL),
+            "SetupDiDestroyDeviceInfoList": ([w.HANDLE], w.BOOL),
+        }
+        for name, (args, result) in signatures.items():
+            function = getattr(api, name); function.argtypes = args; function.restype = result
+        guid = (w.BYTE * 16).from_buffer_copy(uuid.UUID("745a17a0-74d3-11d0-b6fe-00a0c90f57da").bytes_le)
+        handle = api.SetupDiGetClassDevsW(ctypes.byref(guid), None, None, 2)  # DIGCF_PRESENT
+        if not handle or handle == ctypes.c_void_p(-1).value:
+            raise RuntimeError("无法枚举 HID 触屏设备，请检查 Windows 设备服务")
+        def ids_property(info, key):
+            size, kind = w.DWORD(), w.DWORD()
+            if not api.SetupDiGetDeviceRegistryPropertyW(handle, ctypes.byref(info), key,
+                    ctypes.byref(kind), None, 0, ctypes.byref(size)):
+                code = ctypes.get_last_error()
+                if code == 13: return []  # Property absent, not an unreadable device.
+                if code != 122: raise RuntimeError("读取 HID 属性失败 (%d)，未暂停输入" % code)
+            if not size.value or size.value > 65536 or size.value % 2:
+                raise RuntimeError("HID 属性长度无效，未暂停输入")
+            data = (w.BYTE * size.value)()
+            if not api.SetupDiGetDeviceRegistryPropertyW(handle, ctypes.byref(info), key,
+                    ctypes.byref(kind), data, len(data), ctypes.byref(size)):
+                raise RuntimeError("读取 HID 属性失败，未暂停输入")
+            if kind.value != 7: raise RuntimeError("HID 标识属性类型无效，未暂停输入")  # REG_MULTI_SZ
+            return bytes(data).decode("utf-16-le").rstrip("\0").upper().split("\0")
+        try:
+            ids = []
+            for index in range(4096):
+                info = DeviceInfo(); info.cbSize = ctypes.sizeof(info)
+                if not api.SetupDiEnumDeviceInfo(handle, index, ctypes.byref(info)):
+                    if ctypes.get_last_error() == 259: return ids
+                    raise RuntimeError("枚举 HID 设备失败，未暂停输入")
+                identifiers = ids_property(info, 1) + ids_property(info, 2)
+                if not {"HID_DEVICE_UP:000D_U:0004", "HID_DEVICE_SYSTEM_TOUCH"}.intersection(identifiers):
+                    continue
+                instance = ctypes.create_unicode_buffer(513)
+                if not api.SetupDiGetDeviceInstanceIdW(handle, ctypes.byref(info), instance, len(instance), None):
+                    raise RuntimeError("读取触屏设备编号失败，未暂停输入")
+                if not instance.value: raise RuntimeError("触屏设备编号为空，未暂停输入")
+                if instance.value not in ids: ids.append(instance.value)
+            raise RuntimeError("HID 设备数量超出限制，未暂停输入")
+        finally:
+            api.SetupDiDestroyDeviceInfoList(handle)
 
     @staticmethod
     def touch_expected():
@@ -215,6 +249,9 @@ class TouchPause:
                 self.stop();self.detected=detected;self.already_disabled=already
                 return
             self.ping()
+        except WorkerTimeout:
+            self.stop()
+            raise RuntimeError("触屏识别或驱动操作超时，未确认输入暂停；已请求恢复，请稍后重试") from None
         except Exception:
             self.stop(); raise
 

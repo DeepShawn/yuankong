@@ -341,11 +341,29 @@ class DesktopUiTest {
             shadowOf(Looper.getMainLooper()).idleFor(1500,TimeUnit.MILLISECONDS)
             assertFalse(stub.requests.any { it.second.optString("action")=="end" })
             val before=stub.requests.count { it.second.optString("cmd")=="screen" }
-            child.pause().stop().destroy();parent.restart().start().resume()
+            child.get().finish();child.pause().stop().destroy()
+            shadowOf(Looper.getMainLooper()).idleFor(1500,TimeUnit.MILLISECONDS)
+            assertFalse("A slow return handoff must not end desktop leases",stub.requests.any { it.second.optString("action")=="end" })
+            parent.restart().start().resume()
             waitUntil { stub.requests.count { it.second.optString("cmd")=="screen" }>before }
             assertEquals(2,stub.requests.count { it.second.optString("cmd")=="session" && it.second.optString("action").isEmpty() })
             assertFalse(activity.findViewById<View>(R.id.desktopStart).isEnabled)
             parent.pause().stop().destroy()
+        }
+    }
+
+    @Test fun interruptedChildReturnStillEndsSharingAfterBoundedGrace() {
+        Stub().use { stub->
+            stub.install()
+            val parent=Robolectric.buildActivity(DesktopActivity::class.java).setup()
+            parent.get().findViewById<View>(R.id.desktopStart).performClick()
+            waitUntil { parent.get().findViewById<RemoteScreenView>(R.id.desktopScreen).drawable!=null }
+            val child=Robolectric.buildActivity(android.app.Activity::class.java).setup()
+            parent.pause().stop()
+            child.get().finish();child.pause().stop().destroy()
+            shadowOf(Looper.getMainLooper()).idleFor(5500,TimeUnit.MILLISECONDS)
+            waitUntil { stub.requests.count { it.second.optString("action")=="end" }==2 }
+            parent.destroy()
         }
     }
 

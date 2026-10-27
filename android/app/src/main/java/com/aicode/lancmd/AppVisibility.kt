@@ -14,6 +14,7 @@ import java.util.IdentityHashMap
 object AppVisibility : Application.ActivityLifecycleCallbacks {
     private var application: Application? = null
     private val started=Collections.newSetFromMap(IdentityHashMap<Activity,Boolean>())
+    private val created=Collections.newSetFromMap(IdentityHashMap<Activity,Boolean>())
     private val listeners=LinkedHashSet<()->Unit>()
     private val handler=Handler(Looper.getMainLooper())
     private val background=Runnable { if(started.isEmpty())listeners.toList().forEach { it() } }
@@ -21,7 +22,7 @@ object AppVisibility : Application.ActivityLifecycleCallbacks {
     fun install(app:Application) {
         if(application===app)return
         application?.unregisterActivityLifecycleCallbacks(this)
-        handler.removeCallbacks(background);started.clear();listeners.clear()
+        handler.removeCallbacks(background);started.clear();created.clear();listeners.clear()
         application=app;app.registerActivityLifecycleCallbacks(this)
     }
     fun observe(owner:LifecycleOwner, onBackground:()->Unit) {
@@ -33,10 +34,18 @@ object AppVisibility : Application.ActivityLifecycleCallbacks {
     override fun onActivityStarted(activity:Activity) { started.add(activity);handler.removeCallbacks(background) }
     override fun onActivityStopped(activity:Activity) {
         started.remove(activity)
-        if(started.isEmpty()) { handler.removeCallbacks(background);handler.postDelayed(background,700) }
+        if(started.isEmpty()) {
+            // A finishing child can stop before its retained parent restarts on a
+            // slow device. Keep leases during this bounded internal return handoff.
+            val returning = activity.isFinishing && created.any {
+                it !== activity && !it.isFinishing && !it.isDestroyed
+            }
+            handler.removeCallbacks(background)
+            handler.postDelayed(background,if(returning || activity.isChangingConfigurations) 5000 else 700)
+        }
     }
-    override fun onActivityDestroyed(activity:Activity) { started.remove(activity) }
-    override fun onActivityCreated(activity:Activity,state:Bundle?)=Unit
+    override fun onActivityDestroyed(activity:Activity) { started.remove(activity);created.remove(activity) }
+    override fun onActivityCreated(activity:Activity,state:Bundle?) { created.add(activity) }
     override fun onActivityResumed(activity:Activity)=Unit
     override fun onActivityPaused(activity:Activity)=Unit
     override fun onActivitySaveInstanceState(activity:Activity,state:Bundle)=Unit
