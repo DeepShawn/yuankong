@@ -637,7 +637,8 @@ class StorageActivity : FeatureActivity() {
         task {
             val response=pinnedCall(origin,"file_schedule");val jobs=response.getJSONArray("jobs")
             val items=(0 until jobs.length()).map { jobs.getJSONObject(it) }
-            reportTopResults("${items.size} 个延迟文件计划",items.map { "${it.optString("status")} · ${it.optString("command")} · ${it.optString("path")} ${it.optString("error")}" },items.any { it.optString("status")=="failed" })
+            val names=mapOf("waiting" to "等待执行","running" to "执行中","completed" to "已完成","failed" to "失败","cancelled" to "已取消")
+            reportTopResults("${items.size} 个延迟文件计划",items.map { "${names[it.optString("status")] ?: it.optString("status")} · ${it.optString("command")} · ${it.optString("path")} ${it.optString("error")}" },items.any { it.optString("status")=="failed" })
             val pending=items.filter { it.optString("status")=="waiting" }
             if(pending.isNotEmpty())AlertDialog.Builder(this@StorageActivity).setTitle("选择要取消的文件计划")
                 .setItems(pending.map { it.optString("command")+" · "+it.optString("path") }.toTypedArray()) { _,index-> task {

@@ -95,7 +95,11 @@ class OfficeDocumentActivity:FeatureActivity() {
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or if(edit)Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0)
                 intent.clipData=android.content.ClipData.newRawUri("Office 文档",uri)
                 val installed=wpsPackages.firstOrNull { runCatching { packageManager.getPackageInfo(it,0) }.isSuccess }
-                if(installed!=null)intent.setPackage(installed)
+                if(installed!=null) {
+                    intent.setPackage(installed)
+                    if(edit && intent.resolveActivity(packageManager)==null)intent.action=Intent.ACTION_VIEW
+                    intent.putExtra("OpenMode",if(edit)"Normal" else "ReadOnly")
+                }
                 startActivity(if(installed!=null)intent else Intent.createChooser(intent,"选择 WPS 或 Office 应用"))
                 status("手机副本已打开；编辑保存并返回后，点击回传覆盖电脑原件")
             } finally { setBusy(false) }
