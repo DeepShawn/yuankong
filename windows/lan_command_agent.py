@@ -38,7 +38,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -624,6 +624,8 @@ def cmd_ls(path):
                     "dir": is_dir,
                     "size": 0 if is_dir else st.st_size,
                     "mtime": int(st.st_mtime),
+                    "hidden": bool(getattr(st, "st_file_attributes", 0) & 2),
+                    "system": bool(getattr(st, "st_file_attributes", 0) & 4),
                 }
             )
         except OSError:
@@ -1093,10 +1095,22 @@ from task_manager import TaskManager
 from browser_control import browser_request
 from script_runner import ScriptRunner
 from privacy_devices import PrivacyDevices
+from placeholder_files import PlaceholderFiles
 
 _capture_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+
+def prepare_usb_disconnect(device):
+    import ntpath
+    roots = [ntpath.normpath(p).casefold().rstrip("\\") + "\\" for p in device.get("paths", []) if isinstance(p, str) and p]
+    for protected in (_capture_dir, sys.executable, APP_DIR):
+        location = ntpath.normpath(str(protected)).casefold().rstrip("\\") + "\\"
+        if any(location.startswith(root) for root in roots):
+            raise ValueError("接收端或恢复记录位于此 USB 设备，请移到本机磁盘后再断开")
+    _placeholders.stop_for_device(device)
+
 _remote = RemoteFeatures(RpcError, log, os.path.join(_capture_dir, "LanCmdCapture.exe"))
-_devices = DeviceManager(os.path.join(APP_DIR, "device-policy.json"), is_admin)
+_devices = DeviceManager(os.path.join(APP_DIR, "device-policy.json"), is_admin,
+                         before_disconnect=prepare_usb_disconnect)
 _commands = CommandQueue(lambda line, shell: run_exec(line, shell, None, 300))
 _recordings = Recordings(os.path.join(APP_DIR, "recordings"), os.path.join(_capture_dir, "LanCmdRecord.exe"))
 _gestures = Gestures(_remote)
@@ -1105,13 +1119,14 @@ _registry = RegistryEditor(os.path.join(APP_DIR,"registry-backups"))
 _tasks = TaskManager(protected=(_capture_dir,))
 _scripts = ScriptRunner()
 _privacy_devices = PrivacyDevices(is_admin)
+_placeholders = PlaceholderFiles()
 
 
 def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures"])
-        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices"])
+        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices","placeholders"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1148,6 +1163,7 @@ HANDLERS = {
     "browser": lambda q, st: browser_request(q,RpcError),
     "scripts": lambda q, st: _scripts.request(q,st,RpcError),
     "privacy_devices": lambda q, st: _privacy_devices.request(q,RpcError),
+    "placeholders": lambda q, st: _placeholders.request(q,st,RpcError),
     "message": _remote.message,
     "info": lambda q, st: cmd_info(),
     "exec": lambda q, st: run_exec(
