@@ -262,8 +262,56 @@ class TouchRecoveryTest(unittest.TestCase):
 
 @unittest.skipUnless(os.name=="nt","Windows API")
 class NativeAppsTest(unittest.TestCase):
+    def test_touch_inventory_reads_native_hid_properties_without_shell(self):
+        with mock.patch("touch_guard.subprocess.run", side_effect=AssertionError("no shell")):
+            self.assertIsInstance(TouchDevices.inventory(), list)
+
     def test_desktop_windows_can_be_read_without_changing_them(self):
         self.assertIsInstance(DesktopApps().windows(),list)
+
+
+class NativeTouchInventoryTest(unittest.TestCase):
+    def api(self, devices, failed_property=False):
+        api=mock.Mock(); error=[0]
+        api.SetupDiGetClassDevsW.return_value=7
+        current=[0]
+        def enum(handle,index,info):
+            current[0]=index
+            if index>=len(devices): error[0]=259;return False
+            return True
+        def prop(handle,info,key,kind,data,capacity,required):
+            if failed_property: error[0]=5;return False
+            value=devices[current[0]][key]
+            if value is None: error[0]=13;return False
+            encoded=("\0".join(value)+"\0\0").encode("utf-16-le")
+            kind._obj.value=7;required._obj.value=len(encoded)
+            if data is None: error[0]=122;return False
+            ctypes.memmove(data,encoded,len(encoded));return True
+        def instance(handle,info,data,capacity,required):
+            data.value=devices[current[0]]["id"];return True
+        api.SetupDiEnumDeviceInfo.side_effect=enum
+        api.SetupDiGetDeviceRegistryPropertyW.side_effect=prop
+        api.SetupDiGetDeviceInstanceIdW.side_effect=instance
+        return api,error
+
+    def test_hardware_and_compatible_ids_select_only_touchscreens_and_cleanup(self):
+        api,error=self.api([
+            {"id":"touch-1",1:["hid_device_up:000d_u:0004"],2:None},
+            {"id":"keyboard",1:["HID_DEVICE_SYSTEM_KEYBOARD"],2:None},
+            {"id":"touch-2",1:["vendor-device"],2:["HID_DEVICE_SYSTEM_TOUCH"]}])
+        with mock.patch("touch_guard.ctypes.WinDLL",return_value=api,create=True), \
+             mock.patch("touch_guard.ctypes.get_last_error",side_effect=lambda:error[0],create=True), \
+             mock.patch("touch_guard.subprocess.run",side_effect=AssertionError("no PowerShell")):
+            self.assertEqual(["touch-1","touch-2"],TouchDevices.inventory())
+        api.SetupDiDestroyDeviceInfoList.assert_called_once_with(7)
+        self.assertEqual(2,api.SetupDiGetClassDevsW.call_args.args[-1])
+
+    def test_unreadable_properties_fail_closed_and_release_inventory_handle(self):
+        api,error=self.api([{"id":"unknown",1:[],2:[]}],failed_property=True)
+        with mock.patch("touch_guard.ctypes.WinDLL",return_value=api,create=True), \
+             mock.patch("touch_guard.ctypes.get_last_error",side_effect=lambda:error[0],create=True):
+            with self.assertRaisesRegex(RuntimeError,"未暂停输入"):TouchDevices.inventory()
+        api.SetupDiDestroyDeviceInfoList.assert_called_once_with(7)
 
 
 if __name__=="__main__": unittest.main()

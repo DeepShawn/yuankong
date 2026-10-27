@@ -33,6 +33,7 @@ import org.robolectric.annotation.GraphicsMode
 import java.io.Closeable
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import java.net.ServerSocket
 
 @RunWith(RobolectricTestRunner::class)
@@ -255,7 +256,10 @@ class FeatureUiTest {
             parent.pause().stop();stub.recordingActive=true
             shadowOf(Looper.getMainLooper()).idleFor(1500,java.util.concurrent.TimeUnit.MILLISECONDS)
             assertFalse(stub.requests.any { it.optString("action")=="end" })
-            child.pause().stop().destroy();parent.restart().start().resume()
+            child.get().finish();child.pause().stop().destroy()
+            shadowOf(Looper.getMainLooper()).idleFor(1500,TimeUnit.MILLISECONDS)
+            assertFalse("A slow return handoff must not end preview leases",stub.requests.any { it.optString("action")=="end" })
+            parent.restart().start().resume()
             waitUntil { allTexts(root).any { it.contains("摄像头正在录制") } }
             assertFalse(stub.requests.any { it.optString("action")=="end" })
             val before=stub.requests.count { it.optString("cmd")=="camera" && it.optString("action")!="list" }
