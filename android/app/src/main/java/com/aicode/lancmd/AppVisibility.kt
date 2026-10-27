@@ -31,7 +31,11 @@ object AppVisibility : Application.ActivityLifecycleCallbacks {
             override fun onDestroy(owner:LifecycleOwner) { listeners.remove(onBackground) }
         })
     }
-    override fun onActivityStarted(activity:Activity) { started.add(activity);handler.removeCallbacks(background) }
+    override fun onActivityStarted(activity:Activity) {
+        // install() may run from an Activity after its created callback (for
+        // example a restored entry point); starting also establishes ownership.
+        created.add(activity);started.add(activity);handler.removeCallbacks(background)
+    }
     override fun onActivityStopped(activity:Activity) {
         started.remove(activity)
         if(started.isEmpty()) {
