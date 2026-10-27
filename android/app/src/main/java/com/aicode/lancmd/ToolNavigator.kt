@@ -60,7 +60,7 @@ object ToolNavigator {
             override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){render()}
             override fun afterTextChanged(s:Editable?){}
         })
-        body.addView(MaterialButton(activity).apply { text="文件操作延迟 · ${FileDelay.seconds(activity)} 秒";minHeight=dp(48);isAllCaps=false;setTextColor(Themes.color(activity,R.color.accent));setOnClickListener { FileDelay.choose(activity) { text="文件操作延迟 · ${FileDelay.seconds(activity)} 秒" } } })
+        body.addView(MaterialButton(activity).apply { text="文件操作延迟 · ${FileDelay.seconds(activity)} 秒";minHeight=dp(48);isAllCaps=false;backgroundTintList=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.surface_variant));setTextColor(Themes.color(activity,R.color.accent));setOnClickListener { FileDelay.choose(activity) { text="文件操作延迟 · ${FileDelay.seconds(activity)} 秒" } } })
         val height=(activity.resources.displayMetrics.heightPixels*.82f).toInt()
         dialog.setContentView(body,android.view.ViewGroup.LayoutParams(-1,height));dialog.behavior.skipCollapsed=true;dialog.behavior.state=com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
         render();dialog.show()

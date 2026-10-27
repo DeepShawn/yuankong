@@ -629,6 +629,11 @@ class StorageActivity : FeatureActivity() {
     private fun modifyDate(item:JSONObject,selected:String) {
         val format=java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",java.util.Locale.getDefault()).apply { isLenient=false }
         val value=styleInput(EditText(this).apply { setSingleLine();setText(format.format(Date(item.optLong("mtime")*1000)));contentDescription="文件修改日期" })
+        value.addTextChangedListener(object:TextWatcher {
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
+            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){value.error=null}
+            override fun afterTextChanged(s:Editable?){}
+        })
         val editor=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(18),0,dp(18),0);addView(value) }
         val choices=LinearLayout(this)
         fun calendar()=java.util.Calendar.getInstance().apply { time=runCatching { format.parse(value.text.toString()) }.getOrNull() ?: Date(item.optLong("mtime")*1000) }
