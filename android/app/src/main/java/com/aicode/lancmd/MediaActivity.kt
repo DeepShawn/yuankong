@@ -3,12 +3,19 @@ package com.aicode.lancmd
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.Base64
+import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.ArrayAdapter
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Spinner
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.aicode.lancmd.net.RemoteLease
 import kotlinx.coroutines.CancellationException
@@ -26,11 +33,19 @@ import org.json.JSONObject
 import kotlin.coroutines.coroutineContext
 
 class MediaActivity : FeatureActivity() {
+    private companion object { const val STATE_FULLSCREEN = "fullscreen" }
+
     private lateinit var image: ImageView
     private lateinit var start: com.google.android.material.button.MaterialButton
     private lateinit var stop: com.google.android.material.button.MaterialButton
     private lateinit var save: com.google.android.material.button.MaterialButton
     private lateinit var selector: Spinner
+    private lateinit var fullscreenButton: com.google.android.material.button.MaterialButton
+    private lateinit var exitFullscreen: com.google.android.material.button.MaterialButton
+    private lateinit var toolbarView: View
+    /** 全屏时隐藏的页面元素：设备选择、按钮组与说明文字。 */
+    private val chrome = ArrayList<View>()
+    private var fullscreen = false
     private var stream: Job? = null
     private var frame: ByteArray? = null
     private var saveFrame: ByteArray? = null
@@ -53,20 +68,32 @@ class MediaActivity : FeatureActivity() {
         super.onCreate(savedInstanceState)
         setup(if (camera) "摄像头" else "电脑屏幕", "应用内进入子页面保留共享，返回后继续预览")
         AppVisibility.observe(this) { stream?.cancel() }
-        val help = panel()
-        help.addView(label("随时停止共享", 16f))
-        help.addView(label("进入应用内子页面时暂停取帧，返回继续；退出本页、离开应用或切换电脑会结束共享。", 12f, R.color.dim))
+        toolbarView = (body.parent as ViewGroup).getChildAt(0)
         selector = Spinner(this)
         selector.isEnabled = false
         selector.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("开始后选择摄像头"))
-        selector.visibility = if (camera) View.VISIBLE else View.GONE
-        body.addView(selector)
+        styleSpinner(selector)
+        if (camera) {
+            val field = fieldRow("摄像头设备", selector)
+            body.addView(field, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(Ui.GAP) })
+            chrome.add(field)
+        }
         image = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setBackgroundColor(color(R.color.surface))
+            setBackgroundResource(R.drawable.status_bg)
+            clipToOutline = true
             contentDescription = if (camera) "摄像头实时画面" else "电脑屏幕实时画面"
         }
-        body.addView(image, LinearLayout.LayoutParams(-1, 0, 1f))
+        val imageHost = FrameLayout(this)
+        imageHost.addView(image, FrameLayout.LayoutParams(-1, -1))
+        exitFullscreen = button("退出全屏") { setFullscreen(false) }.apply {
+            id = R.id.mediaExitFullscreen
+            visibility = View.GONE
+            textSize = Ui.TEXT_CAPTION
+        }
+        imageHost.addView(exitFullscreen, FrameLayout.LayoutParams(-2, dp(44), Gravity.TOP or Gravity.END)
+            .apply { setMargins(dp(8), dp(8), dp(8), dp(8)) })
+        body.addView(imageHost, LinearLayout.LayoutParams(-1, 0, 1f))
         start = button("开始查看") { begin() }
         primary(start)
         stop = button("停止查看") {
@@ -77,14 +104,47 @@ class MediaActivity : FeatureActivity() {
             saveFrame = frame?.copyOf()
             if (saveFrame != null) saveDocument.launch("LanCmd-${System.currentTimeMillis()}.jpg")
         }.apply { isEnabled = false }
-        val buttons = LinearLayout(this)
-        listOf(start, stop).forEach { buttons.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
-        body.addView(buttons)
-        body.addView(save)
-        if(camera)body.addView(button("摄像头 / 麦克风设备管理") { openChild(android.content.Intent(this,PrivacyDevicesActivity::class.java)) })
-        body.addView(button(if (camera) "录制摄像头视频" else "录制屏幕视频") {
+        fullscreenButton = button("全屏") { setFullscreen(!fullscreen) }.apply { id = R.id.mediaFullscreen }
+        val record = button(if (camera) "录制摄像头视频" else "录制屏幕视频") {
             openChild(android.content.Intent(this, RecordingsActivity::class.java).putExtra("kind", if (camera) "camera" else "screen"))
+        }
+        val rows = ArrayList<View>()
+        rows.add(actions(start, stop))
+        rows.add(actions(save, fullscreenButton))
+        rows.add(if (camera) actions(record,
+            button("摄像头 / 麦克风设备管理") { openChild(android.content.Intent(this,PrivacyDevicesActivity::class.java)) }
+                .apply { textSize = Ui.TEXT_CAPTION })
+            else actions(record))
+        rows.forEachIndexed { index, row ->
+            body.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(if (index == 0) Ui.GAP else 6) })
+            chrome.add(row)
+        }
+        val note = caption("进入应用内子页面时暂停取帧，返回继续；退出本页、离开应用或切换电脑会结束共享。全屏时画面等比显示，点右上角或返回键退出。")
+        body.addView(note, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        chrome.add(note)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() { if (fullscreen) setFullscreen(false) else finish() }
         })
+        if (savedInstanceState?.getBoolean(STATE_FULLSCREEN) == true) setFullscreen(true)
+    }
+
+    /** 全屏只保留等比画面和退出按钮；画面本身继续按 FIT_CENTER 显示，黑边不裁切。 */
+    private fun setFullscreen(value: Boolean) {
+        fullscreen = value
+        toolbarView.visibility = if (value) View.GONE else View.VISIBLE
+        body.setPadding(if (value) 0 else dp(Ui.PAD_PAGE), 0, if (value) 0 else dp(Ui.PAD_PAGE), if (value) 0 else dp(12))
+        exitFullscreen.visibility = if (value) View.VISIBLE else View.GONE
+        chrome.forEach { it.visibility = if (value) View.GONE else View.VISIBLE }
+        hideInlineFeedback(value)
+        fullscreenButton.text = if (value) "退出全屏" else "全屏"
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (value) controller.hide(WindowInsetsCompat.Type.systemBars()) else controller.show(WindowInsetsCompat.Type.systemBars())
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(STATE_FULLSCREEN, fullscreen)
+        super.onSaveInstanceState(outState)
     }
 
     private fun begin() {

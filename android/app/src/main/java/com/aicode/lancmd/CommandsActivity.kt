@@ -41,19 +41,20 @@ class CommandsActivity : FeatureActivity() {
         origin
         recipes = runCatching { JSONArray(prefs.getString("lists", "[]")) }.getOrElse { JSONArray() }
         if (recipes.length() == 0) recipes.put(newRecipe("命令列表 1"))
-        val saved = panel()
+        val saved = panel("命令列表")
         selector = styleSpinner(Spinner(this))
-        saved.addView(selector)
-        val manage = LinearLayout(this)
-        listOf("新列表" to { nameDialog(false) }, "重命名" to { nameDialog(true) }, "删除列表" to { deleteRecipe() }).forEach { (name, run) ->
-            manage.addView(button(name, run).apply { textSize = 12f; minWidth = 0 }, LinearLayout.LayoutParams(0, -2, 1f))
-        }
-        saved.addView(manage)
+        saved.addView(fieldRow("当前列表", selector))
+        val manage = listOf("新列表" to { nameDialog(false) }, "重命名" to { nameDialog(true) }, "删除列表" to { deleteRecipe() })
+            .map { (name, run) -> button(name, run).apply { textSize = Ui.TEXT_CAPTION } }
+        saved.addView(actions(*manage.toTypedArray()))
         editor = panel()
-        body.addView(button("添加命令") { editCommand(null) })
-        body.addView(primary(button("启动当前命令列表") { submit() }))
-        body.addView(label("电脑端负责计时，手机断线仍继续；接收端退出会丢弃未完成计划。单条最长运行 300 秒，失败后继续下一条。", 12f, R.color.dim))
-        body.addView(button("刷新电脑任务") { refreshJobs() })
+        body.addView(actions(
+            button("添加命令") { editCommand(null) },
+            button("刷新电脑任务") { refreshJobs() }))
+        body.addView(primary(button("启动当前命令列表") { submit() }),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        body.addView(caption("电脑端负责计时，手机断线仍继续；接收端退出会丢弃未完成计划。单条最长运行 300 秒，失败后继续下一条。"),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8); bottomMargin = dp(Ui.GAP) })
         jobs = panel()
         updateSelector()
         selector.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
@@ -105,18 +106,20 @@ class CommandsActivity : FeatureActivity() {
     private fun renderEditor() {
         editor.removeAllViews()
         val items = recipe().getJSONArray("items")
-        if (items.length() == 0) editor.addView(label("列表为空，添加命令并设置等待秒数。", 13f, R.color.dim))
+        editor.addView(Ui.sectionLabel(this, "执行顺序"))
+        if (items.length() == 0) editor.addView(emptyState("列表为空，添加命令并设置等待秒数。"))
         for (i in 0 until items.length()) {
             val item = items.getJSONObject(i)
-            editor.addView(label("${i + 1}. ${item.optString("shell").uppercase()} · 等待 ${item.optInt("delay")} 秒", 13f, R.color.accent))
-            editor.addView(label(item.optString("line"), 13f).apply { setPadding(0, dp(6), 0, 0) })
-            val row = LinearLayout(this)
-            listOf("编辑" to { editCommand(i) }, "上移" to {
+            if (i > 0) editor.addView(divider(), Ui.dividerParams(this))
+            editor.addView(listRow(item.optString("line"),
+                "第 ${i + 1} 条 · ${item.optString("shell").uppercase()} · 等待 ${item.optInt("delay")} 秒"))
+            val keys = listOf("编辑" to { editCommand(i) }, "上移" to {
                 if (i > 0) { val previous = items.get(i - 1); items.put(i - 1, item); items.put(i, previous); save(); renderEditor() }
-            }, "删除" to { items.remove(i); save(); renderEditor() }).forEach { (title, run) ->
-                row.addView(button(title, run).apply { textSize = 12f; minWidth = 0; if (title == "上移") isEnabled = i > 0 }, LinearLayout.LayoutParams(0, -2, 1f))
+            }, "删除" to { items.remove(i); save(); renderEditor() }).map { (title, run) ->
+                button(title, run).apply { textSize = Ui.TEXT_CAPTION; if (title == "上移") isEnabled = i > 0 }
+                    .also { if (title == "删除") danger(it) }
             }
-            editor.addView(row)
+            editor.addView(actions(*keys.toTypedArray()))
         }
     }
 
@@ -125,24 +128,24 @@ class CommandsActivity : FeatureActivity() {
         val items = target.getJSONArray("items")
         if (index == null && items.length() >= 50) { status("每个列表最多 50 条命令", true); return }
         val existing = index?.let { items.getJSONObject(it) }
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), 0) }
+        val box = Ui.Column(this).apply { setPadding(dp(20), 0, dp(20), 0) }
         val shell = styleSpinner(Spinner(this)).apply {
             adapter = ArrayAdapter(this@CommandsActivity, android.R.layout.simple_spinner_dropdown_item, listOf("CMD", "PowerShell"))
             setSelection(if ((existing?.optString("shell") ?: seedShell) == "powershell") 1 else 0)
         }
-        box.addView(shell)
+        box.addView(fieldRow("终端类型", shell))
         val line = styleInput(EditText(this)).apply {
             hint = "输入命令"; minLines = 3; maxLines = 6; setText(existing?.optString("line") ?: seed)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             filters = arrayOf(InputFilter.LengthFilter(8192))
         }
-        box.addView(line)
-        box.addView(label("等待秒数 · 第一条从启动计时，后续从上一条结束计时", 12f, R.color.dim))
+        box.addView(fieldRow("命令内容", line))
         val seconds = styleInput(EditText(this)).apply {
             inputType = InputType.TYPE_CLASS_NUMBER; setSingleLine(); setText((existing?.optInt("delay") ?: 0).toString())
             filters = arrayOf(InputFilter.LengthFilter(5))
         }
-        box.addView(seconds)
+        box.addView(fieldRow("等待秒数", seconds))
+        box.addView(caption("第一条从启动计时，后续从上一条结束计时。"))
         val dialog = AlertDialog.Builder(this).setTitle(if (index == null) "添加命令" else "编辑命令").setView(box)
             .setNegativeButton("取消", null).setPositiveButton("保存", null).create()
         dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {

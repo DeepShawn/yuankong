@@ -35,27 +35,25 @@ class GesturesActivity : FeatureActivity() {
         mode = styleCheck(CheckBox(this).apply { text = "记录左键点击 / 拖动（关闭后仅移动鼠标）"; isChecked = true })
         body.addView(mode)
         board = GestureBoard(this)
-        body.addView(board, LinearLayout.LayoutParams(-1, dp(300)))
-        val row = LinearLayout(this)
+        body.addView(board, LinearLayout.LayoutParams(-1, dp(300)).apply { topMargin = dp(6); bottomMargin = dp(Ui.GAP) })
         record = primary(button("开始记录") {
             if (board.recording) board.finish() else { board.dragMode = mode.isChecked; board.begin() }
         })
-        row.addView(record, LinearLayout.LayoutParams(0, -2, 1f))
-        row.addView(button("清空") { if (playback?.isActive != true) board.load(JSONArray()) }, LinearLayout.LayoutParams(0, -2, 1f))
-        body.addView(row)
-        val saved = LinearLayout(this)
-        saved.addView(button("保存手势") { saveGesture() }, LinearLayout.LayoutParams(0, -2, 1f))
-        saved.addView(button("手势列表") { chooseGesture() }, LinearLayout.LayoutParams(0, -2, 1f))
-        body.addView(saved)
-        body.addView(label("延迟播放（秒，0 为立即）", 12f, R.color.dim))
+        body.addView(actions(record,
+            button("清空") { if (playback?.isActive != true) board.load(JSONArray()) }))
+        body.addView(actions(
+            button("保存手势") { saveGesture() },
+            button("手势列表") { chooseGesture() }),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
         delaySeconds = styleInput(EditText(this).apply { inputType = InputType.TYPE_CLASS_NUMBER; hint = "延迟秒数（0 为立即）"; setText("0"); contentDescription = "手势延迟秒数" })
-        body.addView(delaySeconds)
-        val controls = LinearLayout(this)
+        body.addView(fieldRow("延迟播放（秒，0 为立即）", delaySeconds),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(Ui.GAP) })
         play = primary(button("在电脑播放") { confirmPlay() })
-        controls.addView(play, LinearLayout.LayoutParams(0, -2, 1f))
-        controls.addView(button("取消播放") { playback?.cancel() }, LinearLayout.LayoutParams(0, -2, 1f))
-        body.addView(controls)
-        body.addView(label("按原时间间隔回放，单次最多 5 分钟；延迟由电脑计时。离开此页或断线会取消，并释放鼠标。最多保存 20 条手势。", 12f, R.color.dim))
+        body.addView(actions(play,
+            button("取消播放") { playback?.cancel() }),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(Ui.GAP) })
+        body.addView(caption("按原时间间隔回放，单次最多 5 分钟；延迟由电脑计时。离开此页或断线会取消，并释放鼠标。最多保存 20 条手势。"),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         board.changed = {
             record.text = if (board.recording) "结束记录" else "开始记录"
             mode.isEnabled = !board.recording && playback?.isActive != true

@@ -82,32 +82,34 @@ class RecordingsActivity : FeatureActivity() {
         origin
         download = savedInstanceState?.getString("download")?.let { runCatching { JSONObject(it) }.getOrNull() }
         setup("录音 / 录屏 / 摄像头", "录制电脑上的麦克风、屏幕或摄像头，文件保存在电脑。", scrollable = true)
-        val settings = panel()
+        val settings = panel("录制设置")
         fun spinner(names: List<String>) = styleSpinner(Spinner(this).apply { adapter = ArrayAdapter(this@RecordingsActivity, android.R.layout.simple_spinner_dropdown_item, names) })
         mode = spinner(listOf("环境声音（WAV）", "屏幕视频（MP4）", "摄像头视频（MP4）"))
         mode.setSelection(when (intent.getStringExtra("kind")) { "screen" -> 1; "camera" -> 2; else -> 0 })
-        settings.addView(mode)
+        settings.addView(fieldRow("录制内容", mode))
         audio = styleCheck(CheckBox(this).apply { text = "视频同时录制麦克风声音"; isChecked = true })
         settings.addView(audio)
-        settings.addView(label("麦克风", 12f, R.color.dim))
-        microphone = spinner(listOf("Windows 默认录音设备")); settings.addView(microphone)
-        settings.addView(label("摄像头（仅摄像头模式使用）", 12f, R.color.dim))
-        camera = spinner(listOf("读取设备后选择")); settings.addView(camera)
-        settings.addView(label("录制时长（秒，1–3600）", 12f, R.color.dim))
+        microphone = spinner(listOf("Windows 默认录音设备"))
+        settings.addView(fieldRow("麦克风", microphone))
+        camera = spinner(listOf("读取设备后选择"))
+        settings.addView(fieldRow("摄像头（仅摄像头模式使用）", camera))
         seconds = styleInput(EditText(this).apply { hint = "录制时长，1–3600 秒"; inputType = InputType.TYPE_CLASS_NUMBER; setText("300"); contentDescription = "录制时长秒数" })
-        settings.addView(seconds)
-        settings.addView(button("刷新麦克风 / 摄像头") { loadDevices() })
+        settings.addView(fieldRow("录制时长（秒，1–3600）", seconds))
         start = primary(button("开始录制") { confirmStart() }).apply { isEnabled = false }
         settings.addView(start)
-        body.addView(button("管理摄像头 / 麦克风启停") { startActivity(Intent(this,PrivacyDevicesActivity::class.java)) })
-        body.addView(label("到时自动停止，也可在下方手动停止。离开此页或手机断线仍录制，到所选时长结束；退出电脑接收端会停止录制。单文件上限约 1 GB，空间不足会提前停止。遵循 Windows 隐私权限和设备使用指示。", 12f, R.color.dim))
-        val actions = LinearLayout(this)
-        actions.addView(button("刷新列表") { refresh() }, LinearLayout.LayoutParams(0, -2, 1f))
-        actions.addView(button("电脑录制目录") {
-            if (directory.isNotEmpty()) task { pinnedCall(origin, "capabilities"); startActivity(Intent(this@RecordingsActivity, StorageActivity::class.java).putExtra("path", directory)) }
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        body.addView(actions)
-        body.addView(button("取消下载") { transferring?.cancel() })
+        settings.addView(actions(
+            button("刷新麦克风 / 摄像头") { loadDevices() },
+            button("管理摄像头 / 麦克风启停") { startActivity(Intent(this,PrivacyDevicesActivity::class.java)) }))
+        settings.addView(caption("到时自动停止，也可在下方手动停止。离开此页或手机断线仍录制，到所选时长结束；退出电脑接收端会停止录制。单文件上限约 1 GB，空间不足会提前停止。遵循 Windows 隐私权限和设备使用指示。"))
+        val listActions = listOf(
+            button("刷新列表") { refresh() },
+            button("电脑录制目录") {
+                if (directory.isNotEmpty()) task { pinnedCall(origin, "capabilities"); startActivity(Intent(this@RecordingsActivity, StorageActivity::class.java).putExtra("path", directory)) }
+            },
+            button("取消下载") { transferring?.cancel() }
+        ).onEach { it.textSize = Ui.TEXT_CAPTION }
+        body.addView(actions(*listActions.toTypedArray()),
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(Ui.GAP) })
         records = panel()
         task {
             val features = pinnedCall(origin, "capabilities").optJSONArray("features")
@@ -163,44 +165,47 @@ class RecordingsActivity : FeatureActivity() {
                 val result = pinnedCall(origin, "recordings")
                 directory = result.getString("directory")
                 records.removeAllViews()
+                records.addView(Ui.sectionLabel(this@RecordingsActivity, "已录制文件"))
                 val items = result.getJSONArray("recordings")
-                if (items.length() == 0) records.addView(label("暂无录制，选择模式后点击开始。", 13f, R.color.dim))
-                for (i in 0 until items.length()) renderRecord(items.getJSONObject(i))
+                if (items.length() == 0) records.addView(emptyState("暂无录制，选择模式后点击开始。"))
+                for (i in 0 until items.length()) renderRecord(items.getJSONObject(i), i)
             } finally { busy = false }
         }
     }
 
-    private fun renderRecord(record: JSONObject) {
+    private fun renderRecord(record: JSONObject, index: Int) {
         val state = record.getString("status")
         val active = state in listOf("starting", "recording", "stopping")
         val name = when (record.getString("mode")) { "audio" -> "环境录音"; "screen" -> "屏幕录制"; else -> "摄像头录制" }
         val stateName = when (state) { "starting" -> "正在启动"; "recording" -> "正在录制"; "stopping" -> "正在封装文件"; "completed" -> "已完成"; "interrupted" -> "曾被中断"; else -> "失败" }
-        records.addView(label("$name · $stateName", 15f, if (active) R.color.warn else R.color.text))
         val date = DateFormat.getDateTimeInstance().format(Date((record.getDouble("created") * 1000).toLong()))
-        records.addView(label("$date\n${FileTransfer.humanSize(record.optLong("size"))} · 最长 ${record.optInt("seconds")} 秒${if (record.optBoolean("audio") && name != "环境录音") " · 含麦克风声音" else ""}", 12f, R.color.dim))
+        val detail = "$date · ${FileTransfer.humanSize(record.optLong("size"))} · 最长 ${record.optInt("seconds")} 秒" +
+            if (record.optBoolean("audio") && name != "环境录音") " · 含麦克风声音" else ""
+        if (index > 0) records.addView(divider(), Ui.dividerParams(this))
+        records.addView(listRow(name, detail,
+            icon = if (record.getString("mode") == "audio") R.drawable.ic_message else R.drawable.ic_camera,
+            trailing = Ui.text(this, stateName, Ui.TEXT_LABEL, if (active) R.color.warn else R.color.dim).apply {
+                setBackgroundResource(R.drawable.pill_bg); setPadding(dp(10), dp(4), dp(10), dp(4))
+            }))
         val reason = when (record.optString("reason")) { "size_limit" -> "已达到单文件大小上限"; "disk_space" -> "磁盘空间不足，已提前停止"; else -> "" }
-        if (reason.isNotEmpty()) records.addView(label(reason, 12f, R.color.warn))
-        if (record.has("error")) records.addView(label(record.getString("error"), 12f, R.color.danger))
+        if (reason.isNotEmpty()) records.addView(label(reason, Ui.TEXT_CAPTION, R.color.warn))
+        if (record.has("error")) records.addView(label(record.getString("error"), Ui.TEXT_CAPTION, R.color.danger))
         if (active) records.addView(button("停止录制") {
             task { pinnedCall(origin, "recordings", JSONObject().put("action", "stop").put("recording_id", record.getString("id"))); refresh() }
         }.apply { isEnabled = state != "stopping" })
-        else {
-            val row = LinearLayout(this)
-            row.addView(button("下载 / 播放") {
+        else records.addView(actions(
+            button("下载 / 播放") {
                 if (transferring?.isActive != true) {
                     download = JSONObject(record.toString())
                     saveDocument.launch("LanCmd-${record.getString("mode")}-${record.getString("id").take(8)}.${if (record.getString("mode") == "audio") "wav" else "mp4"}")
                 }
-            }.apply { isEnabled = record.optLong("size") > 0 }, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(button("删除") {
+            }.apply { isEnabled = record.optLong("size") > 0 },
+            danger(button("删除") {
                 AlertDialog.Builder(this).setTitle("删除电脑上的录制文件？").setMessage("删除后无法恢复。")
                     .setNegativeButton("取消", null).setPositiveButton("删除") { _, _ ->
                         task { pinnedCall(origin, "recordings", JSONObject().put("action", "delete").put("recording_id", record.getString("id"))); refresh() }
                     }.show()
-            }, LinearLayout.LayoutParams(0, -2, 1f))
-            records.addView(row)
-        }
-        records.addView(label("", 6f))
+            })))
     }
 
     override fun onStart() { super.onStart(); poll = lifecycleScope.launch { while (isActive) { refresh(); delay(2000) } } }

@@ -20,4 +20,6 @@
     <item name="audioMute" type="id" />
     <item name="desktopLocalInput" type="id" />
     <item name="desktopLocalStatus" type="id" />
+    <item name="mediaFullscreen" type="id" />
+    <item name="mediaExitFullscreen" type="id" />
 </resources>

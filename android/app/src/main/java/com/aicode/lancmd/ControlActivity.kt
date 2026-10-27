@@ -49,7 +49,7 @@ class ControlActivity : FeatureActivity() {
 
     private fun messageUi() {
         setup("发送消息", "消息会在 Windows 桌面显示，电脑端可直接关闭", scrollable = true)
-        val box = panel()
+        val box = panel("消息内容")
         val title = input(box, "标题", 1, 60).apply { setText("手机消息") }
         val text = input(box, "写一条消息…", 5, 2000)
         lateinit var send: com.google.android.material.button.MaterialButton
@@ -69,32 +69,28 @@ class ControlActivity : FeatureActivity() {
 
     private fun keyboardUi() {
         setup("远程按键", "快捷按键、虚拟键盘与文字输入 · 控制电脑当前前台窗口", scrollable = true)
-        val session = panel()
-        session.addView(label("开始控制后，按键和文字将发送至电脑当前前台窗口。", 13f, R.color.dim))
+        val session = panel("键盘控制")
+        session.addView(caption("开始控制后，按键和文字将发送至电脑当前前台窗口。"))
         start = button("请求键盘控制") { begin() }
         primary(start)
         stop = button("停止控制") { sessionJob?.cancel() }.apply { isEnabled = false }
-        session.addView(start)
-        session.addView(stop)
-        val keys = panel()
+        session.addView(actions(start, stop))
+        val keys = panel("常用组合键")
         listOf(listOf("Ctrl+C", "Ctrl+V", "Ctrl+A", "Alt+Tab")).forEach { row ->
-            val line = LinearLayout(this)
-            row.forEach { name ->
-                val key = button(name) { sendKeys(name) }.apply {
-                    textSize = 11f; isEnabled = false; minWidth = 0
+            val group = row.map { name ->
+                button(name) { sendKeys(name) }.apply {
+                    textSize = Ui.TEXT_CAPTION; isEnabled = false
                     setPadding(dp(4), 0, dp(4), 0)
                     setSingleLine()
-                }
-                controlled.add(key)
-                line.addView(key, LinearLayout.LayoutParams(0, -2, 1f))
+                }.also { controlled.add(it) }
             }
-            keys.addView(line)
+            keys.addView(actions(*group.toTypedArray()))
         }
         val virtual = VirtualKeyboard(this) { names ->
             task { (lease ?: error("请先开始键盘控制")).call("input", JSONObject().put("keys", JSONArray(names))) }
         }.apply { isEnabled = false }
         controlled.add(virtual)
-        keys.addView(label("虚拟键盘", 14f, R.color.text).apply { setPadding(0, dp(12), 0, dp(8)) })
+        keys.addView(Ui.sectionLabel(this, "虚拟键盘"))
         keys.addView(virtual)
         val text = input(keys, "输入文字到电脑", 2, 1000)
         val send = button("发送文字") {
