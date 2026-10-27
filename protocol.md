@@ -326,3 +326,10 @@ Android internal Activity transitions preserve pinned sharing sessions and send 
 - 临时副本写入前持久化临时目录身份，重启恢复时仅清理身份一致的本应用临时目录。已完成任务仅保留到接收端退出。
 
 `capabilities.features` 增加 `file_jobs` 与 `usb_connection`；`devices.list` 增加 `actions`，包含支持的 action。安卓优先采用动作列表，兼容 2.5/2.6 的版本字段；旧接收端或旧模块不支持时明确提示完整更新并重启，不重试为其他禁用方式。
+
+
+`file_schedule`：`add` 含 `command,params,delay`（0–86400 整数秒），白名单为 files/rm/rename/mkdir/put/file_jobs.create/placeholders.create/scripts.run，返回 job；`get,job_id` 返回状态和完成 result；`list` 返回本手机最近20项元数据；`cancel,job_id` 仅取消等待项。每次接收端最多20项等待/运行、保留50项，退出不续跑。对所选已存在源保存并重新验证 file_id。批量作业创建延迟结束后还需按原 file_jobs 接口查看执行结果。
+
+`files.open` 可带 `application=default|wps,background=bool`，请求后台时使用 SW_SHOWNOACTIVATE 并将新建且同 PID 的窗口置于原前台窗口下方；单实例复用和应用自行激活不保证遵守。`files.mtime` 含 `modified` Unix秒，范围1970–2100，保留 atime，可带 file_id。
+
+`upload.begin` 可带 `file_id`，只允许覆盖该版本，`end` 提交前再次检查；冲突删除临时上传，保留电脑原件。成功返回新的 file_id。手机 Office 副本通过受限 FileProvider 的 content URI 向办公应用授权读写，明确确认后回传。

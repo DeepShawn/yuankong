@@ -72,7 +72,7 @@ class PlaceholderFilesActivity : FeatureActivity() {
                 if(!busy) task {
                     setBusy(true)
                     try {
-                        pinnedCall(origin,"placeholders",JSONObject().put("action","create").put("path",path).put("size",bytes))
+                        FileDelay.call(this@PlaceholderFilesActivity,origin,"placeholders",JSONObject().put("action","create").put("path",path).put("size",bytes))
                         status("创建任务已提交，进度显示在下方")
                     } finally { setBusy(false) }
                     refreshNow()

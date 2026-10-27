@@ -31,6 +31,7 @@ import re
 import secrets
 import shutil
 import stat
+from pathlib import Path
 import signal
 import socket
 import subprocess
@@ -486,7 +487,7 @@ def run_exec(line, shell="cmd", cwd=None, timeout=None):
     try:
         proc = subprocess.Popen(
             argv,
-            cwd=cwd or None,
+            cwd=cwd or (os.path.join(os.environ.get("SystemRoot",r"C:\Windows"),"System32") if IS_WIN and shell=="cmd" else None),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
@@ -741,6 +742,11 @@ def cmd_upload(q, st):
         if size > limit:
             raise RpcError("文件 %s 超过上限 %s" % (human_size(size), human_size(limit)), 2)
         overwrite = bool(q.get("overwrite", True))
+        expected = q.get("file_id")
+        if expected is not None:
+            from file_jobs import snapshot
+            if not os.path.exists(path) or file_token(snapshot(Path(path))) != expected:
+                raise RpcError("电脑原件已变化，未覆盖；请保留手机副本并重新读取")
         if os.path.exists(path) and not overwrite:
             raise RpcError("目标已存在: %s" % path)
         if os.path.isdir(path):
@@ -758,6 +764,7 @@ def cmd_upload(q, st):
             "part": part,
             "size": size,
             "overwrite": overwrite,
+            "file_id": expected,
             "received": 0,
             "seq": 0,
             "sha": hashlib.sha256(),
@@ -802,6 +809,10 @@ def cmd_upload(q, st):
             actual = sess["sha"].hexdigest()
             if expect and not hmac.compare_digest(expect.lower(), actual):
                 raise RpcError("sha256 校验失败", 7)
+            if sess.get("file_id") is not None:
+                from file_jobs import snapshot
+                if not os.path.exists(sess["path"]) or file_token(snapshot(Path(sess["path"]))) != sess["file_id"]:
+                    raise RpcError("电脑原件在回传期间被修改，未覆盖；手机副本保留")
             if sess["overwrite"]:
                 os.replace(sess["part"], sess["path"])
             else:
@@ -832,6 +843,7 @@ def cmd_upload(q, st):
             "path": os.path.abspath(sess["path"]),
             "size": sess["received"],
             "sha256": actual,
+            "file_id": file_token(os.stat(sess["path"])),
         }
 
     if action == "abort":
@@ -1117,6 +1129,7 @@ from script_runner import ScriptRunner
 from privacy_devices import PrivacyDevices
 from placeholder_files import PlaceholderFiles
 from file_jobs import FileJobs, file_token
+from file_schedule import FileSchedule
 
 _capture_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 
@@ -1128,6 +1141,7 @@ def prepare_usb_disconnect(device):
         if any(location.startswith(root) for root in roots):
             raise ValueError("接收端或恢复记录位于此 USB 设备，请移到本机磁盘后再断开")
     _placeholders.stop_for_device(device)
+    _file_schedule.stop_for_device(device)
     _file_jobs.stop_for_device(device)
 
 _remote = RemoteFeatures(RpcError, log, os.path.join(_capture_dir, "LanCmdCapture.exe"))
@@ -1149,7 +1163,7 @@ def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures"])
-        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection"])
+        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1208,6 +1222,9 @@ HANDLERS = {
     "ps": lambda q, st: cmd_ps(q.get("filter", "")),
     "kill": lambda q, st: cmd_kill(q.get("pid"), q.get("force", True)),
 }
+_file_schedule = FileSchedule(lambda command, params, state: HANDLERS[command](params,state))
+HANDLERS["file_schedule"] = lambda q,st: _file_schedule.request(q,st,RpcError)
+
 
 
 # ---------------------------------------------------------------- 配对与授权

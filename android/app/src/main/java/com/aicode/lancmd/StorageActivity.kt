@@ -46,7 +46,9 @@ class StorageActivity : FeatureActivity() {
     }
     private suspend fun storageCall(command: String, params: JSONObject = JSONObject(), timeout: Long = 30_000): JSONObject {
         checkSource()
-        return pinnedCall(origin, command, params, timeout)
+        return if(command in setOf("files","rm","rename","mkdir","put") || command in setOf("file_jobs","placeholders") && params.optString("action")=="create")
+            FileDelay.call(this,origin,command,params) { status(it) }
+        else pinnedCall(origin, command, params, timeout)
     }
     private fun sourceReady(): Boolean = try { checkSource(); true } catch(e: Exception) { status(e.message ?: "连接已改变",true); false }
 
@@ -170,7 +172,7 @@ class StorageActivity : FeatureActivity() {
         val tools = LinearLayout(this)
         tools.addView(button("占位文件") { openPlaceholder() }.apply { textSize=12f;minWidth=0;contentDescription="创建 0–500 GB 隐藏系统占位文件" },LinearLayout.LayoutParams(0,-2,1f))
         tools.addView(button("文件任务") { showFileJobs() }.apply { textSize=12f;minWidth=0 },LinearLayout.LayoutParams(0,-2,1f))
-        tools.addView(button("脚本任务") { if(sourceReady())ScriptJobsDialog.show(this,origin) }.apply { textSize=12f;minWidth=0 },LinearLayout.LayoutParams(0,-2,1f))
+        tools.addView(button("延迟计划") { showFilePlans() }.apply { textSize=12f;minWidth=0 },LinearLayout.LayoutParams(0,-2,1f))
         tools.addView(button("U盘管理") { usbActions() }.apply { textSize=12f;minWidth=0;contentDescription="U盘弹出 / 断开" },LinearLayout.LayoutParams(0,-2,1f))
         body.addView(tools)
         search = EditText(this).apply {
@@ -186,6 +188,7 @@ class StorageActivity : FeatureActivity() {
         val searchRow=LinearLayout(this)
         searchRow.addView(search,LinearLayout.LayoutParams(0,dp(48),1f))
         multiButton=button("多选") { if(!operationsBusy){multi=!multi;if(!multi)selection.clear();updateSelection();adapter.notifyDataSetChanged()} }.apply { minWidth=0;textSize=12f }
+        searchRow.addView(button("延迟 ${FileDelay.seconds(this)}s") { FileDelay.choose(this) { (searchRow.getChildAt(1) as? android.widget.TextView)?.text="延迟 ${FileDelay.seconds(this)}s" } }.apply { minWidth=0;textSize=11f;setPadding(dp(4),0,dp(4),0);contentDescription="设置文件操作延迟" },LinearLayout.LayoutParams(dp(80),dp(48)))
         searchRow.addView(multiButton,LinearLayout.LayoutParams(dp(84),dp(48)))
         body.addView(searchRow, LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(4);bottomMargin=dp(4) })
         selectionBar=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
@@ -315,7 +318,11 @@ class StorageActivity : FeatureActivity() {
         val client = origin
         menu.menu.add("在电脑打开")
         if (!item.optBoolean("dir")) menu.menu.add("预览")
-        if (!item.optBoolean("dir")) menu.menu.add("编辑文本")
+        val office=OfficeDocumentActivity.supports(item.optString("name"))
+        if (!item.optBoolean("dir")) menu.menu.add(if(office)"手机 WPS 预览 / 编辑" else "编辑文本")
+        if(office)menu.menu.add("电脑 WPS 打开")
+        menu.menu.add("在当前窗口下方打开")
+        menu.menu.add("修改日期")
         val scriptType=item.optString("name").substringAfterLast('.',"").lowercase()
         if (!item.optBoolean("dir") && scriptType in listOf("bat","cmd","vbs")) menu.menu.add("运行 ${scriptType.uppercase()}")
         if (!item.optBoolean("dir") && item.optString("name").endsWith(".exe",true)) menu.menu.add("应用锁")
@@ -329,10 +336,16 @@ class StorageActivity : FeatureActivity() {
                 "在电脑打开" -> AlertDialog.Builder(this).setTitle("在电脑打开？")
                     .setMessage("$selected\n\n应用程序会在电脑启动，文件将使用电脑默认应用打开。")
                     .setNegativeButton("取消", null).setPositiveButton("打开") { _, _ -> task {
-                        pinnedCall(client, "files", JSONObject().put("action", "open").put("path", selected))
+                        FileDelay.call(this@StorageActivity,client, "files", JSONObject().put("action", "open").put("path", selected))
                         status("已向电脑发送打开请求")
                     } }.show()
-                "预览" -> FilePreview.show(this, client, selected)
+                "预览" -> if(office)openOffice(selected,item.optString("file_id")) else FilePreview.show(this, client, selected)
+                "手机 WPS 预览 / 编辑" -> openOffice(selected,item.optString("file_id"))
+                "电脑 WPS 打开","在当前窗口下方打开" -> task {
+                    val response=FileDelay.call(this@StorageActivity,client,"files",JSONObject().put("action","open").put("path",selected).put("application",if(it.title=="电脑 WPS 打开")"wps" else "default").put("background",it.title=="在当前窗口下方打开")) { status(it) }
+                    status(response.optString("notice","已向电脑发送打开请求"))
+                }
+                "修改日期" -> modifyDate(item,selected)
                 "编辑文本" -> task { checkSource(); startActivity(android.content.Intent(this@StorageActivity,TextEditorActivity::class.java).putExtra("path",selected)) }
                 "运行 BAT","运行 CMD","运行 VBS" -> ScriptJobsDialog.show(this,client,selected)
                 "应用锁" -> task { checkSource(); startActivity(android.content.Intent(this@StorageActivity,AppLocksActivity::class.java).putExtra("path",selected)) }
@@ -350,7 +363,7 @@ class StorageActivity : FeatureActivity() {
                             dialog.dismiss()
                             task {
                                 status("正在解压 ZIP…")
-                                val result = pinnedCall(client, "files", JSONObject().put("action", "extract")
+                                val result = FileDelay.call(this@StorageActivity,client, "files", JSONObject().put("action", "extract")
                                     .put("path", selected).put("destination", target), 120_000)
                                 status("已解压 ${result.optInt("count")} 项")
                                 load(result.getString("path"))
@@ -588,7 +601,7 @@ class StorageActivity : FeatureActivity() {
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
                 task { try {
                     checkSource()
-                    val result = pinnedCall(client,"files",JSONObject().put("action","text_create").put("path",joinPath(base,filename)).put("text","")
+                    val result = FileDelay.call(this@StorageActivity,client,"files",JSONObject().put("action","text_create").put("path",joinPath(base,filename)).put("text","")
                         .put("encoding",TextEditorActivity.ENCODINGS[format.selectedItemPosition]).put("newline","crlf"))
                     checkSource()
                     dialog.dismiss(); load(base)
@@ -597,6 +610,37 @@ class StorageActivity : FeatureActivity() {
             } }
             dialog.show()
         }.show()
+    }
+
+    private fun openOffice(selected:String,version:String) {
+        if(sourceReady())startActivity(android.content.Intent(this,OfficeDocumentActivity::class.java).putExtra("path",selected).putExtra("file_id",version))
+    }
+    private fun modifyDate(item:JSONObject,selected:String) {
+        val format=java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",java.util.Locale.getDefault()).apply { isLenient=false }
+        val value=styleInput(EditText(this).apply { setSingleLine();setText(format.format(Date(item.optLong("mtime")*1000)));contentDescription="文件修改日期" })
+        val dialog=AlertDialog.Builder(this).setTitle("修改文件日期").setMessage("电脑文件的最后修改时间，按手机本地时区输入。格式 yyyy-MM-dd HH:mm:ss。操作延迟 ${FileDelay.seconds(this)} 秒。")
+            .setView(value).setNegativeButton("取消",null).setPositiveButton("保存",null).create()
+        dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val date=runCatching { val pos=java.text.ParsePosition(0);val d=format.parse(value.text.toString(),pos);check(pos.index==value.length());d }.getOrNull()
+            if(date==null || date.time !in 0L..4_102_444_800_000L){value.error="请输入 1970–2100 年的有效日期";return@setOnClickListener}
+            dialog.dismiss();task {
+                storageCall("files",JSONObject().put("action","mtime").put("path",selected).put("modified",date.time/1000.0).apply { item.optString("file_id").takeIf { it.isNotBlank() }?.let { put("file_id",it) } })
+                load(path,"修改日期已保存：${item.optString("name")}")
+            }
+        } };dialog.show()
+    }
+    private fun showFilePlans() {
+        if(!sourceReady())return
+        task {
+            val response=pinnedCall(origin,"file_schedule");val jobs=response.getJSONArray("jobs")
+            val items=(0 until jobs.length()).map { jobs.getJSONObject(it) }
+            reportTopResults("${items.size} 个延迟文件计划",items.map { "${it.optString("status")} · ${it.optString("command")} · ${it.optString("path")} ${it.optString("error")}" },items.any { it.optString("status")=="failed" })
+            val pending=items.filter { it.optString("status")=="waiting" }
+            if(pending.isNotEmpty())AlertDialog.Builder(this@StorageActivity).setTitle("选择要取消的文件计划")
+                .setItems(pending.map { it.optString("command")+" · "+it.optString("path") }.toTypedArray()) { _,index-> task {
+                    pinnedCall(origin,"file_schedule",JSONObject().put("action","cancel").put("job_id",pending[index].getString("id")));status("已取消尚未执行的文件计划")
+                } }.setNegativeButton("关闭",null).show()
+        }
     }
 
     private fun usbActions() {
@@ -668,6 +712,7 @@ class StorageActivity : FeatureActivity() {
         transferInfo.text = title
         transfer = task {
             try {
+                FileDelay.waitLocal(this@StorageActivity,origin) { status(it) }
                 block { p -> runOnUiThread {
                     if (!isDestroyed) transferInfo.text = "$title · ${p.percent}% · ${FileTransfer.humanSize(p.done)} / ${FileTransfer.humanSize(p.total)}"
                 } }

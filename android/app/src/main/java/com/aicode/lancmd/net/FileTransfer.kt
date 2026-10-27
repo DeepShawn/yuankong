@@ -43,12 +43,16 @@ object FileTransfer {
         onProgress: (Progress) -> Unit
     ): JSONObject = uploadTo(ctx, uri, remotePath, null, onProgress)
 
-    suspend fun uploadTo(
+    suspend fun uploadTo(ctx:Context,uri:Uri,remotePath:String,expectedClient:AgentClient?,onProgress:(Progress)->Unit):JSONObject =
+        uploadRevision(ctx,uri,remotePath,expectedClient,onProgress,null)
+
+    suspend fun uploadRevision(
         ctx: Context,
         uri: Uri,
         remotePath: String,
         expectedClient: AgentClient?,
-        onProgress: (Progress) -> Unit
+        onProgress: (Progress) -> Unit,
+        expectedFileId: String? = null
     ): JSONObject = withContext(Dispatchers.IO) {
         val resolver = ctx.contentResolver
         val knownSize = querySize(ctx, uri)
@@ -91,7 +95,7 @@ object FileTransfer {
                 JSONObject()
                     .put("action", "begin")
                     .put("path", remotePath)
-                    .put("size", size),
+                    .put("size", size).apply { if(expectedFileId!=null)put("file_id",expectedFileId) },
                 20_000
             )
             if (!begin.optBoolean("ok")) throw IOException(begin.optString("error", "无法开始上传"))

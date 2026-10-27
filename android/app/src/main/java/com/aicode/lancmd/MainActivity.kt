@@ -405,6 +405,7 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
             var succeeded = 0
             var failed = 0
             try {
+                FileDelay.waitLocal(this@MainActivity,source) { box.setTitle(it) }
                 for ((i, uri) in uris.withIndex()) {
                     val name = FileTransfer.displayName(this@MainActivity, uri)
                     val remote = joinPath(dir, name)
@@ -528,7 +529,8 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
     ) {
         lifecycleScope.launch {
             try {
-                val r = ConnectionManager.send(cmd, params, timeoutMs)
+                val r = if(cmd in setOf("files","mkdir","rm","rename","put"))FileDelay.call(this@MainActivity,ConnectionManager.sessionClient(),cmd,params,timeoutMs) { log(it,LogKind.INFO) }
+                    else ConnectionManager.send(cmd, params, timeoutMs)
                 if (!r.optBoolean("ok")) {
                     log(r.optString("error", "执行失败"), LogKind.ERROR)
                     return@launch
@@ -737,7 +739,9 @@ class MainActivity : AppCompatActivity(), ConnectionManager.Listener {
                 val dir = getExternalFilesDir("downloads") ?: filesDir
                 dir.mkdirs()
                 val dest = java.io.File(dir, name)
-                FileTransfer.download(path, dest) { p ->
+                val source=ConnectionManager.sessionClient()
+                FileDelay.waitLocal(this@MainActivity,source) { box.setTitle(it) }
+                FileTransfer.downloadFrom(path, dest,source) { p ->
                     if (!isFinishing && !isDestroyed) runOnUiThread { box.update(p) }
                 }
                 log("✓ 已保存 ${FileTransfer.humanSize(dest.length())} → ${dest.absolutePath}", LogKind.OK)
