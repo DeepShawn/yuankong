@@ -28,16 +28,23 @@ class RegistryActivity : FeatureActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState);origin
         setup("注册表编辑器","直接管理电脑注册表；写入使用接收端已有权限，不自动提升权限。修改值前会备份到电脑。",scrollable=true)
+        val locate=panel("位置")
         val controls=LinearLayout(this)
         root=styleSpinner(Spinner(this).apply { adapter=ArrayAdapter(this@RegistryActivity,android.R.layout.simple_spinner_dropdown_item,roots) })
         view=styleSpinner(Spinner(this).apply { adapter=ArrayAdapter(this@RegistryActivity,android.R.layout.simple_spinner_dropdown_item,listOf("64 位视图","32 位视图")) })
-        controls.addView(root,LinearLayout.LayoutParams(0,-2,1f));controls.addView(view,LinearLayout.LayoutParams(0,-2,1f));body.addView(controls)
-        path=styleInput(EditText(this).apply { hint="子项路径，如 Software";setSingleLine();contentDescription="注册表子项路径" });body.addView(path,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(8) })
-        row(body,listOf("打开" to { browse(JSONObject().put("root",roots[root.selectedItemPosition]).put("path",path.text.toString().trim().trim('\\')).put("view",if(view.selectedItemPosition==0)64 else 32)) },
+        controls.addView(root,LinearLayout.LayoutParams(0,-2,1f).apply { marginEnd=dp(4) })
+        controls.addView(view,LinearLayout.LayoutParams(0,-2,1f).apply { marginStart=dp(4) })
+        locate.addView(fieldRow("根键与视图",controls))
+        path=styleInput(EditText(this).apply { hint="子项路径，如 Software";setSingleLine();contentDescription="注册表子项路径" })
+        locate.addView(fieldRow("子项路径",path))
+        row(locate,listOf("打开" to { browse(JSONObject().put("root",roots[root.selectedItemPosition]).put("path",path.text.toString().trim().trim('\\')).put("view",if(view.selectedItemPosition==0)64 else 32)) },
             "上一级" to { browse(JSONObject(current.toString()).put("path",current.optString("path").substringBeforeLast('\\',""))) },"刷新" to { browse(current) }))
-        currentLabel=label("",12f,R.color.accent).apply { setTextIsSelectable(true) };body.addView(currentLabel)
-        row(body,listOf("新建子项" to { createKey() },"删除空项" to { deleteKey() }))
-        row(body,listOf("新建值" to { editValue(null) },"修改备份" to { history() }))
+        currentLabel=label("",Ui.TEXT_CAPTION,R.color.accent).apply {
+            setTextIsSelectable(true);setBackgroundResource(R.drawable.status_bg);setPadding(dp(12),dp(8),dp(12),dp(8))
+        }
+        locate.addView(currentLabel)
+        row(locate,listOf("新建子项" to { createKey() },"删除空项" to { deleteKey() }))
+        row(locate,listOf("新建值" to { editValue(null) },"修改备份" to { history() }))
         keys=panel();values=panel()
         browse(current)
     }

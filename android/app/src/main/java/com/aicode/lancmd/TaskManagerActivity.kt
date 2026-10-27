@@ -60,7 +60,7 @@ class TaskManagerActivity : FeatureActivity() {
         if(state?.getString("source")==sourceKey) {
             restoreKeys=state.getStringArrayList("selection").orEmpty().toSet();multi=state.getBoolean("multi")
         }
-        search=styleInput(EditText(this).apply { hint="搜索名称、PID 或路径";setSingleLine();contentDescription="搜索电脑进程" });body.addView(search)
+        search=styleInput(EditText(this).apply { hint="搜索名称、PID 或路径";setSingleLine();contentDescription="搜索电脑进程" });body.addView(fieldRow("筛选进程",search))
         search.addTextChangedListener(object:TextWatcher {
             override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
             override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){filter()}
@@ -79,10 +79,9 @@ class TaskManagerActivity : FeatureActivity() {
         listOf("全选结果" to { chooseAll() },"反选" to { invert() },"清空" to { selection.clear();updateSelection();adapter.notifyDataSetChanged() }).forEach { (name,action)->
             choices.addView(button(name) { if(!batchBusy)action() }.apply { minWidth=0;textSize=12f },LinearLayout.LayoutParams(0,-2,1f))
         };selectionBar.addView(choices)
-        val actions=LinearLayout(this)
-        endSelected=primary(button("结束所选") { confirmTerminateMany(selection.values.map { JSONObject(it.toString()) }) })
+        endSelected=danger(button("结束所选") { confirmTerminateMany(selection.values.map { JSONObject(it.toString()) }) })
         cancel=button("停止后续操作") { cancelRequested=true;status("已请求停止，当前请求返回后不再结束后续进程") }
-        actions.addView(endSelected,LinearLayout.LayoutParams(0,-2,1f));actions.addView(cancel,LinearLayout.LayoutParams(0,-2,1f));selectionBar.addView(actions);body.addView(selectionBar)
+        selectionBar.addView(actions(endSelected,cancel));body.addView(selectionBar)
         sort.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){filter()}

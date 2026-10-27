@@ -53,17 +53,16 @@ class MediaActivity : FeatureActivity() {
         super.onCreate(savedInstanceState)
         setup(if (camera) "摄像头" else "电脑屏幕", "应用内进入子页面保留共享，返回后继续预览")
         AppVisibility.observe(this) { stream?.cancel() }
-        val help = panel()
-        help.addView(label("随时停止共享", 16f))
-        help.addView(label("进入应用内子页面时暂停取帧，返回继续；退出本页、离开应用或切换电脑会结束共享。", 12f, R.color.dim))
         selector = Spinner(this)
         selector.isEnabled = false
         selector.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("开始后选择摄像头"))
-        selector.visibility = if (camera) View.VISIBLE else View.GONE
-        body.addView(selector)
+        styleSpinner(selector)
+        if (camera) body.addView(fieldRow("摄像头设备", selector),
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(Ui.GAP) })
         image = ImageView(this).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setBackgroundColor(color(R.color.surface))
+            setBackgroundResource(R.drawable.status_bg)
+            clipToOutline = true
             contentDescription = if (camera) "摄像头实时画面" else "电脑屏幕实时画面"
         }
         body.addView(image, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -77,14 +76,15 @@ class MediaActivity : FeatureActivity() {
             saveFrame = frame?.copyOf()
             if (saveFrame != null) saveDocument.launch("LanCmd-${System.currentTimeMillis()}.jpg")
         }.apply { isEnabled = false }
-        val buttons = LinearLayout(this)
-        listOf(start, stop).forEach { buttons.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
-        body.addView(buttons)
-        body.addView(save)
-        if(camera)body.addView(button("摄像头 / 麦克风设备管理") { openChild(android.content.Intent(this,PrivacyDevicesActivity::class.java)) })
-        body.addView(button(if (camera) "录制摄像头视频" else "录制屏幕视频") {
+        body.addView(actions(start, stop), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(Ui.GAP) })
+        val record = button(if (camera) "录制摄像头视频" else "录制屏幕视频") {
             openChild(android.content.Intent(this, RecordingsActivity::class.java).putExtra("kind", if (camera) "camera" else "screen"))
-        })
+        }
+        body.addView(actions(save, record), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        if (camera) body.addView(button("摄像头 / 麦克风设备管理") { openChild(android.content.Intent(this,PrivacyDevicesActivity::class.java)) },
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        body.addView(caption("进入应用内子页面时暂停取帧，返回继续；退出本页、离开应用或切换电脑会结束共享。"),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
     }
 
     private fun begin() {

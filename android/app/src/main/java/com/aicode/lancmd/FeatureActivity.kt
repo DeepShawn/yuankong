@@ -66,19 +66,18 @@ abstract class FeatureActivity : AppCompatActivity() {
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(56)))
         body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), 0, dp(16), dp(12))
+            setPadding(dp(Ui.PAD_PAGE), 0, dp(Ui.PAD_PAGE), dp(12))
         }
         if (scrollable) {
             val scroll = ScrollView(this).apply { isFillViewport = true; addView(body) }
             root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         } else root.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
-        statusText = label(description, 13f, R.color.dim).apply {
-            setPadding(dp(12), dp(8), dp(12), dp(8))
+        statusText = label(description, Ui.TEXT_CAPTION, R.color.dim).apply {
+            setPadding(dp(14), dp(10), dp(14), dp(10))
             setBackgroundResource(R.drawable.status_bg)
-            setLineSpacing(dp(2).toFloat(), 1f)
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
-        body.addView(statusText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2); bottomMargin = dp(12) })
+        body.addView(statusText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2); bottomMargin = dp(Ui.GAP_SECTION) })
         WindowCompat.setDecorFitsSystemWindows(window, false)
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
@@ -89,10 +88,66 @@ abstract class FeatureActivity : AppCompatActivity() {
         setContentView(root)
     }
 
-    protected fun label(text: String, size: Float = 14f, tint: Int = R.color.text) = TextView(this).apply {
-        this.text = text
-        textSize = size
-        setTextColor(color(tint))
+    protected fun label(text: String, size: Float = Ui.TEXT_ITEM, tint: Int = R.color.text): TextView =
+        Ui.text(this, text, size, tint)
+
+    /** 卡片或分组标题。 */
+    protected fun title(text: String): TextView = Ui.text(this, text, Ui.TEXT_TITLE, R.color.text)
+
+    /** 次要说明文字，紧跟在标题或控件之后。 */
+    protected fun caption(text: String): TextView = Ui.text(this, text, Ui.TEXT_CAPTION, R.color.dim)
+
+    /** 细分隔线，用于列表条目之间。 */
+    protected fun divider(): View = Ui.divider(this)
+
+    /**
+     * 结构化列表条目：标题 + 说明（可选）+ 右侧附加视图。
+     * 取代以往「多行 label 叠在一起」的写法，让每条记录成为可辨认的一行。
+     */
+    protected fun listRow(
+        title: String,
+        detail: String? = null,
+        tint: Int = R.color.text,
+        icon: Int = 0,
+        trailing: View? = null
+    ): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, dp(Ui.GAP_TIGHT), 0, dp(Ui.GAP_TIGHT))
+        }
+        if (icon != 0) row.addView(android.widget.ImageView(this).apply {
+            setImageResource(icon)
+            imageTintList = android.content.res.ColorStateList.valueOf(color(R.color.accent))
+            contentDescription = null
+        }, LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(12) })
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(Ui.text(this, title, Ui.TEXT_ITEM, tint))
+        if (!detail.isNullOrBlank()) texts.addView(caption(detail), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
+        row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
+        if (trailing != null) row.addView(trailing, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
+        return row
+    }
+
+    /** 带名称的输入控件：控件上方给出用途说明，不再只靠灰色 hint。 */
+    protected fun fieldRow(name: String, field: View): LinearLayout {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        box.addView(Ui.sectionLabel(this, name))
+        box.addView(field, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        return box
+    }
+
+    /** 并排的操作按钮组，自动等分并留出间距。 */
+    protected fun actions(vararg items: MaterialButton): LinearLayout {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        items.forEach { row.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
+        return row
+    }
+
+    /** 空列表提示：居中弱化文字，而不是留白或一行普通说明。 */
+    protected fun emptyState(text: String): TextView = caption(text).apply {
+        gravity = android.view.Gravity.CENTER
+        setPadding(dp(12), dp(22), dp(12), dp(22))
     }
 
     protected open fun navigateBack() { finish() }
@@ -102,16 +157,17 @@ abstract class FeatureActivity : AppCompatActivity() {
         setBackgroundResource(R.drawable.input_bg)
         setTextColor(color(R.color.text))
         setHintTextColor(color(R.color.dim))
-        setPadding(dp(12), dp(10), dp(12), dp(10))
-        textSize = 14f
-        if (minHeight < dp(48)) minHeight = dp(48)
+        setPadding(dp(14), dp(10), dp(14), dp(10))
+        textSize = Ui.TEXT_BODY
+        if (minHeight < dp(Ui.TOUCH)) minHeight = dp(Ui.TOUCH)
     }
 
     /** 统一复选框外观：主题文字色与选中时的强调色勾选。 */
     protected fun styleCheck(view: CheckBox): CheckBox = view.apply {
         setTextColor(color(R.color.text))
-        textSize = 13f
-        setPadding(dp(6), dp(6), 0, dp(6))
+        textSize = Ui.TEXT_BODY
+        minHeight = dp(Ui.TOUCH)
+        setPadding(dp(8), dp(6), 0, dp(6))
         buttonTintList = android.content.res.ColorStateList(
             arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
             intArrayOf(color(R.color.accent), color(R.color.dim)))
@@ -120,8 +176,8 @@ abstract class FeatureActivity : AppCompatActivity() {
     /** 统一下拉框外观：圆角描边底与内边距，弹出项保持系统默认。 */
     protected fun styleSpinner(view: Spinner): Spinner = view.apply {
         setBackgroundResource(R.drawable.input_bg)
-        minimumHeight = dp(48)
-        if (paddingStart < dp(12)) setPadding(dp(12), paddingTop, dp(12), paddingBottom)
+        minimumHeight = dp(Ui.TOUCH)
+        if (paddingStart < dp(14)) setPadding(dp(14), paddingTop, dp(14), paddingBottom)
     }
 
     /** 并排等分的按钮自动留出间距，避免相邻按钮贴在一起。 */
@@ -138,21 +194,7 @@ abstract class FeatureActivity : AppCompatActivity() {
 
     protected fun button(text: String, action: () -> Unit): MaterialButton = SpacedButton(this).apply {
         this.text = text
-        isAllCaps = false
-        minHeight = dp(48)
-        minWidth=0
-        setPadding(dp(12),paddingTop,dp(12),paddingBottom)
-        maxLines=2
-        ellipsize=android.text.TextUtils.TruncateAt.END
-        cornerRadius = dp(14)
-        typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-        rippleColor = android.content.res.ColorStateList.valueOf(color(R.color.accent_glow))
-        backgroundTintList = android.content.res.ColorStateList(arrayOf(intArrayOf(android.R.attr.state_enabled), intArrayOf()),
-            intArrayOf(color(R.color.surface_variant), color(R.color.surface)))
-        setTextColor(android.content.res.ColorStateList(arrayOf(intArrayOf(android.R.attr.state_enabled), intArrayOf()),
-            intArrayOf(color(R.color.text), color(R.color.dim))))
-        strokeWidth = dp(1)
-        strokeColor = android.content.res.ColorStateList.valueOf(color(R.color.outline_soft))
+        Ui.styleSecondary(this)
         setOnClickListener {
             val previous=feedbackOwner.get()
             val selected=feedbackFor(this)
@@ -161,29 +203,29 @@ abstract class FeatureActivity : AppCompatActivity() {
         }
     }
 
-    protected fun primary(button: MaterialButton): MaterialButton = button.apply {
-        backgroundTintList = android.content.res.ColorStateList(arrayOf(intArrayOf(android.R.attr.state_enabled), intArrayOf()),
-            intArrayOf(color(R.color.accent), color(R.color.surface)))
-        setTextColor(android.content.res.ColorStateList(arrayOf(intArrayOf(android.R.attr.state_enabled), intArrayOf()),
-            intArrayOf(color(R.color.on_accent), color(R.color.dim))))
-        rippleColor = android.content.res.ColorStateList.valueOf(0x55FFFFFF)
-        strokeWidth = 0
-    }
+    protected fun primary(button: MaterialButton): MaterialButton = Ui.stylePrimary(button)
 
-    protected fun panel(): LinearLayout {
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(16), dp(18), dp(16))
+    /** 破坏性操作：危险色描边与文字。 */
+    protected fun danger(button: MaterialButton): MaterialButton = Ui.styleDanger(button)
+
+    /**
+     * 内容卡片。子视图自动获得统一垂直间距，可选标题作为分区标签，
+     * 页面因此不必再给每个元素手写 padding。
+     */
+    protected fun panel(heading: String? = null): LinearLayout {
+        val content = Ui.Column(this).apply {
+            setPadding(dp(Ui.PAD_CARD), dp(Ui.PAD_CARD), dp(Ui.PAD_CARD), dp(Ui.PAD_CARD))
         }
         val card = MaterialCardView(this).apply {
-            radius = dp(20).toFloat()
+            radius = dp(Ui.RADIUS_CARD).toFloat()
             cardElevation = 0f
             strokeWidth = dp(1)
             strokeColor = color(R.color.outline_soft)
             setCardBackgroundColor(color(R.color.surface))
             addView(content)
         }
-        body.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
+        body.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(Ui.GAP_SECTION) })
+        if (heading != null) content.addView(Ui.sectionLabel(this, heading))
         return content
     }
 
