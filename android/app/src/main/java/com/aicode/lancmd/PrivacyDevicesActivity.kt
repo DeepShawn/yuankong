@@ -17,7 +17,7 @@ class PrivacyDevicesActivity : FeatureActivity() {
     private lateinit var refreshButton:MaterialButton
     private val controls=ArrayList<Pair<MaterialButton,Boolean>>()
     private val feedback=linkedMapOf<String,Pair<String,Boolean>>()
-    private val filters=ArrayList<MaterialButton>()
+    private val filterButtons=ArrayList<MaterialButton>()
     private var devices=listOf<JSONObject>()
     private var selectedKind="all"
     private var busy=false
@@ -30,7 +30,7 @@ class PrivacyDevicesActivity : FeatureActivity() {
         setup("隐私设备 · 摄像头与麦克风","读取设备状态…",scrollable=true)
         val row=LinearLayout(this)
         listOf("全部" to "all","摄像头" to "camera","麦克风" to "microphone").forEach { (name,kind)->
-            row.addView(button(name) { selectedKind=kind;render() }.apply { contentDescription="筛选$name";filters.add(this) },LinearLayout.LayoutParams(0,-2,1f))
+            row.addView(button(name) { selectedKind=kind;render() }.apply { contentDescription="筛选$name";filterButtons.add(this) },LinearLayout.LayoutParams(0,-2,1f))
         };body.addView(row)
         refreshButton=button("刷新设备状态") { refresh() };body.addView(refreshButton)
         summary=label("",12f,R.color.dim);body.addView(summary)
@@ -70,7 +70,7 @@ class PrivacyDevicesActivity : FeatureActivity() {
         controls.clear();items.removeAllViews()
         val cameras=devices.count { it.optString("kind")=="camera" };val microphones=devices.size-cameras
         summary.text="${if(admin)"管理员接收端" else "标准权限 · 启停需要管理员"} · $cameras 个摄像头 / $microphones 个麦克风"
-        filters.forEachIndexed { i,b->b.strokeColor=android.content.res.ColorStateList.valueOf(color(if(listOf("all","camera","microphone")[i]==selectedKind)R.color.accent else R.color.outline_soft)) }
+        filterButtons.forEachIndexed { i,b->b.strokeColor=android.content.res.ColorStateList.valueOf(color(if(listOf("all","camera","microphone")[i]==selectedKind)R.color.accent else R.color.outline_soft)) }
         val shown=devices.filter { selectedKind=="all" || it.optString("kind")==selectedKind }
         if(shown.isEmpty())items.addView(label("此分类没有可管理的设备，请刷新或检查驱动与连接。",13f,R.color.dim))
         for(item in shown) {
