@@ -4,13 +4,24 @@ import android.os.Bundle
 import android.view.ViewGroup
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.aicode.lancmd.net.AgentClient
@@ -18,8 +29,18 @@ import com.aicode.lancmd.net.ConnectionManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.extra.SuperArrow
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
@@ -78,6 +99,39 @@ abstract class MiuixActivity : AppCompatActivity() {
         })
     }
 
+    /**
+     * 标准页面骨架：顶栏与返回、可滚动内容，以及顶部的状态提示。
+     * 页面只需在 [content] 里描述分区，留白由骨架给出。
+     */
+    @Composable
+    protected fun Page(title: String, content: @Composable ColumnScope.() -> Unit) {
+        Scaffold(
+            topBar = {
+                SmallTopAppBar(
+                    title = title,
+                    navigationIcon = {
+                        IconButton(onClick = { onBack() }) {
+                            Icon(painterResource(R.drawable.ic_back), "返回")
+                        }
+                    }
+                )
+            }
+        ) { insets ->
+            Column(
+                modifier = Modifier.fillMaxSize().padding(insets).verticalScroll(rememberScrollState())
+            ) {
+                StatusNote(noteText.value, noteFailed.value)
+                content()
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
+
+    /** 顶栏返回键的行为，子类可覆盖（例如先提示未保存内容）。 */
+    protected open fun onBack() {
+        finish()
+    }
+
     protected fun status(text: String, failed: Boolean = false) {
         noteText.value = text
         noteFailed.value = failed
@@ -94,4 +148,94 @@ abstract class MiuixActivity : AppCompatActivity() {
 @Composable
 fun MiuixColumn(content: @Composable () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) { content() }
+}
+
+// ----------------------------------------------------------------- 排版组件
+//
+// 各页面只描述内容，留白、分区和圆角由这里统一给出，
+// 对应旧 View 版 Ui.kt 的作用。
+
+/** 卡片分区：可选分区标题 + 圆角卡片。 */
+@Composable
+fun SectionCard(title: String? = null, content: @Composable ColumnScope.() -> Unit) {
+    if (title != null) SmallTitle(title)
+    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) { content() }
+}
+
+/** 列表条目：标题 + 说明，可点击。 */
+@Composable
+fun RowItem(title: String, summary: String? = null, enabled: Boolean = true, onClick: () -> Unit) {
+    SuperArrow(title = title, summary = summary, enabled = enabled, onClick = onClick)
+}
+
+/** 只读的列表条目：展示状态，不可点击。 */
+@Composable
+fun InfoItem(title: String, summary: String? = null) {
+    BasicComponent(title = title, summary = summary)
+}
+
+/** 说明文字。 */
+@Composable
+fun Note(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+    )
+}
+
+/** 空列表提示。 */
+@Composable
+fun EmptyNote(text: String) {
+    Text(
+        text = text,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 20.dp),
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+    )
+}
+
+/** 操作按钮；[primary] 用强调色，用于页面主操作。 */
+@Composable
+fun Action(
+    text: String,
+    enabled: Boolean = true,
+    primary: Boolean = false,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    TextButton(
+        text = text,
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.padding(vertical = 4.dp),
+        colors = if (primary) ButtonDefaults.textButtonColorsPrimary() else ButtonDefaults.textButtonColors()
+    )
+}
+
+/** 并排的操作按钮，等分宽度。 */
+@Composable
+fun ActionRow(content: @Composable RowScope.() -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) { content() }
+}
+
+/** 带名称的输入框。 */
+@Composable
+fun Field(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    singleLine: Boolean = true,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default
+) {
+    TextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = label,
+        singleLine = singleLine,
+        keyboardOptions = keyboardOptions,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+    )
 }

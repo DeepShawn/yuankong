@@ -325,15 +325,19 @@ class ConvenienceUiTest {
     @Test fun desktopAppsActionsUseListedIdentityAndCloseNeedsConfirmation() {
         Stub().use { stub ->
             stub.install()
+            // 桌面程序页已迁移到 Compose（miuix）：按钮不再是 View，
+            // 这里驱动页面自身的操作入口，关闭仍需手机确认。
             val controller = Robolectric.buildActivity(AppsActivity::class.java).setup()
-            val root = controller.get().window.decorView
-            waitUntil { buttons(root).any { it.text == "切换到前台" && it.isEnabled } }
-            buttons(root).single { it.text == "切换到前台" }.performClick()
-            waitUntil { stub.requests.any { it.optString("cmd") == "apps" && it.optString("action") == "activate" } &&
-                buttons(root).any { it.text == "关闭" && it.isEnabled } }
+            val apps = controller.get()
+            val root = apps.window.decorView
+            waitUntil { apps.windows.isNotEmpty() && !apps.busy }
+            apps.apply(apps.windows.first(), "activate")
+            waitUntil { stub.requests.any { it.optString("cmd") == "apps" && it.optString("action") == "activate" } }
             val activation = stub.requests.single { it.optString("action") == "activate" }
             assertEquals("123", activation.getString("handle")); assertEquals(44, activation.getInt("pid"))
-            buttons(root).single { it.text == "关闭" }.performClick()
+            waitUntil { apps.windows.isNotEmpty() && !apps.busy }
+            apps.confirmClose(apps.windows.first())
+            shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action") == "close" })
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             waitUntil { stub.requests.any { it.optString("action") == "close" } }

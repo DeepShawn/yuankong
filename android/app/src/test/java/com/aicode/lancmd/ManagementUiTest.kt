@@ -133,18 +133,21 @@ class ManagementUiTest {
     @Test fun privacyAndAppLockRequirePhoneConfirmationBeforeChangingComputer() {
         Stub().use { stub->
             stub.install()
+            // 应用锁页已迁移到 Compose（miuix）：按钮不再是 View，
+            // 这里驱动页面自身的操作入口，确认依然要经过手机上的确认框。
             val lock=Robolectric.buildActivity(AppLocksActivity::class.java,Intent(RuntimeEnvironment.getApplication(),AppLocksActivity::class.java).putExtra("path","C:\\Apps\\test.exe")).setup()
-            waitFor { buttons(lock.get().window.decorView).any { it.text=="锁定这个 EXE" && it.isEnabled } }
-            buttons(lock.get().window.decorView).single { it.text=="锁定这个 EXE" }.performClick()
-            shadowOf(Looper.getMainLooper()).idle()
+            val locks=lock.get()
+            assertEquals("C:\\Apps\\test.exe",locks.pathInput)
+            locks.confirmLock();shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="lock" })
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { buttons(lock.get().window.decorView).any { it.text=="解锁" && it.isEnabled } }
-            render(lock.get().window.decorView,"app-locks")
-            buttons(lock.get().window.decorView).single { it.text=="解锁" }.performClick()
-            waitFor { buttons(lock.get().window.decorView).any { it.text=="移除记录" && it.isEnabled } }
+            waitFor { stub.requests.any { it.optString("action")=="lock" } && locks.locks.any { it.state=="locked" } }
+            assertEquals("C:\\Apps\\test.exe",stub.requests.single { it.optString("action")=="lock" }.getString("path"))
+            render(locks.window.decorView,"app-locks")
+            locks.mutate(JSONObject().put("action","unlock").put("lock_id",locks.locks.first().id))
+            waitFor { stub.requests.any { it.optString("action")=="unlock" } }
             assertEquals("lock-entry",stub.requests.single { it.optString("action")=="unlock" }.getString("lock_id"))
-            buttons(lock.get().window.decorView).single { it.text=="移除记录" }.performClick()
+            locks.mutate(JSONObject().put("action","forget").put("lock_id","lock-entry"))
             waitFor { stub.requests.any { it.optString("action")=="forget" } }
             assertEquals("lock-entry",stub.requests.single { it.optString("action")=="forget" }.getString("lock_id"))
             lock.pause().stop().destroy()
