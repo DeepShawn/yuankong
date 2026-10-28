@@ -32,7 +32,7 @@ class NativeSuspension:
         try:
             current=self.processes.info(item["pid"],handle=handle)
             if (not current["can_terminate"] or current["created"]!=item["created"] or
-                    os.path.normcase(current["path"])!=os.path.normcase(path)):
+                    os.path.normcase(str(Path(current["path"]).resolve()))!=os.path.normcase(str(Path(path).resolve()))):
                 raise ValueError("进程已变化、受保护或无法验证，未冻结")
             status=self.nt.NtSuspendProcess(handle)
             if status:raise OSError("Windows 拒绝冻结进程 (0x%08X)"%(status&0xffffffff))
@@ -75,7 +75,10 @@ class FreezeCore:
         path=str(self.validate(q.get("path"))[0])
         if any(os.path.normcase(v["path"])==os.path.normcase(path) for v in self.jobs.values()):
             raise ValueError("此应用已由本接收端冻结，请先解冻")
-        matching=[p for p in self.backend.list() if os.path.normcase(p.get("path",""))==os.path.normcase(path)]
+        def canonical(value):
+            try:return os.path.normcase(str(Path(value).resolve())) if value else ""
+            except (OSError,ValueError):return ""
+        matching=[p for p in self.backend.list() if canonical(p.get("path",""))==canonical(path)]
         if not matching:raise ValueError("此应用没有正在运行的进程；禁止启动请使用应用锁")
         if len(self.jobs)>=50 or len(matching)>256:raise ValueError("最多冻结 50 个应用、每个应用 256 个进程")
         key=uuid.uuid4().hex

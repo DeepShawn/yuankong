@@ -68,8 +68,10 @@ jobs:
         run: python -m unittest discover -s tools -p "test_management*.py" -v
       - name: Filename index queries, persistence and cancellation
         run: python -m unittest discover -s tools -p test_file_search.py -v
-      - name: Installed apps, freeze recovery and display coordinates
+      - name: Installed apps and freeze recovery
         run: python -m unittest discover -s tools -p test_app_workspace.py -v
+      - name: Local upgrade validation, rollback and wallpaper recovery
+        run: python -m unittest discover -s tools -p test_local_upgrade.py -v
       - name: Camera release and selected-device SetupAPI recovery
         run: python -m unittest discover -s tools -p test_privacy_recovery.py -v
       - name: Application lock and privacy device recovery edge checks

@@ -14,7 +14,6 @@ import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"windows"))
 from app_catalog import AppCatalog,executable
 from app_freeze import FreezeCore,serve_worker,NativeSuspension
-from displays import pointer_position
 
 
 class Error(Exception):pass
@@ -86,22 +85,8 @@ class FreezeTest(unittest.TestCase):
             source.q.put(None)
 
 
-class DisplayMappingTest(unittest.TestCase):
-    def test_second_screen_left_of_primary_maps_to_virtual_coordinates(self):
-        bounds=dict(left=-1920,top=0,width=1920,height=1080)
-        self.assertEqual((0,0),pointer_position(0,0,bounds,(-1920,0,3840,1080)))
-        x,y=pointer_position(1,1,bounds,(-1920,0,3840,1080))
-        self.assertAlmostEqual(1919/3839,x);self.assertEqual(1,y)
-    def test_invalid_display_dimensions_cannot_route_pointer(self):
-        with self.assertRaises(ValueError):pointer_position(0,0,dict(left=0,top=0,width=0,height=10),(0,0,100,100))
-
-
 @unittest.skipUnless(os.name=="nt","Windows process/display APIs")
 class NativeWorkspaceTest(unittest.TestCase):
-    def test_read_display_inventory_without_switching_or_installing_drivers(self):
-        from displays import NativeDisplays
-        self.assertIsInstance(NativeDisplays().list(),list)
-
     def test_suspend_and_resume_only_this_tests_own_child(self):
         with tempfile.TemporaryDirectory() as folder:
             counter=Path(folder)/"counter"

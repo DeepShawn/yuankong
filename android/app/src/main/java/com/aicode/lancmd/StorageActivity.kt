@@ -464,6 +464,7 @@ class StorageActivity : MiuixActivity() {
         }
         groups["编辑与属性"] = buildList {
             if (!dir) add(if (office) "手机 WPS 预览 / 编辑" else "编辑文本")
+            if (!dir && name.substringAfterLast('.', "").lowercase() in listOf("jpg","jpeg","png","bmp")) add("设为桌面背景")
             add("最后修改日期"); add("文件属性")
         }
         groups["传输与整理"] = buildList {
@@ -488,6 +489,7 @@ class StorageActivity : MiuixActivity() {
         val selected = joinPath(path, item.getString("name"))
         val office = OfficeDocumentActivity.supports(item.optString("name"))
         when (label) {
+            "设为桌面背景" -> if(sourceReady())startActivity(Intent(this,WallpaperActivity::class.java).putExtra("path",selected))
             "在电脑打开" -> WorkspaceDialog.Builder(this).setTitle("在电脑打开？")
                 .setMessage("$selected\n\n应用程序会在电脑启动，文件将使用电脑默认应用打开。")
                 .setNegativeButton("取消", null)

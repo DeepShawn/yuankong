@@ -1124,7 +1124,7 @@ from gestures import Gestures
 from app_locks import AppLocks
 from app_catalog import AppCatalog
 from app_freeze import AppFreeze
-from displays import Wallpaper
+from wallpaper import Wallpaper
 from registry_editor import RegistryEditor
 from task_manager import TaskManager
 from browser_control import browser_request

@@ -33,7 +33,7 @@ class AppLocksActivity : MiuixActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        pathInput = intent.getStringExtra("path").orEmpty()
+        pathInput = savedInstanceState?.getString("path") ?: intent.getStringExtra("path").orEmpty()
         status("锁定所选 EXE，限制当前 Windows 用户启动；已运行的程序继续运行。")
         content { Screen() }
         refresh()
@@ -92,6 +92,8 @@ class AppLocksActivity : MiuixActivity() {
             .setPositiveButton("锁定") { _, _ -> mutate(JSONObject().put("action", "lock").put("path", selected)) }
             .show()
     }
+
+    override fun onSaveInstanceState(state:Bundle) { state.putString("path",pathInput);super.onSaveInstanceState(state) }
 
     internal fun mutate(params: JSONObject) {
         if (busy) return

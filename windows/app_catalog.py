@@ -90,8 +90,8 @@ class AppCatalog:
                     self.processes=NativeProcesses(self.protected)
                 running=self.processes.list();by_path={}
                 for process in running:
-                    path=process.get("path","")
-                    if path:by_path.setdefault(os.path.normcase(path).casefold(),[]).append(process)
+                    path=executable(process.get("path",""))
+                    if path:by_path.setdefault(os.path.normcase(str(path)).casefold(),[]).append(process)
                 records=self.backend.records()+[dict(name=p.get("name",""),path=p.get("path",""),source="running") for p in running if p.get("path")]
                 items={}
                 for record in records:

@@ -27,6 +27,9 @@ object ToolNavigator {
         Tool("系统与应用","任务管理器","多选结束进程、内存和 CPU",R.drawable.ic_process,TaskManagerActivity::class.java),
         Tool("系统与应用","桌面窗口","切换、最小化和正常关闭窗口",R.drawable.ic_desktop,AppsActivity::class.java),
         Tool("系统与应用","应用锁","限制指定应用启动与恢复",R.drawable.ic_lock,AppLocksActivity::class.java),
+        Tool("系统与应用","应用中心","自动识别已安装程序、应用锁、冻结和解冻",R.drawable.ic_process,ApplicationsActivity::class.java),
+        Tool("系统与应用","桌面背景","更换电脑壁纸和图片显示方式",R.drawable.ic_desktop,WallpaperActivity::class.java),
+        Tool("系统与应用","本地升级","安装 upgrade 文件夹中的 Windows ZIP",R.drawable.ic_history,UpgradeActivity::class.java),
         Tool("系统与应用","注册表编辑器","浏览、编辑和恢复备份",R.drawable.ic_terminal,RegistryActivity::class.java),
         Tool("系统与应用","浏览器","向电脑发送网址",R.drawable.ic_browser,BrowserActivity::class.java),
         Tool("录制与自动化","录音与录屏","麦克风、屏幕和摄像头视频录制",R.drawable.ic_camera,RecordingsActivity::class.java),
@@ -35,14 +38,12 @@ object ToolNavigator {
     )
     fun show(activity:AppCompatActivity) {
         fun dp(v:Int)=(v*activity.resources.displayMetrics.density).toInt()
-        val dialog=BottomSheetDialog(activity)
-        val body=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL;setPadding(dp(16),dp(10),dp(16),dp(16));setBackgroundResource(R.drawable.sheet_bg) }
-        body.addView(View(activity).apply { setBackgroundResource(R.drawable.sheet_handle) },LinearLayout.LayoutParams(dp(36),dp(4)).apply { gravity=android.view.Gravity.CENTER_HORIZONTAL;bottomMargin=dp(12) })
-        body.addView(TextView(activity).apply { text="全部工具";textSize=20f;setTextColor(Themes.color(activity,R.color.text));typeface=android.graphics.Typeface.create("sans-serif-medium",android.graphics.Typeface.NORMAL);setPadding(dp(4),0,0,dp(12)) })
+        val body=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL;setPadding(0,dp(8),0,dp(8)) }
+        val dialog=WorkspaceDialog.Builder(activity).setTitle("工具库").setView(body).setNegativeButton("关闭",null).create()
         val search=EditText(activity).apply { hint="搜索工具、文档、设备或操作";contentDescription="搜索全部工具";setSingleLine();textSize=14f;minHeight=dp(48);setTextColor(Themes.color(activity,R.color.text));setHintTextColor(Themes.color(activity,R.color.dim));setPadding(dp(12),dp(8),dp(12),dp(8));setBackgroundResource(R.drawable.input_bg) }
         body.addView(search)
         val list=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL }
-        body.addView(ScrollView(activity).apply { addView(list);isFillViewport=false },LinearLayout.LayoutParams(-1,0,1f))
+        body.addView(ScrollView(activity).apply { addView(list);isFillViewport=false },LinearLayout.LayoutParams(-1,dp(280)))
         fun render() {
             list.removeAllViews();val query=search.text.toString().trim()
             val matches=tools.filter { (it.group+it.title+it.detail).contains(query,true) }
@@ -68,8 +69,6 @@ object ToolNavigator {
             override fun afterTextChanged(s:Editable?){}
         })
         body.addView(MaterialButton(activity).apply { text="文件操作延迟 · ${FileDelay.seconds(activity)} 秒";minHeight=dp(48);isAllCaps=false;cornerRadius=dp(14);setIconResource(R.drawable.ic_history);iconTint=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.accent));backgroundTintList=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.surface_variant));strokeWidth=dp(1);strokeColor=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.outline_soft));setTextColor(Themes.color(activity,R.color.accent));setOnClickListener { FileDelay.choose(activity) { text="文件操作延迟 · ${FileDelay.seconds(activity)} 秒" } } },LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(10) })
-        val height=(activity.resources.displayMetrics.heightPixels*.82f).toInt()
-        dialog.setContentView(body,android.view.ViewGroup.LayoutParams(-1,height));dialog.behavior.skipCollapsed=true;dialog.behavior.state=com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
         render();dialog.show()
     }
 }

@@ -96,7 +96,7 @@ def unpack(package,destination,current):
         manifest_entry=by_name.get(MANIFEST)
         if manifest_entry is None or manifest_entry[1].file_size>1024*1024:raise ValueError("升级包缺少校验清单，请使用支持本地升级的新版本 ZIP")
         manifest=json.loads(archive.read(manifest_entry[1]))
-        if (manifest.get("product")!="LanCmd-Windows" or manifest.get("format")!=1 or manifest.get("arch")!="amd64" or version(manifest.get("version"))<=version(current)):
+        if (not isinstance(manifest,dict) or manifest.get("product")!="LanCmd-Windows" or manifest.get("format")!=1 or manifest.get("arch")!="amd64" or version(manifest.get("version"))<=version(current)):
             raise ValueError("升级包不兼容，或版本没有高于当前版本")
         files=manifest.get("files")
         if not isinstance(files,dict) or not REQUIRED.issubset(files) or len(files)>1000:raise ValueError("升级包运行文件不完整")
@@ -189,6 +189,7 @@ class LocalUpgrade:
                 if q.get("action","list")=="list":
                     items=[]
                     for path in list(directory.iterdir())[:200]:
+                        if len(items)>=5:break
                         if path.suffix.lower()!=".zip":continue
                         try:
                             info=ordinary(path)

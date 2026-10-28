@@ -72,7 +72,11 @@ class WorkspaceDialog private constructor(private val spec:Builder):AlertDialog(
                 Card(cornerRadius=28.dp,insideMargin=PaddingValues(20.dp)) {
                     Text(spec.title?.toString().orEmpty(),fontSize=21.sp,color=MiuixTheme.colorScheme.onSurface)
                     Column(Modifier.fillMaxWidth().heightIn(max=420.dp).verticalScroll(rememberScrollState())) {
-                        if(!spec.message.isNullOrBlank())Note(spec.message.toString(),Modifier.padding(vertical=8.dp))
+                        if(!spec.message.isNullOrBlank())AndroidView(factory={ TextView(it).apply {
+                            id=android.R.id.message;text=spec.message;textSize=14f
+                            setTextColor(Themes.color(context,R.color.dim));setLineSpacing(px(3).toFloat(),1f)
+                            setTextIsSelectable(true)
+                        } },modifier=Modifier.fillMaxWidth().padding(vertical=14.dp))
                         spec.body?.let { body -> AndroidView(factory={ (body.parent as? ViewGroup)?.removeView(body);body },modifier=Modifier.fillMaxWidth().padding(vertical=8.dp)) }
                         choices?.let { list -> AndroidView(factory={list},modifier=Modifier.fillMaxWidth().height((spec.items!!.size*64).coerceAtMost(360).coerceAtLeast(64).dp)) }
                     }
