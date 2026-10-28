@@ -7,8 +7,6 @@ import android.graphics.Canvas
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
-import android.widget.CheckBox
-import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.aicode.lancmd.net.AgentClient
@@ -65,13 +63,13 @@ class ManagementUiTest {
         File("build/ui-previews/$name.png").apply { parentFile!!.mkdirs() }.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) };bitmap.recycle()
     }
     private fun editor()=Robolectric.buildActivity(TextEditorActivity::class.java,Intent(RuntimeEnvironment.getApplication(),TextEditorActivity::class.java).putExtra("path","C:\\notes\\test.bat")).setup()
-    private fun content(root:View)=all(root).filterIsInstance<EditText>().single { it.contentDescription=="电脑文件文本内容" }
     @Test fun editorLoadsAndSavesRevisionEncodingAndTextWithoutExecuting() {
         Stub().use { stub->
-            stub.install();val controller=editor();val root=controller.get().window.decorView
-            waitFor { content(root).isEnabled };assertEquals("initial\r\n",content(root).text.toString())
-            content(root).setText("echo 中文\nexit /b 0")
-            buttons(root).single { it.text=="保存" }.performClick()
+            // 文本编辑页已迁移到 Compose（miuix）：驱动页面的编辑与保存入口。
+            stub.install();val controller=editor();val page=controller.get();val root=page.window.decorView
+            waitFor { page.editable };assertEquals("initial\r\n",page.body)
+            page.edit("echo 中文\nexit /b 0")
+            page.save()
             waitFor { stub.requests.any { it.optString("action")=="text_write" } }
             val saved=stub.requests.single { it.optString("action")=="text_write" }
             assertEquals("echo 中文\nexit /b 0",saved.getString("text"));assertEquals("r1",saved.getString("revision"));assertEquals("utf-8",saved.getString("encoding"));assertEquals("crlf",saved.getString("newline"))
@@ -81,52 +79,51 @@ class ManagementUiTest {
     }
     @Test fun autosaveDebouncesAndConflictKeepsTextAndStopsAutomaticWrites() {
         Stub().use { stub->
-            stub.install();val controller=editor();val root=controller.get().window.decorView
-            waitFor { content(root).isEnabled };stub.conflict=true
-            val auto=all(root).filterIsInstance<CheckBox>().single()
-            auto.isChecked=true;content(root).setText("draft conflict")
+            stub.install();val controller=editor();val page=controller.get()
+            waitFor { page.editable };stub.conflict=true
+            page.autoSave=true;page.edit("draft conflict")
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1100))
-            waitFor { stub.requests.any { it.optString("action")=="text_write" } && !auto.isChecked }
-            assertEquals("draft conflict",content(root).text.toString())
-            assertTrue(all(root).filterIsInstance<TextView>().any { it.text.contains("外部修改") })
+            waitFor { stub.requests.any { it.optString("action")=="text_write" } && !page.autoSave }
+            assertEquals("draft conflict",page.body)
+            assertTrue(page.note.contains("外部修改"))
             controller.pause().stop().destroy()
         }
     }
     @Test fun unsavedDraftSurvivesRecreationAndOldConnectionCannotSaveToNewComputer() {
         Stub().use { first->Stub().use { second->
-            first.install();val controller=editor();var root=controller.get().window.decorView
-            waitFor { content(root).isEnabled };content(root).setText("local draft")
-            controller.recreate();root=controller.get().window.decorView
-            waitFor { content(root).isEnabled && content(root).text.toString()=="local draft" }
-            second.install();buttons(root).single { it.text=="保存" }.performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("电脑已切换") } }
+            first.install();val controller=editor()
+            waitFor { controller.get().editable };controller.get().edit("local draft")
+            controller.recreate();val page=controller.get()
+            waitFor { page.editable && page.body=="local draft" }
+            second.install();page.save()
+            waitFor { page.note.contains("电脑已切换") }
             assertFalse(second.requests.any { it.optString("action")=="text_write" })
-            assertEquals("local draft",content(root).text.toString());controller.pause().stop().destroy()
+            assertEquals("local draft",page.body);controller.pause().stop().destroy()
         } }
     }
     @Test fun failedReloadKeepsDraftEditableAndCanRestoreWithoutNetworkRead() {
         Stub().use { stub->
-            stub.install();val controller=editor();var root=controller.get().window.decorView
-            waitFor { content(root).isEnabled };content(root).setText("draft to retain")
+            stub.install();val controller=editor()
+            waitFor { controller.get().editable };controller.get().edit("draft to retain")
             stub.failRead=true
-            buttons(root).single { it.text=="重新加载" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            controller.get().confirmReload();shadowOf(Looper.getMainLooper()).idle()
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("读取失败") } }
-            assertTrue(content(root).isEnabled);assertEquals("draft to retain",content(root).text.toString())
+            waitFor { controller.get().note.contains("读取失败") }
+            assertTrue(controller.get().editable);assertEquals("draft to retain",controller.get().body)
             val reads=stub.requests.count { it.optString("action")=="text_read" }
-            controller.recreate();root=controller.get().window.decorView
-            waitFor { content(root).isEnabled && content(root).text.toString()=="draft to retain" }
+            controller.recreate();val page=controller.get()
+            waitFor { page.editable && page.body=="draft to retain" }
             assertEquals("Draft restoration must not depend on a successful PC read",reads,stub.requests.count { it.optString("action")=="text_read" })
             controller.pause().stop().destroy()
         }
     }
     @Test fun revertingChangesDoesNotRestoreAnObsoleteDraftLater() {
         Stub().use { stub->
-            stub.install();val controller=editor();val root=controller.get().window.decorView
-            waitFor { content(root).isEnabled };content(root).setText("obsolete draft")
-            controller.pause().resume();content(root).setText("initial\r\n");controller.pause().stop().destroy()
-            val reopened=editor();val second=reopened.get().window.decorView
-            waitFor { content(second).isEnabled };assertEquals("initial\r\n",content(second).text.toString())
+            stub.install();val controller=editor()
+            waitFor { controller.get().editable };controller.get().edit("obsolete draft")
+            controller.pause().resume();controller.get().edit("initial\r\n");controller.pause().stop().destroy()
+            val reopened=editor();val page=reopened.get()
+            waitFor { page.editable };assertEquals("initial\r\n",page.body)
             reopened.pause().stop().destroy()
         }
     }

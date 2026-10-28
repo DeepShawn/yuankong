@@ -5,13 +5,9 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Looper
 import android.view.View
-import android.view.ViewGroup
-import android.widget.EditText
-import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
-import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -41,8 +37,6 @@ class FileSearchUiTest {
     @Before fun before()=disconnect()
     @After fun after()=disconnect()
     private fun disconnect(){ConnectionManager.stop();runBlocking { (ConnectionManager::class.java.getDeclaredField("loopJob").apply { isAccessible=true }.get(ConnectionManager) as? Job)?.join() };shadowOf(Looper.getMainLooper()).idle()}
-    private fun all(v:View):List<View> = listOf(v)+if(v is ViewGroup)(0 until v.childCount).flatMap { all(v.getChildAt(it)) } else emptyList()
-    private fun button(v:View,name:String)=all(v).filterIsInstance<MaterialButton>().single { it.text==name }
     private fun latest()=ShadowDialog.getLatestDialog() as AlertDialog
     private fun waitFor(check:()->Boolean) { val end=System.currentTimeMillis()+8000;while(System.currentTimeMillis()<end){shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100));if(check())return;Thread.sleep(10)};fail("Search UI did not settle") }
     private fun preview(v:View) {
@@ -52,32 +46,34 @@ class FileSearchUiTest {
     }
     @Test fun wildcardSearchPaginatesAndCanLocateTheResultWithoutExecutingIt() {
         Stub().use { stub->
+            // 文件搜索页已迁移到 Compose（miuix）：结果菜单改用系统列表弹窗。
             stub.install();val c=Robolectric.buildActivity(FileSearchActivity::class.java).setup();val a=c.get();val root=a.window.decorView
-            val input=all(root).filterIsInstance<EditText>().single();input.setText("*.docx")
-            waitFor { stub.requests.any { it.optString("query")=="*.docx" } && button(root,"下一页").isEnabled }
+            a.typed("*.docx")
+            waitFor { stub.requests.any { it.optString("query")=="*.docx" } && a.hasNext }
             preview(root)
-            val row=all(root).single { it.contentDescription=="搜索结果 report.docx" };row.performClick()
-            val menu=org.robolectric.shadows.ShadowPopupMenu.getLatestPopupMenu()!!
-            val locate=(0 until menu.menu.size()).map { menu.menu.getItem(it) }.single { it.title=="在文件管理中定位" }
-            org.robolectric.shadow.api.Shadow.extract<org.robolectric.shadows.ShadowPopupMenu>(menu).onMenuItemClickListener!!.onMenuItemClick(locate)
+            val row=a.items.single { it.name=="report.docx" }
+            a.actions(row);shadowOf(Looper.getMainLooper()).idle()
+            val menu=latest()
+            assertEquals("在文件管理中定位",menu.listView.adapter.getItem(0))
+            menu.listView.performItemClick(null,0,0);shadowOf(Looper.getMainLooper()).idle()
             val intent=shadowOf(a).nextStartedActivity;assertEquals(StorageActivity::class.java.name,intent.component!!.className)
             assertEquals("C:\\Docs",intent.getStringExtra("path"));assertEquals("report.docx",intent.getStringExtra("highlight"))
-            assertFalse(stub.requests.any { it.optString("cmd")=="files" });menu.dismiss()
-            button(root,"下一页").performClick()
-            waitFor { stub.requests.any { it.optInt("offset")==100 } && all(root).filterIsInstance<TextView>().any { it.text=="101–101 / 101" } }
+            assertFalse(stub.requests.any { it.optString("cmd")=="files" })
+            a.offsetBy(100)
+            waitFor { stub.requests.any { it.optInt("offset")==100 } && a.pageLabel=="101–101 / 101" }
             c.pause().stop().destroy()
         }
     }
     @Test fun indexBuildIsExplicitAndCancelUsesTheJobId() {
         Stub().use { stub->
-            stub.install();val c=Robolectric.buildActivity(FileSearchActivity::class.java).setup();val root=c.get().window.decorView
-            waitFor { all(root).filterIsInstance<MaterialButton>().any { it.text=="更新索引" && it.isEnabled } }
-            button(root,"更新索引").performClick();shadowOf(Looper.getMainLooper()).idle()
+            stub.install();val c=Robolectric.buildActivity(FileSearchActivity::class.java).setup();val a=c.get()
+            waitFor { a.buildLabel=="更新索引" && a.canBuild }
+            a.build();shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="build" });latest().getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
-            button(root,"更新索引").performClick();shadowOf(Looper.getMainLooper()).idle();latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { button(root,"取消建立").isEnabled }
+            a.build();shadowOf(Looper.getMainLooper()).idle();latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitFor { a.canCancel }
             assertEquals("C:\\Docs",stub.requests.single { it.optString("action")=="build" }.getJSONArray("roots").getString(0))
-            button(root,"取消建立").performClick()
+            a.cancelBuild()
             waitFor { stub.requests.any { it.optString("action")=="cancel" } }
             assertEquals("index-job",stub.requests.single { it.optString("action")=="cancel" }.getString("job_id"))
             c.pause().stop().destroy()
@@ -85,10 +81,10 @@ class FileSearchUiTest {
     }
     @Test fun switchingComputerNeverSendsTheOldPagesQueryToReplacement() {
         Stub().use { first->Stub().use { second->
-            first.install();val c=Robolectric.buildActivity(FileSearchActivity::class.java).setup();val root=c.get().window.decorView
+            first.install();val c=Robolectric.buildActivity(FileSearchActivity::class.java).setup();val a=c.get()
             waitFor { first.requests.any { it.optString("action")=="query" } }
-            second.install();all(root).filterIsInstance<EditText>().single().setText("private-query")
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("电脑连接已改变") } }
+            second.install();a.typed("private-query")
+            waitFor { a.note.contains("电脑连接已改变") || a.indexInfo.contains("电脑连接已改变") }
             assertTrue(second.requests.isEmpty());c.pause().stop().destroy()
         } }
     }
