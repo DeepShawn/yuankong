@@ -4,12 +4,14 @@ on:
     paths:
       - windows/**
       - tools/test_*.py
+      - tools/check_windows_package.py
       - tools/start_panel_harness.c
       - .github/workflows/windows-features.yml
   pull_request:
     paths:
       - windows/**
       - tools/test_*.py
+      - tools/check_windows_package.py
       - tools/start_panel_harness.c
       - .github/workflows/windows-features.yml
   workflow_dispatch:
@@ -36,6 +38,8 @@ jobs:
         run: cl /nologo /O2 /EHsc /std:c++17 /Fe:windows\LanCmdRecord.exe windows\record.cpp /link mf.lib mfreadwrite.lib mfplat.lib mfuuid.lib ole32.lib gdi32.lib user32.lib winmm.lib uuid.lib
       - name: Launcher argument regression
         run: python -m unittest discover -s tools -p test_launcher.py -v
+      - name: Isolated Python entry point regression
+        run: python -m unittest discover -s tools -p test_agent_startup.py -v
       - name: Build visible panel and native regression harness
         shell: cmd
         run: |
@@ -117,3 +121,23 @@ jobs:
           path: dist/LanCmd-Windows-*.zip
           if-no-files-found: error
           retention-days: 14
+  packaged-startup:
+    needs: package-windows
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: LanCmd-Windows-${{ github.run_number }}
+          path: dist
+      - name: Start the actual Windows ZIP with its embedded Python
+        shell: pwsh
+        run: |
+          $package = @(Get-ChildItem dist/LanCmd-Windows-*.zip)
+          if ($package.Count -ne 1) { throw 'Expected exactly one Windows ZIP' }
+          python tools/check_windows_package.py $package[0].FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

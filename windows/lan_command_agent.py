@@ -39,8 +39,12 @@ import sys
 import threading
 import time
 
+# The portable Python runtime excludes the script directory from sys.path.
+# Initialize it before *any* sibling import, including storage_reads below.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 APP_ID = "LANCMD"
-VERSION = "3.4.2"
+VERSION = "3.4.3"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1119,8 +1123,6 @@ def cmd_kill(pid, force=True):
     return {"pid": pid, "killed": True}
 
 
-# The embeddable Python runtime uses an isolated module path.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from remote_features import RemoteFeatures
 from system_controls import audio_request
 from device_management import DeviceManager
