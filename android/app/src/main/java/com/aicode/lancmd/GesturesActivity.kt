@@ -33,9 +33,9 @@ class GesturesActivity : MiuixActivity() {
 
     private var dragMode by mutableStateOf(true)
     private var recording by mutableStateOf(false)
-    private var eventCount by mutableIntStateOf(0)
+    internal var eventCount by mutableIntStateOf(0)
     private var delaySeconds by mutableStateOf("0")
-    private var playing by mutableStateOf(false)
+    internal var playing by mutableStateOf(false)
     private var playback: Job? = null
     private var lease: RemoteLease? = null
 

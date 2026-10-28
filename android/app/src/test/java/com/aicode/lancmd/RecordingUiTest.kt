@@ -81,12 +81,14 @@ class RecordingUiTest {
             if (name == "recordings") {
                 assertTrue(findButtons(view).any { it.text.contains("开始录制") })
             } else {
-                // 手势页已迁移到 Compose（miuix）：回放入口由页面提供，
-                // 没有记录时不应提交回放。
+                // 手势页已迁移到 Compose（miuix）：没有记录时回放入口保持不可用，
+                // 调用它也不会弹出确认框。
                 val gestures = activity as GesturesActivity
+                assertEquals(0, gestures.eventCount)
+                assertFalse(gestures.playing)
                 gestures.confirmPlay()
                 shadowOf(Looper.getMainLooper()).idle()
-                assertNull(org.robolectric.shadows.ShadowDialog.getLatestDialog())
+                assertFalse("没有记录时不应开始回放", gestures.playing)
             }
             controller.pause().stop().destroy()
         }
