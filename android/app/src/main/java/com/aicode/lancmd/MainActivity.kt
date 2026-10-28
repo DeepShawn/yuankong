@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -184,7 +186,6 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
             }
             Column(modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())) {
                 if (homeCategory == "命令控制台") Console() else Tools()
-            }
             if(homeCategory=="命令控制台")SectionCard {
                 Field(
                     label = "输入命令，回车发送",
@@ -218,6 +219,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                     }
                 }
             }
+            }
             HomeDock()
         }
     }
@@ -241,7 +243,9 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     private fun Console() {
         SectionCard("命令控制台") {
             if (consoleText.isBlank()) EmptyNote("连接后在下方输入命令，输出显示在这里。")
-            else Note(consoleText.takeLast(8000))
+            else Column(Modifier.fillMaxWidth().heightIn(max=240.dp).verticalScroll(rememberScrollState())) {
+                SelectionContainer { Note(consoleText.takeLast(8000)) }
+            }
             Action("清空控制台") { consoleText = "" }
         }
     }

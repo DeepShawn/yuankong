@@ -40,12 +40,21 @@ class WorkspaceDialog private constructor(private val spec:Builder):AlertDialog(
     private var choices:ListView?=null
     private var composition:ComposeView?=null
     internal val description:String get()=listOfNotNull(spec.title,spec.message).joinToString("\n")
-    override fun getButton(whichButton:Int):Button=buttons.getValue(whichButton)
+    override fun getButton(whichButton:Int):Button=buttons.getOrPut(whichButton){Button(context).apply{visibility=View.GONE}}
     override fun getListView():ListView?=choices
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
         val density=context.resources.displayMetrics.density
         fun px(value:Int)=(value*density).toInt()
+        fun style(view:View) {
+            if(view is android.widget.EditText) {
+                view.setBackgroundResource(R.drawable.input_bg);view.setTextColor(Themes.color(context,R.color.text))
+                view.setHintTextColor(Themes.color(context,R.color.dim));view.setPadding(px(14),px(12),px(14),px(12));view.minHeight=px(48)
+            }
+            if(view is MaterialButton) {view.cornerRadius=px(16);view.isAllCaps=false;view.minHeight=px(48)}
+            if(view is ViewGroup)for(index in 0 until view.childCount)style(view.getChildAt(index))
+        }
+        spec.body?.let{style(it)}
         spec.buttons.forEach { (which,item) -> buttons[which]=MaterialButton(context).apply {
             text=item.first;isAllCaps=false;minHeight=px(48);cornerRadius=px(16)
             setTextColor(Themes.color(context,if(which==BUTTON_POSITIVE)R.color.on_accent else R.color.text))

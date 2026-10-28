@@ -7,6 +7,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.isDialog
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -40,7 +43,7 @@ class ChoiceFieldTest {
         compose.setContent { LanCmdMiuixTheme { ChoiceField(items.value,"浏览器",selected.intValue) { selected.intValue=it } } }
         compose.runOnIdle { items.value=listOf("默认") }
         compose.onNodeWithText("浏览器").performClick()
-        compose.onNodeWithText("默认").performClick()
+        compose.onNode(hasText("默认") and hasAnyAncestor(isDialog())).performClick()
         compose.runOnIdle { assertEquals(0,selected.intValue) }
     }
 }
