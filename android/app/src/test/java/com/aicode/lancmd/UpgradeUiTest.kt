@@ -52,7 +52,12 @@ class UpgradeUiTest {
                 fresh.reportId=old.requestId;fresh.install()
                 waitFor{controller.get().note.contains("start.bat")}
                 controller.recreate();fresh.phase="completed"
-                waitFor{controller.get().note.contains("升级已完成") && !controller.get().restarting}
+                try {waitFor{controller.get().note.contains("升级已完成") && !controller.get().restarting}}
+                catch(error:Throwable) {
+                    val page=controller.get()
+                    fun field(name:String)=UpgradeActivity::class.java.getDeclaredField(name).apply{isAccessible=true}.get(page)
+                    throw AssertionError("after recreate note=${page.note}; restarting=${page.restarting}; resumed=${field("resumedUpdate")}; request=${field("requestId")}; target=${field("targetVersion")}; closed=${fresh.client.closed}; RPC=${fresh.requests}",error)
+                }
                 compose.onNodeWithText("3.4.2").assertExists()
                 assertTrue(fresh.requests.any{it.optString("cmd")=="upgrade" && !it.optBoolean("include_packages",true)})
                 assertEquals(1,old.requests.count{it.optString("action")=="apply"})
