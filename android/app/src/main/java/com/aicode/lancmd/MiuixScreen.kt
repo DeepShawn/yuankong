@@ -37,6 +37,7 @@ import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
@@ -161,6 +162,9 @@ abstract class MiuixActivity : AppCompatActivity() {
     protected open fun onBack() {
         finish()
     }
+
+    /** 当前状态提示，供测试读取（Compose 文本不在 View 树里）。 */
+    internal val note: String get() = noteText.value
 
     protected fun status(text: String, failed: Boolean = false) {
         noteText.value = text
@@ -293,6 +297,15 @@ fun ActionRow(content: @Composable RowScope.() -> Unit) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) { content() }
+}
+
+/** 进度条；[progress] 为 null 时表示进度未知。 */
+@Composable
+fun Progress(progress: Float?) {
+    LinearProgressIndicator(
+        progress = progress,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+    )
 }
 
 /** 带名称的输入框。 */

@@ -186,12 +186,8 @@ class FeatureUiTest {
             val intent = Intent(RuntimeEnvironment.getApplication(), ControlActivity::class.java).putExtra("kind", kind)
             val controller = Robolectric.buildActivity(ControlActivity::class.java, intent).setup()
             val activity = controller.get()
-            val controls = buttons(activity.findViewById(android.R.id.content))
-            if (kind == "input") {
-                assertFalse(controls.single { it.text == "Ctrl+V" }.isEnabled)
-                assertFalse(controls.single { it.text == "发送文字" }.isEnabled)
-                assertTrue(controls.single { it.text == "请求键盘控制" }.isEnabled)
-            }
+            // 按键页已迁移到 Compose（miuix）：未取得控制前按键与文字入口不可用。
+            if (kind == "input") assertFalse("未经同意不应取得键盘控制", activity.controlling)
             render(activity, kind)
             controller.pause().stop().destroy()
         }
@@ -231,15 +227,15 @@ class FeatureUiTest {
             stub.install()
             val controller = Robolectric.buildActivity(ControlActivity::class.java,
                 Intent(RuntimeEnvironment.getApplication(), ControlActivity::class.java).putExtra("kind", "input")).setup()
-            val controls = buttons(controller.get().findViewById(android.R.id.content))
-            controls.single { it.text == "请求键盘控制" }.performClick()
-            waitUntil { controls.single { it.text == "发送文字" }.isEnabled }
+            val page = controller.get()
+            page.begin()
+            waitUntil { page.controlling }
             assertEquals("input", stub.requests.single { it.optString("cmd") == "session" }.optString("scope"))
             controller.pause().stop()
             shadowOf(Looper.getMainLooper()).idleFor(1,java.util.concurrent.TimeUnit.SECONDS)
             waitUntil { stub.requests.any { it.optString("cmd") == "session" && it.optString("action") == "end" } }
             assertEquals("approved-test-session", stub.requests.single { it.optString("action") == "end" }.optString("sid"))
-            waitUntil { !controls.single { it.text == "发送文字" }.isEnabled }
+            waitUntil { !page.controlling }
             controller.destroy()
         }
     }
