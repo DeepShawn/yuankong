@@ -1177,7 +1177,7 @@ def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures"])
-        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","usb_connection_fallback"])
+        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):

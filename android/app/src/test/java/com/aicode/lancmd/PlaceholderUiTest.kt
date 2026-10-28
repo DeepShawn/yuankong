@@ -88,6 +88,7 @@ class PlaceholderUiTest {
             waitFor { buttons(root).any { it.text=="取消创建" } && buttons(root).single { it.text=="刷新占位任务" }.isEnabled }
             val request=stub.requests.single { it.optString("action")=="create" }
             assertEquals(500_000_000_000L,request.getLong("size"));assertEquals("E:\\LanCmd-placeholder.dat",request.getString("path"))
+            assertEquals("stable",request.getString("mode"))
             assertTrue(all(root).filterIsInstance<android.widget.ProgressBar>().any { it.isIndeterminate })
             render(root,"placeholder-files")
             buttons(root).single { it.text=="取消创建" }.performClick()
@@ -96,6 +97,36 @@ class PlaceholderUiTest {
             controller.pause().stop().destroy()
         }
     }
+    @Test fun fastModeSurvivesRecreationAndIsSentToReceiver() {
+        Stub().use { stub->
+            stub.install();val controller=Robolectric.buildActivity(PlaceholderFilesActivity::class.java,Intent(RuntimeEnvironment.getApplication(),PlaceholderFilesActivity::class.java).putExtra("directory","E:\\")).setup()
+            var root=controller.get().window.decorView
+            all(root).filterIsInstance<android.widget.Spinner>().single { it.contentDescription=="占位文件生成模式" }.setSelection(1)
+            controller.recreate();root=controller.get().window.decorView
+            assertEquals(1,all(root).filterIsInstance<android.widget.Spinner>().single { it.contentDescription=="占位文件生成模式" }.selectedItemPosition)
+            waitFor { buttons(root).single { it.text=="创建占位文件" }.isEnabled }
+            buttons(root).single { it.text=="创建占位文件" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitFor { stub.requests.any { it.optString("action")=="create" } }
+            assertEquals("fast",stub.requests.single { it.optString("action")=="create" }.getString("mode"))
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test fun oldReceiverCannotSilentlyIgnoreStableMode() {
+        Stub().use { stub->
+            stub.supportsModes=false;stub.install()
+            val controller=Robolectric.buildActivity(PlaceholderFilesActivity::class.java,Intent(RuntimeEnvironment.getApplication(),PlaceholderFilesActivity::class.java).putExtra("directory","E:\\")).setup()
+            val root=controller.get().window.decorView
+            waitFor { buttons(root).single { it.text=="创建占位文件" }.isEnabled }
+            buttons(root).single { it.text=="创建占位文件" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("旧版不支持稳定模式") } }
+            assertFalse(stub.requests.any { it.optString("action")=="create" })
+            controller.pause().stop().destroy()
+        }
+    }
+
     @Test fun slowDiskCancellationRemainsPendingUntilCleanupCompletes() {
         Stub().use { stub->
             stub.jobState="checking";stub.slowCancel=true;stub.install()
@@ -192,7 +223,7 @@ class PlaceholderUiTest {
 
     private class Stub:Closeable {
         private val server=ServerSocket(0);private val client=AgentClient("127.0.0.1",server.localPort)
-        val requests=CopyOnWriteArrayList<JSONObject>();@Volatile var jobState="";@Volatile var slowCancel=false;private var disconnected=false
+        val requests=CopyOnWriteArrayList<JSONObject>();@Volatile var jobState="";@Volatile var slowCancel=false;var supportsModes=true;private var disconnected=false
         private val worker=Thread {
             try { server.accept().use { socket->
                 val reader=socket.getInputStream().bufferedReader();val writer=socket.getOutputStream().bufferedWriter()
@@ -212,7 +243,7 @@ class PlaceholderUiTest {
                                 .put("devices",JSONArray().put(usb).put(JSONObject().put("id","USBSTOR\\SYSTEM").put("name","System USB").put("kind","storage").put("protected",true).put("ejectable",true)))
                                 .put("disconnected",JSONArray().apply { if(disconnected)put(JSONObject(usb.toString()).put("enabled",false).put("problem",22)) })
                         }
-                        "capabilities"->result.put("version","2.7.0").put("features",JSONArray().put("placeholders").put("usb_connection"))
+                        "capabilities"->result.put("version","3.2.2").put("features",JSONArray().put("placeholders").put("usb_connection").apply { if(supportsModes)put("placeholders_modes") })
                     }
                     requests.add(q);writer.write(result.toString()+"\n");writer.flush()
                 }

@@ -21,6 +21,24 @@ CHUNK_BYTES = 4 * 1024 * 1024
 ALLOCATION_MIN = 1024 * 1024
 ALLOCATION_MAX = 256 * 1024 * 1024
 FLUSH_BYTES = 64 * 1024 * 1024
+STABLE_ALLOCATION_MAX = 32 * 1024 * 1024
+STABLE_WRITE_RATE = 64 * 1024 * 1024
+
+
+class WritePacer:
+    """Small token bucket only for real payload writes, never logical allocation."""
+    def __init__(self):
+        self.credit=8*1024*1024
+        self.checked=time.monotonic()
+
+    def account(self,amount,cancel):
+        now=time.monotonic()
+        self.credit=min(8*1024*1024,self.credit+max(0,now-self.checked)*STABLE_WRITE_RATE)-amount
+        self.checked=now
+        if self.credit<0:
+            if cancel.wait(-self.credit/STABLE_WRITE_RATE):raise FastAllocationCancelled()
+            self.checked=time.monotonic()
+            self.credit=0
 
 
 class FastAllocationUnsupported(Exception):
@@ -139,9 +157,10 @@ class NativeAllocation:
     def write(self, data):
         return self.stream.write(data)
 
-    def reserve(self,size,progress=lambda amount:None,cancelled=lambda:False):
+    def reserve(self,size,progress=lambda amount:None,cancelled=lambda:False,mode="fast",pause=None):
         """Reserve real clusters in bounded steps; keep Windows zero-read semantics."""
         if type(size) is not int or not 0<=size<=MAX_BYTES:raise ValueError("占位大小无效")
+        if mode not in ("stable","fast"):raise ValueError("占位模式无效")
         if size==0:return
         def set_info(info_class,value):
             amount=ctypes.c_longlong(value)
@@ -153,7 +172,9 @@ class NativeAllocation:
         # bytes beyond valid-data length, while ordinary clusters are reserved.
         # A single 16 GiB allocation or one final huge EOF update can monopolize
         # a USB controller. Bound BOTH operations and adapt to measured latency.
-        step=8*1024**2
+        stable=mode=="stable"
+        maximum=STABLE_ALLOCATION_MAX if stable else ALLOCATION_MAX
+        step=(4 if stable else 8)*1024**2
         start=0
         while start<size:
             if cancelled():raise FastAllocationCancelled()
@@ -166,8 +187,11 @@ class NativeAllocation:
             if actual<target:raise FastAllocationUnsupported("文件系统未确认实际空间预分配")
             progress(target)
             elapsed=max(.001,time.monotonic()-started)
-            step=max(ALLOCATION_MIN,min(ALLOCATION_MAX,step*2,max(step//2,int(step*.25/elapsed))))
+            step=max(ALLOCATION_MIN,min(maximum,step*2,max(step//2,int(step*.25/elapsed))))
             start=target
+            if stable and start<size:
+                if pause is None:time.sleep(.005)
+                elif pause(.005):raise FastAllocationCancelled()
         if cancelled():raise FastAllocationCancelled()
 
     def flush(self):
@@ -301,6 +325,8 @@ class PlaceholderFiles:
                 size = q.get("size")
                 if type(size) is not int or not 0 <= size <= MAX_BYTES:
                     raise ValueError("占位大小须为 0–500 GB 的整数字节数（1 GB = 1,000,000,000 字节）")
+                mode=q.get("mode","stable")
+                if mode not in ("stable","fast"):raise ValueError("请选择稳定或快速模式")
                 if self.stopped or any(not j["done"].is_set() for j in self.jobs.values()):
                     raise ValueError("当前有占位文件正在创建或接收端正在退出，请等待或取消")
                 # Admission only performs lexical validation. All volume I/O is
@@ -311,7 +337,7 @@ class PlaceholderFiles:
                     self.jobs.pop(completed.pop(0))
                 rid = uuid.uuid4().hex
                 job = dict(owner=state.client_id, cancel=threading.Event(), done=threading.Event(),
-                           data=dict(id=rid, path=str(path), size=size, written=0, allocated=0, status="queued", created=time.time(), updated=time.time()))
+                           data=dict(id=rid, path=str(path), size=size, mode=mode, written=0, allocated=0, status="queued", created=time.time(), updated=time.time()))
                 self.jobs[rid] = job
                 worker = threading.Thread(target=self._run, args=(job, path), name="placeholder-file", daemon=True)
                 job["thread"] = worker
@@ -351,7 +377,7 @@ class PlaceholderFiles:
                         data["updated"]=time.time()
                         if data["size"] and self.backend.free(path)<RESERVE_BYTES:
                             raise ValueError("分配后剩余空间不足 1 GB，已取消并清理")
-                    reserve(data["size"],progress,job["cancel"].is_set)
+                    reserve(data["size"],progress,job["cancel"].is_set,mode=data["mode"],pause=job["cancel"].wait)
                     info=allocation.inspect()
                     if info["size"]!=data["size"] or info["allocated"]<data["size"]:
                         raise FastAllocationUnsupported("未确认快速实际分配，改用逐块写入")
@@ -366,13 +392,17 @@ class PlaceholderFiles:
                         raise ValueError("空间不足，无法回退写入；未完成文件已清理")
                     allocation=self.backend.create(path)
                     data.update(status="writing",method="stream",written=0)
-            block = bytes(CHUNK_BYTES) if data["written"]<data["size"] else b""
+            stable=data["mode"]=="stable"
+            chunk_bytes=min(CHUNK_BYTES,1024*1024) if stable else CHUNK_BYTES
+            flush_bytes=min(FLUSH_BYTES,16*1024*1024) if stable else FLUSH_BYTES
+            pacer=WritePacer() if stable else None
+            block = bytes(chunk_bytes) if data["written"]<data["size"] else b""
             unflushed=0
             while data["written"] < data["size"]:
                 if job["cancel"].is_set():
                     data["status"] = "cancelled"
                     return
-                chunk = block[:min(CHUNK_BYTES, data["size"] - data["written"])]
+                chunk = block[:min(chunk_bytes, data["size"] - data["written"])]
                 if self.backend.free(path) - len(chunk) < RESERVE_BYTES:
                     raise ValueError("剩余空间已接近 1 GB，已停止并清理未完成文件")
                 count = allocation.write(chunk)
@@ -381,7 +411,8 @@ class PlaceholderFiles:
                 data["written"] += count
                 data["updated"]=time.time()
                 unflushed+=count
-                if unflushed>=FLUSH_BYTES:
+                if pacer:pacer.account(count,job["cancel"])
+                if unflushed>=flush_bytes:
                     if job["cancel"].is_set():
                         data["status"]="cancelled"
                         return
