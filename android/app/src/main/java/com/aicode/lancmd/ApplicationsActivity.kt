@@ -22,13 +22,13 @@ class ApplicationsActivity:MiuixActivity() {
         val items=result.optJSONArray(key) ?: return emptyList()
         return (0 until items.length()).mapNotNull { items.optJSONObject(it) }
     }
-    private fun refresh(force:Boolean=false) {
+    private fun refresh(force:Boolean=false,notice:String?=null) {
         if(busy)return
         busy=true
         task { try {
             apps=array(pinnedCall(origin,"app_catalog",JSONObject().put("refresh",force),60_000),"items")
             freezes=array(pinnedCall(origin,"app_freeze",timeout=30_000),"items")
-            status("已识别 ${apps.size} 个应用条目 · 本手机冻结 ${freezes.size} 个应用")
+            status(listOfNotNull(notice,"已识别 ${apps.size} 个应用条目 · 本手机冻结 ${freezes.size} 个应用").joinToString("\n"))
         } finally {busy=false} }
     }
     @Composable private fun Screen() {
@@ -68,14 +68,17 @@ class ApplicationsActivity:MiuixActivity() {
     private fun operate(action:String,item:JSONObject) {
         if(busy)return
         busy=true
-        task {try {
-            when(action) {
+        task {var notice="";try {
+            val result=when(action) {
                 "launch" -> pinnedCall(origin,"files",JSONObject().put("action","open").put("path",item.optString("path")),60_000)
                 "freeze" -> pinnedCall(origin,"app_freeze",JSONObject().put("action","freeze").put("path",item.optString("path")),30_000)
                 "resume" -> pinnedCall(origin,"app_freeze",JSONObject().put("action","resume").put("freeze_id",item.optString("id")),30_000)
+                else -> error("无效的应用操作")
             }
-            status("操作已完成，正在刷新状态")
-        }finally {busy=false};refresh(true)}
+            notice=if(result.optBoolean("partial") || !result.optBoolean("resumed",true))"部分进程未处理，请查看冻结记录中的原因"
+                else when(action){"freeze"->"应用进程已暂停";"resume"->"应用进程已恢复";else->"已向电脑发送启动请求"}
+            status(notice)
+        }finally {busy=false};refresh(true,notice)}
     }
     override fun onSaveInstanceState(state:Bundle) { state.putString("query",query);super.onSaveInstanceState(state) }
 }
