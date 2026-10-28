@@ -104,42 +104,75 @@ class WallpaperTest(unittest.TestCase):
 
 @unittest.skipUnless(os.name=="nt","Windows process and replacement APIs")
 class NativeUpgradeTest(unittest.TestCase):
-    def test_helper_installs_and_rolls_back_only_its_isolated_test_child(self):
+    def test_batch_restart_cross_volume_status_and_rollback_only_touch_our_own_children(self):
         from local_upgrade import write_json
+        import ctypes
+        from ctypes import wintypes as w
+        repository=Path(__file__).resolve().parents[1]
+        module=repository/"windows/local_upgrade.py"
+        batch=(repository/"windows/start.bat").read_bytes()
         for fails in (False,True):
-            with self.subTest(startup_failure=fails),tempfile.TemporaryDirectory() as folder:
-                base=Path(folder);root=base/"install";root.mkdir();work=base/"work";work.mkdir();stage=work/"stage";stage.mkdir()
+            with self.subTest(startup_failure=fails),tempfile.TemporaryDirectory(dir=repository) as folder,tempfile.TemporaryDirectory() as status_dir:
+                base=Path(folder);root=base/"LanCmd 中文 & ! %folder%";root.mkdir()
+                work=root/".upgrade/run-test";work.mkdir(parents=True)
                 runtime=root/"python"
                 junction=subprocess.run(["cmd","/c","mklink","/J",str(runtime),sys.base_prefix],capture_output=True)
                 self.assertEqual(0,junction.returncode,junction.stderr)
-                # Both old and new dummy receivers have a short, finite lifetime.
-                source="import json,os,pathlib,time\np=pathlib.Path(os.environ['LANCMD_UPGRADE_READY']);t=p.with_suffix('.tmp');t.write_text(json.dumps(dict(version='3.4.0',pid=os.getpid())));os.replace(t,p)\ntime.sleep(2)\n"
-                old=b"import time;time.sleep(2)\n";(root/"lan_command_agent.py").write_bytes(old);(root/"Start.exe").write_bytes(b"old")
-                (stage/"lan_command_agent.py").write_text("raise RuntimeError('simulated startup failure')\n" if fails else source)
-                (stage/"Start.exe").write_bytes(b"new");write_json(stage/MANIFEST,{})
-                parent=subprocess.Popen([sys.executable,"-c","import time;time.sleep(3)"],creationflags=0x08000000)
-                plan=dict(root=str(root),work=str(work),parent=parent.pid,state=str(base/"status.json"),version="3.4.0",files=["lan_command_agent.py","Start.exe"])
+                def source(release,nonce):
+                    return ("import json,os,pathlib,time\n"+
+                        "data=dict(version="+repr(release)+",pid=os.getpid())\n"+
+                        ("data['nonce']=os.environ['LANCMD_UPGRADE_NONCE']\n" if nonce else "")+
+                        "p=pathlib.Path(os.environ['LANCMD_UPGRADE_READY']);t=p.with_suffix('.tmp');t.write_text(json.dumps(data));os.replace(t,p)\ntime.sleep(6)\n")
+                old=source("3.4.1",False).encode()
+                (root/"lan_command_agent.py").write_bytes(old);(root/"Start.exe").write_bytes(b"old")
+                (root/"local_upgrade.py").write_bytes(module.read_bytes());(root/"start.bat").write_bytes(b"@echo off\r\nexit /b 0\r\n")
+                (root/"my-notes.txt").write_text("preserve user data")
+                payload=base/"payload";payload.mkdir()
+                (payload/"lan_command_agent.py").write_text("raise RuntimeError('simulated startup failure')\n" if fails else source("3.4.2",True))
+                (payload/"Start.exe").write_bytes(b"new");(payload/"local_upgrade.py").write_bytes(module.read_bytes());(payload/"start.bat").write_bytes(batch)
+                # The real embedded runtime is unchanged in this isolated test;
+                # only these four payload files participate in replacement.
+                names={"lan_command_agent.py","local_upgrade.py","start.bat","Start.exe"}
+                from unittest import mock
+                with mock.patch("local_upgrade.REQUIRED",names):manifest=build_manifest(payload,"3.4.2")
+                with zipfile.ZipFile(work/"package.zip","w") as archive:
+                    for path in payload.iterdir():archive.write(path,"LanCmd-Windows/"+path.name)
+                parent=subprocess.Popen([sys.executable,"-c","import pathlib,sys,time;p=pathlib.Path(sys.argv[1]);end=time.monotonic()+30\nwhile not p.exists() and time.monotonic()<end:time.sleep(.02)",str(work/"release-parent")],creationflags=0x08000000)
+                plan=dict(root=str(root),work=str(work),parent=parent.pid,state=str(Path(status_dir)/"status.json"),version="3.4.2",previous="3.4.1",request_id="a"*32,files=list(manifest["files"]))
                 write_json(work/"plan.json",plan);helper=None
+                bootstrap="import json,sys;sys.path.insert(0,sys.argv[1]);import local_upgrade as u;u.REQUIRED=set(json.loads(sys.argv[2]));u.helper(json.loads(__import__('pathlib').Path(sys.argv[3]).read_text(encoding='utf-8')))"
                 try:
-                    helper=subprocess.Popen([sys.executable,str(Path(__file__).resolve().parents[1]/"windows/local_upgrade.py"),"--apply",str(work/"plan.json")],creationflags=0x08000000)
-                    self.assertEqual(0,helper.wait(15));parent.wait(3)
-                    report=json.loads((base/"status.json").read_text(encoding="utf-8"))
-                    self.assertEqual("rolled_back" if fails else "completed",report["status"],report)
-                    import ctypes
-                    from ctypes import wintypes as w
+                    helper_log=(work/"helper.log").open("wb")
+                    self.addCleanup(helper_log.close)
+                    helper=subprocess.Popen([sys.executable,"-X","utf8","-c",bootstrap,str(module.parent),json.dumps(sorted(names)),str(work/"plan.json")],stdout=helper_log,stderr=helper_log,creationflags=0x08000000)
+                    import time
+                    deadline=time.monotonic()+8
+                    while not (work/"ready").exists() and helper.poll() is None and time.monotonic()<deadline:time.sleep(.02)
+                    self.assertTrue((work/"ready").exists(),(work/"helper.log").read_text(encoding="utf-8",errors="replace"));self.assertIsNone(parent.poll())
+                    self.assertFalse((work/"stage").exists(),"不得在旧接收端退出前解压")
+                    self.assertEqual(b"old",(root/"Start.exe").read_bytes())
+                    (work/"release-parent").touch()
+                    self.assertEqual(0,helper.wait(35),(work/"helper.log").read_text(encoding="utf-8",errors="replace"));parent.wait(3)
+                    report=json.loads((Path(status_dir)/"status.json").read_text(encoding="utf-8"))
+                    self.assertEqual("rolled_back" if fails else "completed",report["status"],str(report)+"\n"+"\n".join(p.read_text(encoding="utf-8",errors="replace") for p in work.glob("*.log")))
+                    self.assertEqual("a"*32,report["request_id"])
                     kernel=ctypes.WinDLL("kernel32",use_last_error=True)
                     kernel.OpenProcess.argtypes=[w.DWORD,w.BOOL,w.DWORD];kernel.OpenProcess.restype=w.HANDLE
                     kernel.WaitForSingleObject.argtypes=[w.HANDLE,w.DWORD];kernel.CloseHandle.argtypes=[w.HANDLE]
                     child=kernel.OpenProcess(0x100000,False,report["pid"])
                     if child:
-                        try:self.assertEqual(0,kernel.WaitForSingleObject(child,5000))
+                        try:self.assertEqual(0,kernel.WaitForSingleObject(child,10000))
                         finally:kernel.CloseHandle(child)
                     self.assertEqual(b"old" if fails else b"new",(root/"Start.exe").read_bytes())
+                    self.assertEqual("preserve user data",(root/"my-notes.txt").read_text())
                     if fails:self.assertEqual(old,(root/"lan_command_agent.py").read_bytes())
-                    else:self.assertEqual(b"old",(work/"backup/Start.exe").read_bytes())
+                    else:
+                        self.assertEqual(b"old",(work/"backup/Start.exe").read_bytes())
+                        self.assertTrue(report["cmd_closed"]);self.assertEqual("start.bat",report["start_via"])
                 finally:
                     if parent.poll() is None:parent.terminate();parent.wait(3)
                     if helper is not None and helper.poll() is None:helper.terminate();helper.wait(3)
+                    helper_log.close()
                     runtime.rmdir()
 
 

@@ -40,7 +40,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "3.4.1"
+VERSION = "3.4.2"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1159,13 +1159,37 @@ def upgrade_busy():
         if any("finished" not in job["data"] for job in _scripts.jobs.values()):return "请先停止运行中的脚本"
     with _commands.lock:
         if any("finished" not in job for job in _commands.batches.values()):return "请先取消或完成延迟命令"
-    with _remote.pointer_lock:
-        if _remote.playback_owner or _remote.pointer_owners:return "请先停止手势回放和拖动"
     # Worker exit/EOF restores held suspension counts before package replacement.
     return None
 
+_upgrade_exit_ready=threading.Event()
+_tcp_listener=None
+
 def upgrade_stop():
-    cleanup_pid();os._exit(0)
+    # Disconnect sockets first; release every input lease before the old process
+    # exits. The independent installer waits on this exact process handle.
+    STOP.set()
+    try:
+        listener=_tcp_listener
+        if listener is not None:
+            try:listener.shutdown(socket.SHUT_RDWR)
+            except OSError:pass
+            listener.close()
+        with _connections_lock:connections=list(_connections)
+        for state in connections:
+            if state.sock is not None:
+                try:state.sock.shutdown(socket.SHUT_RDWR)
+                except OSError:pass
+                try:state.sock.close()
+                except OSError:pass
+        for state in connections:
+            try:state.close_transfers()
+            except Exception:log.exception("升级前释放连接资源失败")
+        _app_freeze.close()
+    finally:
+        cleanup_pid()
+        _upgrade_exit_ready.set()
+        os._exit(0)
 
 _capture_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 
@@ -1430,6 +1454,9 @@ def serve_client(sock, addr, cfg):
             cmd = str(req.get("cmd") or "")
             try:
                 if cmd == "hello":
+                    if _updates.draining:
+                        write_frame(wf,{"id":rid,"ok":False,"error":"接收端正在升级，请等待重连","ecode":503})
+                        break
                     resp = _handle_hello(state, req, cfg)
                     resp["id"] = rid
                     write_frame(wf, resp)
@@ -1575,12 +1602,16 @@ def bind_listener(cfg, attempts=30):
 
 
 def tcp_server(cfg):
-    global CLIENT_COUNT
+    global CLIENT_COUNT,_tcp_listener
     srv = bind_listener(cfg)
+    _tcp_listener=srv
     ready=os.environ.pop("LANCMD_UPGRADE_READY",None)
     if ready:
         from local_upgrade import write_json
-        write_json(ready,dict(version=VERSION,pid=os.getpid()))
+        health=dict(version=VERSION,pid=os.getpid())
+        nonce=os.environ.pop("LANCMD_UPGRADE_NONCE",None)
+        if nonce:health["nonce"]=nonce
+        write_json(ready,health)
     enable_keepalive(srv)
     log.info("TCP 监听 %s:%s", cfg["bind"], cfg["port"])
     while not STOP.is_set():
@@ -1715,10 +1746,12 @@ def install_signal_handlers():
 # ---------------------------------------------------------------- CLI
 
 
-def cleanup_pid():
+def cleanup_pid(expected=None):
     try:
+        with io.open(PID_PATH,"r") as stream:current=int(stream.read().strip())
+        if current!=(os.getpid() if expected is None else expected):return
         os.remove(PID_PATH)
-    except OSError:
+    except (OSError,ValueError):
         pass
 
 
@@ -1790,7 +1823,7 @@ def do_stop():
         if _pid_alive(pid) and IS_WIN:
             subprocess.run(["taskkill", "/PID", str(pid), "/F"],
                            stdin=DEVNULL_IN, capture_output=True)
-        cleanup_pid()
+        if not _pid_alive(pid):cleanup_pid(pid)
         print("已停止 PID %s" % pid)
         return 0
     except Exception as e:
@@ -2010,6 +2043,7 @@ def main(argv):
     except KeyboardInterrupt:
         STOP.set()
     finally:
+        if _updates.draining:_upgrade_exit_ready.wait(45)
         cleanup_pid()
     return 0
 
