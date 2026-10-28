@@ -20,6 +20,8 @@ LIMIT=512*1024*1024
 MANIFEST="release-manifest.json"
 REQUIRED={"LanCmdAgent.exe","LanCmdCtl.exe","Start.exe","lan_command_agent.py","local_upgrade.py","python/pythonw.exe","python/python311.dll"}
 
+class RecoveryError(OSError):pass
+
 
 def version(value):
     if not isinstance(value,str) or not re.fullmatch(r"\d{1,4}\.\d{1,4}\.\d{1,4}",value):raise ValueError("升级包版本号无效")
@@ -151,8 +153,10 @@ def install(root,stage,backup,files,replace=os.replace):
             write_json(backup/"journal.json",entries)
             replace(source,target);entries[-1]["installed"]=True
             write_json(backup/"journal.json",entries)
-    except Exception:
-        rollback(root,backup,entries);raise
+    except Exception as original:
+        try:rollback(root,backup,entries)
+        except Exception as recovery:raise RecoveryError("安装失败且回退未完成：%s；%s"%(original,recovery)) from original
+        raise
     return entries
 
 
@@ -292,6 +296,8 @@ def helper(plan):
         ready.unlink(missing_ok=True);report("completed",pid=process.pid)
         shutil.rmtree(work/"stage",ignore_errors=True)
     except Exception as exc:
+        if isinstance(exc,RecoveryError):
+            report("failed",error=str(exc)[:2000]);return
         try:
             if entries is not None:rollback(root,work/"backup",entries)
             restored=launch();report("rolled_back",error=str(exc)[:1600],pid=restored.pid)

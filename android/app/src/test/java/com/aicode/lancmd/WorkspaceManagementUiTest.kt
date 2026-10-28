@@ -3,6 +3,7 @@ package com.aicode.lancmd
 import android.app.Application
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.semantics.SemanticsActions
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
 import kotlinx.coroutines.Dispatchers
@@ -35,12 +36,12 @@ class WorkspaceManagementUiTest {
             stub.install();val controller=Robolectric.buildActivity(ApplicationsActivity::class.java).setup();val page=controller.get()
             try {
                 compose.waitUntil(8000){page.note.contains("已识别")}
-                compose.onNodeWithText("冻结").performScrollTo().performClick()
+                compose.onNodeWithText("冻结").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
                 assertFalse(stub.requests.any{it.optString("action")=="freeze"})
                 compose.onNodeWithText("确认").performClick()
                 compose.waitUntil(8000){stub.requests.any{it.optString("action")=="freeze"} && page.note.contains("冻结 1")}
                 assertEquals("C:\\Apps\\demo.exe",stub.requests.single{it.optString("action")=="freeze"}.getString("path"))
-                compose.onNodeWithText("解冻").performScrollTo().performClick()
+                compose.onNodeWithText("解冻").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
                 compose.waitUntil(8000){stub.requests.any{it.optString("action")=="resume"} && page.note.contains("冻结 0")}
                 assertEquals("held",stub.requests.single{it.optString("action")=="resume"}.getString("freeze_id"))
             }finally{controller.pause().stop().destroy()}
@@ -52,7 +53,7 @@ class WorkspaceManagementUiTest {
             try {
                 compose.waitUntil(8000){page.note.contains("已识别")}
                 second.install()
-                compose.onNodeWithText("启动").performScrollTo().performClick()
+                compose.onNodeWithText("启动").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
                 compose.onNodeWithText("确认").performClick()
                 compose.waitUntil(8000){page.note.contains("电脑已切换")}
                 assertFalse(first.requests.any{it.optString("cmd")=="files"})
