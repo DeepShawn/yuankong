@@ -148,7 +148,8 @@ def worker_main():
         if sys.stdout is None:
             sys.stdout=os.fdopen(msvcrt.open_osfhandle(kernel.GetStdHandle(-11&0xffffffff),os.O_WRONLY),"w",encoding="utf-8")
     root=Path(__file__).resolve().parent
-    protected=(root,Path(sys.executable),Path(os.environ.get("APPDATA",str(root)))/"LanCmd",os.environ.get("SystemRoot",r"C:\Windows"))
+    install=Path(sys.executable).resolve().parent if getattr(sys,"frozen",False) else root
+    protected=(root,install,Path(sys.executable),Path(os.environ.get("APPDATA",str(root)))/"LanCmd",os.environ.get("SystemRoot",r"C:\Windows"))
     locks=AppLocks(root/"unused-freeze-policy.json",protected=protected)
     return serve_worker(FreezeCore(NativeSuspension(protected),locks._target),sys.stdin,sys.stdout)
 
