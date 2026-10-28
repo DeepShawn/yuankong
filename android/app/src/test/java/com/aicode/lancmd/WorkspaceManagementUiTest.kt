@@ -39,7 +39,8 @@ class WorkspaceManagementUiTest {
                 compose.onNodeWithText("冻结").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
                 assertFalse(stub.requests.any{it.optString("action")=="freeze"})
                 compose.onNodeWithText("确认").performSemanticsAction(SemanticsActions.OnClick){it()}
-                compose.waitUntil(8000){stub.requests.any{it.optString("action")=="freeze"} && page.note.contains("冻结 1")}
+                try { compose.waitUntil(8000){stub.requests.any{it.optString("action")=="freeze"} && page.note.contains("冻结 1")} }
+                catch(error:AssertionError){throw AssertionError("冻结后的状态=${page.note}; RPC=${stub.requests}",error)}
                 assertEquals("C:\\Apps\\demo.exe",stub.requests.single{it.optString("action")=="freeze"}.getString("path"))
                 compose.onNodeWithText("解冻").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
                 compose.waitUntil(8000){stub.requests.any{it.optString("action")=="resume"} && page.note.contains("冻结 0")}
