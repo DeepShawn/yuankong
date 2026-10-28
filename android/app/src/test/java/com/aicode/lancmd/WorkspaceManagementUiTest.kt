@@ -38,7 +38,7 @@ class WorkspaceManagementUiTest {
                 compose.waitUntil(8000){page.note.contains("已识别")}
                 compose.onNodeWithText("冻结").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
                 assertFalse(stub.requests.any{it.optString("action")=="freeze"})
-                compose.onNodeWithText("确认").performClick()
+                compose.onNodeWithText("确认").performSemanticsAction(SemanticsActions.OnClick){it()}
                 compose.waitUntil(8000){stub.requests.any{it.optString("action")=="freeze"} && page.note.contains("冻结 1")}
                 assertEquals("C:\\Apps\\demo.exe",stub.requests.single{it.optString("action")=="freeze"}.getString("path"))
                 compose.onNodeWithText("解冻").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
@@ -54,7 +54,7 @@ class WorkspaceManagementUiTest {
                 compose.waitUntil(8000){page.note.contains("已识别")}
                 second.install()
                 compose.onNodeWithText("启动").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
-                compose.onNodeWithText("确认").performClick()
+                compose.onNodeWithText("确认").performSemanticsAction(SemanticsActions.OnClick){it()}
                 compose.waitUntil(8000){page.note.contains("电脑已切换")}
                 assertFalse(first.requests.any{it.optString("cmd")=="files"})
                 assertFalse(second.requests.any{it.optString("cmd")=="files"})
