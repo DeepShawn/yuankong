@@ -159,10 +159,10 @@ class PlaceholderUiTest {
     }
     @Test fun usbSafeEjectAndForceDisconnectAreSeparateConfirmedActionsWithRestore() {
         Stub().use { stub->
-            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val page=controller.get()
-            waitFor { page.visible.any { it.optString("name")=="reserve.dat" } }
+            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val storage=controller.get()
+            waitFor { storage.visible.any { it.optString("name")=="reserve.dat" } }
             fun select(force:Boolean) {
-                page.usbActions();shadowOf(Looper.getMainLooper()).idle();choose(if(force)1 else 0)
+                storage.usbActions();shadowOf(Looper.getMainLooper()).idle();choose(if(force)1 else 0)
                 waitFor { latest().listView?.adapter?.count==1 };choose(0)
             }
             select(false);assertFalse(stub.requests.any { it.optString("action")=="eject" })
