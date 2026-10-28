@@ -55,8 +55,7 @@ class UpgradeUiTest {
                 try {waitFor{controller.get().note.contains("升级已完成") && !controller.get().restarting}}
                 catch(error:Throwable) {
                     val page=controller.get()
-                    fun field(name:String)=UpgradeActivity::class.java.getDeclaredField(name).apply{isAccessible=true}.get(page)
-                    throw AssertionError("after recreate note=${page.note}; restarting=${page.restarting}; resumed=${field("resumedUpdate")}; request=${field("requestId")}; target=${field("targetVersion")}; closed=${fresh.client.closed}; RPC=${fresh.requests}",error)
+                    throw AssertionError("after recreate note=${page.note}; restarting=${page.restarting}; server phase=${fresh.phase}; closed=${fresh.client.closed}; queries=${fresh.requests.size}",error)
                 }
                 compose.onNodeWithText("3.4.2").assertExists()
                 assertTrue(fresh.requests.any{it.optString("cmd")=="upgrade" && !it.optBoolean("include_packages",true)})
@@ -113,7 +112,7 @@ class UpgradeUiTest {
                     }else {
                         result.put("directory","C:\\LanCmd\\upgrade").put("current",version)
                             .put("items",JSONArray().put(JSONObject().put("name","LanCmd-Windows-3.4.2.zip").put("size",1234).put("sha256","a".repeat(64))))
-                            .put("status",JSONObject().put("status",phase).put("version","3.4.2").put("request_id",reportId))
+                            .put("status",JSONObject().put("status",this@Stub.phase).put("version","3.4.2").put("request_id",reportId))
                     }
                     requests.add(q);output.write(result.toString()+"\n");output.flush()
                 }
