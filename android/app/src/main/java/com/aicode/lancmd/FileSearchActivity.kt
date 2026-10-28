@@ -9,6 +9,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.remember
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.aicode.lancmd.net.ConnectionManager
 import com.aicode.lancmd.net.FileTransfer
@@ -50,6 +56,7 @@ class FileSearchActivity : MiuixActivity() {
     internal var hasPrevious by mutableStateOf(false)
     internal var hasNext by mutableStateOf(false)
 
+    private var settingsExpanded by mutableStateOf(false)
     private var roots = listOf<String>()
     private var drives = listOf<String>()
     private var offset = 0
@@ -72,45 +79,32 @@ class FileSearchActivity : MiuixActivity() {
     }
 
     @Composable
-    private fun Screen() = Page("文件搜索") {
+    private fun Screen() = FixedPage("文件搜索") {
         SectionCard {
-            Field(label = "文件名、关键词或 *.docx", value = query, onValueChange = { typed(it) })
-            ChoiceField(
-                items = scopes, title = "搜索范围",
-                selectedIndex = scopeIndex,
-                onSelectedIndexChange = { scopeIndex = it; search(true) }
-            )
-            ChoiceField(
-                items = kinds, title = "结果类型",
-                selectedIndex = kindIndex,
-                onSelectedIndexChange = { kindIndex = it; search(true) }
-            )
-            ChoiceField(
-                items = sorts, title = "排序方式",
-                selectedIndex = sortIndex,
-                onSelectedIndexChange = { sortIndex = it; search(true) }
-            )
+            Field(label="文件名、关键词或 *.docx",value=query,onValueChange={typed(it)})
+            ActionRow {
+                SelectionAction(if(settingsExpanded)"收起设置" else "筛选 / 索引",selected=settingsExpanded,modifier=Modifier.weight(1f)){settingsExpanded=!settingsExpanded}
+                Action(buildLabel,enabled=canBuild,primary=true,modifier=Modifier.weight(1f)){build()}
+                if(canCancel)Action("取消建立",modifier=Modifier.weight(1f)){cancelBuild()}
+            }
         }
-        SectionCard("索引") {
+        if(settingsExpanded) SectionCard {
+            ChoiceField(scopes,"搜索范围",scopeIndex){scopeIndex=it;search(true)}
+            ChoiceField(kinds,"结果类型",kindIndex){kindIndex=it;search(true)}
+            ChoiceField(sorts,"排序方式",sortIndex){sortIndex=it;search(true)}
             Note(indexInfo)
-            ActionRow {
-                Action("索引范围", modifier = Modifier.weight(1f)) { chooseRoots() }
-                Action(buildLabel, enabled = canBuild, primary = true, modifier = Modifier.weight(1f)) { build() }
-                Action("取消建立", enabled = canCancel, modifier = Modifier.weight(1f)) { cancelBuild() }
+            Action("索引范围"){chooseRoots()}
+        }
+        Note("结果 · $pageLabel")
+        LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+            if(items.isEmpty())item{EmptyNote("没有匹配结果；先建立索引，或修改关键词。")}
+            items(items,key={it.path}) { entry ->
+                RowItem((if(entry.dir)"📁 " else "")+entry.name,"${entry.parent}\n${entry.detail}"){actions(entry)}
             }
         }
-        SectionCard("结果 · $pageLabel") {
-            if (items.isEmpty()) EmptyNote("没有匹配结果；先建立索引，或在上方修改关键词。")
-            items.forEach { item ->
-                RowItem(
-                    title = (if (item.dir) "📁 " else "") + item.name,
-                    summary = "${item.parent}\n${item.detail}"
-                ) { actions(item) }
-            }
-            ActionRow {
-                Action("上一页", enabled = hasPrevious, modifier = Modifier.weight(1f)) { offsetBy(-100) }
-                Action("下一页", enabled = hasNext, modifier = Modifier.weight(1f)) { offsetBy(100) }
-            }
+        ActionRow {
+            Action("上一页",enabled=hasPrevious,modifier=Modifier.weight(1f)){offsetBy(-100)}
+            Action("下一页",enabled=hasNext,modifier=Modifier.weight(1f)){offsetBy(100)}
         }
     }
 

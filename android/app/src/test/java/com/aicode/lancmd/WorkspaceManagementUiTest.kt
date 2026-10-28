@@ -45,7 +45,7 @@ class WorkspaceManagementUiTest {
     private fun waitFor(condition:()->Boolean) {
         val deadline=System.currentTimeMillis()+8000
         while(System.currentTimeMillis()<deadline) {
-            shadowOf(Looper.getMainLooper()).idle()
+            shadowOf(Looper.getMainLooper()).idleFor(50,java.util.concurrent.TimeUnit.MILLISECONDS)
             if(condition())return
             Thread.sleep(10)
         }
@@ -68,6 +68,30 @@ class WorkspaceManagementUiTest {
             }finally{controller.pause().stop().destroy()}
         }
     }
+    @Test fun asynchronousFreezeAndCloseKeepProgressVisibleWhileCatalogIsLoading() {
+        Stub(async=true).use {stub ->
+            stub.install();val controller=Robolectric.buildActivity(ApplicationsActivity::class.java).setup();val page=controller.get()
+            try {
+                waitFor{stub.requests.any{it.optString("cmd")=="app_catalog"}}
+                compose.onNodeWithText("冻结").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
+                compose.onNodeWithText("确认").performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{page.note.contains("Windows 正在处理")}
+                compose.onNodeWithText("应用列表正在后台加载，不会阻止解冻或返回。").assertExists()
+                stub.finishJob=true
+                waitFor{page.note.contains("已暂停") && page.note.contains("冻结 1")}
+                compose.onNodeWithText("解冻").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{page.note.contains("已恢复") && page.note.contains("冻结 0")}
+                compose.onNodeWithText("关闭").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
+                assertFalse(stub.requests.any{it.optString("operation")=="close"})
+                compose.onNodeWithText("确认").performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{page.note.contains("已关闭 1 个进程")}
+                val request=stub.requests.single{it.optString("operation")=="close"}
+                assertEquals("C:\\Apps\\demo.exe",request.optString("path"))
+                assertEquals("submit",request.optString("action"))
+            }finally{controller.pause().stop().destroy()}
+        }
+    }
+
     @Test fun oldApplicationPageCannotLaunchOnAChangedComputer() {
         Stub().use { first ->Stub().use { second ->
             first.install();val controller=Robolectric.buildActivity(ApplicationsActivity::class.java).setup();val page=controller.get()
@@ -82,7 +106,9 @@ class WorkspaceManagementUiTest {
             }finally{controller.pause().stop().destroy()}
         } }
     }
-    private class Stub:Closeable {
+    private class Stub(private val async:Boolean=false):Closeable {
+        @Volatile var finishJob=false
+        private var operation=""
         val server=ServerSocket(0);val client=AgentClient("127.0.0.1",server.localPort)
         val requests=CopyOnWriteArrayList<JSONObject>();var frozen=false
         val worker=Thread {
@@ -91,9 +117,23 @@ class WorkspaceManagementUiTest {
                 while(true) {
                     val q=JSONObject(input.readLine()?:break);val result=JSONObject().put("id",q.getInt("id")).put("ok",true)
                     when(q.optString("cmd")) {
-                        "app_catalog" ->result.put("items",JSONArray().put(JSONObject().put("id","demo").put("name","Demo App").put("path","C:\\Apps\\demo.exe").put("can_lock",true).put("running",1)))
+                        "capabilities" ->result.put("features",JSONArray().apply{if(async)put("app_freeze_jobs").put("app_close")})
+                        "app_catalog" ->result.put("loading",async).put("items",JSONArray().put(JSONObject().put("id","demo").put("name","Demo App").put("path","C:\\Apps\\demo.exe").put("can_lock",true).put("running",1)))
                         "app_freeze" -> {
-                            when(q.optString("action")){"freeze"->frozen=true;"resume"->frozen=false}
+                            when(q.optString("action")) {
+                                "freeze"->frozen=true
+                                "resume"->frozen=false
+                                "submit"->{operation=q.optString("operation");result.put("job",JSONObject().put("id","operation-job").put("status","queued"))}
+                                "job"->{
+                                    val job=JSONObject().put("id","operation-job").put("operation",operation)
+                                    if(!finishJob)job.put("status","running") else {
+                                        if(operation=="freeze")frozen=true else frozen=false
+                                        val done=JSONObject().put("resumed",true).put("closed",1).put("items",JSONArray().apply{if(frozen)put(JSONObject().put("id","held").put("path","C:\\Apps\\demo.exe").put("processes",JSONArray().put(JSONObject().put("pid",123))))})
+                                        job.put("status","completed").put("result",done)
+                                    }
+                                    result.put("job",job)
+                                }
+                            }
                             result.put("items",JSONArray().apply{if(frozen)put(JSONObject().put("id","held").put("path","C:\\Apps\\demo.exe").put("processes",JSONArray().put(JSONObject().put("pid",123))))})
                         }
                     }

@@ -15,6 +15,8 @@ import androidx.appcompat.app.AppCompatActivity
 class ThemeDialog(private val activity: AppCompatActivity) {
     private var accent = Themes.accent(activity)
     private var tone = Themes.tone(activity)
+    private var style = Prefs.uiStyle(activity)
+    private val styleViews = ArrayList<Pair<String, TextView>>()
     private val accentViews = ArrayList<Pair<Themes.Option, View>>()
     private val toneViews = ArrayList<Pair<Themes.Option, View>>()
 
@@ -26,8 +28,28 @@ class ThemeDialog(private val activity: AppCompatActivity) {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(4), dp(22), dp(8))
         }
-        body.addView(section("主题色"))
-        Themes.accents.chunked(2).forEach { group ->
+        body.addView(section("界面风格"))
+        for ((key,label) in listOf("kernel" to "KernelSU 参考风格", "miuix" to "miuix 经典风格")) {
+            val option=TextView(activity).apply {
+                text=label;tag=label;textSize=14f;gravity=Gravity.CENTER_VERTICAL
+                setTextColor(color(R.color.text));setPadding(dp(12),dp(10),dp(12),dp(10));minHeight=dp(48)
+                contentDescription="界面风格 $label";isClickable=true;isFocusable=true
+                setOnClickListener {style=key;refresh()}
+            }
+            styleViews.add(key to option)
+            body.addView(option,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(4)})
+        }
+        body.addView(section("深色 / 亮色背景"))
+        Themes.tones.chunked(2).forEach { group ->
+            val row=LinearLayout(activity)
+            group.forEach { option ->
+                val chip=toneChip(option);toneViews.add(option to chip)
+                row.addView(chip,LinearLayout.LayoutParams(0,dp(48),1f).apply{setMargins(dp(3),dp(3),dp(3),dp(3))})
+            }
+            body.addView(row)
+        }
+        body.addView(section("主题色 · ${Themes.accents.size} 色"))
+        Themes.accents.chunked(3).forEach { group ->
             val row = LinearLayout(activity)
             group.forEach { option ->
                 val chip = accentChip(option)
@@ -35,16 +57,6 @@ class ThemeDialog(private val activity: AppCompatActivity) {
                 row.addView(chip, LinearLayout.LayoutParams(0, -2, 1f))
             }
             body.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
-        }
-        body.addView(section("背景色调"))
-        Themes.tones.chunked(2).forEach { group ->
-            val row = LinearLayout(activity)
-            group.forEach { option ->
-                val chip = toneChip(option)
-                toneViews.add(option to chip)
-                row.addView(chip, LinearLayout.LayoutParams(0, dp(52), 1f).apply { setMargins(dp(4), dp(4), dp(4), dp(4)) })
-            }
-            body.addView(row)
         }
         body.addView(TextView(activity).apply {
             text = "设置保存在本机，仅改变外观，不影响连接与功能。"
@@ -58,8 +70,9 @@ class ThemeDialog(private val activity: AppCompatActivity) {
             .setView(ScrollView(activity).apply { addView(body) })
             .setNegativeButton("取消", null)
             .setPositiveButton("应用") { _, _ ->
-                if (accent.key != Themes.accent(activity).key || tone.key != Themes.tone(activity).key) {
+                if (accent.key != Themes.accent(activity).key || tone.key != Themes.tone(activity).key || style != Prefs.uiStyle(activity)) {
                     Prefs.saveTheme(activity, accent.key, tone.key)
+                    Prefs.saveUiStyle(activity,style)
                     activity.recreate()
                 }
             }
@@ -79,7 +92,7 @@ class ThemeDialog(private val activity: AppCompatActivity) {
         val box = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(12), dp(8), dp(12))
+            setPadding(dp(4), dp(8), dp(4), dp(8));minimumHeight=dp(48)
             isClickable = true; isFocusable = true
             contentDescription = "主题色 ${option.label}"
             setOnClickListener { accent = option; refresh() }
@@ -95,11 +108,11 @@ class ThemeDialog(private val activity: AppCompatActivity) {
             setTextColor(0xE6101010.toInt())
             tag = "check"
         }, FrameLayout.LayoutParams(-1, -1))
-        box.addView(swatch, LinearLayout.LayoutParams(dp(30), dp(30)))
+        box.addView(swatch, LinearLayout.LayoutParams(dp(24), dp(24)))
         box.addView(TextView(activity).apply {
             text = option.label; textSize = 12.5f; gravity = Gravity.CENTER
             setTextColor(color(R.color.text))
-            setPadding(dp(10), 0, 0, 0)
+            setPadding(dp(6), 0, 0, 0)
         })
         return box
     }
@@ -109,25 +122,34 @@ class ThemeDialog(private val activity: AppCompatActivity) {
         textSize = 13f
         gravity = Gravity.CENTER
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        setTextColor(0xFFEAF1F8.toInt())
+        setTextColor(if(option.light)0xFF172238.toInt() else 0xFFEAF1F8.toInt())
         isClickable = true; isFocusable = true
         contentDescription = "背景色调 ${option.label}"
         setOnClickListener { tone = option; refresh() }
     }
 
     private fun refresh() {
+        styleViews.forEach { (key,view) ->
+            view.isSelected=key==style;view.text=if(view.isSelected)"✓ ${view.tag}" else view.tag.toString()
+            view.background=GradientDrawable().apply {
+                setColor(color(if(view.isSelected)R.color.accent_dim else R.color.surface_variant));cornerRadius=dp(16).toFloat()
+                setStroke(dp(1),color(if(view.isSelected)R.color.accent else R.color.outline_soft))
+            }
+        }
         accentViews.forEach { (option, view) ->
             val selected = option.key == accent.key
             val swatch = (view as LinearLayout).getChildAt(0) as FrameLayout
+            (swatch.background as GradientDrawable).colors=if(tone.light)intArrayOf(option.lightSwatch,option.lightSwatch) else intArrayOf(option.swatch,option.swatch2)
             (swatch.background as GradientDrawable).setStroke(if (selected) dp(3) else 0, 0xFFFFFFFF.toInt())
             swatch.findViewWithTag<View>("check").visibility = if (selected) View.VISIBLE else View.INVISIBLE
+            swatch.findViewWithTag<TextView>("check").setTextColor(if(tone.light)0xFFFFFFFF.toInt() else 0xE6101010.toInt())
             view.isSelected = selected
         }
         toneViews.forEach { (option, view) ->
             val selected = option.key == tone.key
             view.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(option.swatch2, option.swatch)).apply {
                 cornerRadius = dp(14).toFloat()
-                setStroke(if (selected) dp(2) else dp(1), if (selected) accent.swatch else 0x33FFFFFF)
+                setStroke(if (selected) dp(2) else dp(1), if (selected) {if(option.light)accent.lightSwatch else accent.swatch} else if(option.light)0x33526078 else 0x33FFFFFF)
             }
             view.isSelected = selected
             (view as TextView).text = if (selected) "✓ ${option.label}" else option.label

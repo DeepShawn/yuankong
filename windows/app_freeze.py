@@ -25,6 +25,8 @@ class NativeSuspension:
             fn=getattr(self.nt,name);fn.argtypes=[w.HANDLE];fn.restype=ctypes.c_long
 
     def list(self):return self.processes.list()
+    def list_matching(self,path):return self.processes.list(name=Path(path).name)
+    def terminate(self,pid,created):self.processes.terminate(pid,created)
 
     def suspend(self,item,path):
         handle=self.kernel.OpenProcess(0x1800,False,item["pid"])
@@ -71,14 +73,33 @@ class FreezeCore:
             if job is None or job["owner"]!=owner:raise ValueError("冻结记录不存在或属于其他手机")
             errors=self._resume(key)
             return dict(items=self.public(owner),resumed=not errors,errors=errors)
-        if action!="freeze":raise ValueError("无效的应用冻结操作")
+        if action not in ("freeze","close"):raise ValueError("无效的应用冻结操作")
         path=str(self.validate(q.get("path"))[0])
-        if any(os.path.normcase(v["path"])==os.path.normcase(path) for v in self.jobs.values()):
+        if action=="freeze" and any(os.path.normcase(v["path"])==os.path.normcase(path) for v in self.jobs.values()):
             raise ValueError("此应用已由本接收端冻结，请先解冻")
         def canonical(value):
-            try:return os.path.normcase(str(Path(value).resolve())) if value else ""
+            try:return os.path.normcase(os.path.abspath(value)) if value else ""
             except (OSError,ValueError):return ""
-        matching=[p for p in self.backend.list() if canonical(p.get("path",""))==canonical(path)]
+        source=self.backend.list_matching(path) if hasattr(self.backend,"list_matching") else self.backend.list()
+        matching=[p for p in source if canonical(p.get("path",""))==canonical(path)]
+        if action=="close":
+            if any(canonical(job["path"])==canonical(path) and job["owner"]!=owner for job in self.jobs.values()):
+                raise ValueError("应用由其他手机冻结，请先由原手机解冻")
+            errors=[];terminated=set()
+            for item in matching:
+                if not item.get("can_terminate"):
+                    errors.append("进程 %s 受保护或无权验证，已跳过"%item["pid"]);continue
+                try:self.backend.terminate(item["pid"],item["created"]);terminated.add((item["pid"],item["created"]))
+                except (OSError,ValueError) as exc:errors.append("进程 %s：%s"%(item["pid"],exc))
+            for key,job in list(self.jobs.items()):
+                if job["owner"]!=owner:continue
+                for item in list(job["processes"]):
+                    if (item["pid"],item["created"]) in terminated:
+                        try:self.backend.resume(item["handle"]);job["processes"].remove(item)
+                        except OSError as exc:errors.append(str(exc))
+                if not job["processes"]:self.jobs.pop(key)
+            if errors and not terminated:raise ValueError("未关闭任何进程："+"；".join(errors)[:1000])
+            return dict(items=self.public(owner),closed=len(terminated),errors=errors,partial=bool(errors))
         if not matching:raise ValueError("此应用没有正在运行的进程；禁止启动请使用应用锁")
         if len(self.jobs)>=50 or len(matching)>256:raise ValueError("最多冻结 50 个应用、每个应用 256 个进程")
         key=uuid.uuid4().hex
@@ -157,6 +178,7 @@ def worker_main():
 class AppFreeze:
     def __init__(self):
         self.lock=threading.RLock();self.process=None;self.recovering=None;self.closed=False;self.failure=""
+        self.jobs_lock=threading.RLock();self.jobs={};self.snapshots={}
         atexit.register(self.close)
         threading.Thread(target=self._heartbeat,daemon=True,name="freeze-heartbeat").start()
 
@@ -196,17 +218,61 @@ class AppFreeze:
             if not result.get("ok"):raise ValueError(result.get("error","冻结操作失败"))
             return result
 
+    def _finish_job(self,job,request):
+        with self.jobs_lock:job["status"]="running"
+        try:
+            result=self._rpc(request)
+            with self.jobs_lock:
+                if "items" in result:self.snapshots[job["owner"]]=result["items"]
+                job.update(status="completed",result=result)
+        except Exception as exc:
+            with self.jobs_lock:job.update(status="failed",error=str(exc)[:1600])
+
     def request(self,q,state,error):
         try:
-            if q.get("action","list") not in ("list","freeze","resume"):raise ValueError("无效的应用冻结操作")
-            # Worker ownership always comes from the authenticated connection.
-            return self._rpc(dict(q,owner=state.client_id))
+            owner=state.client_id
+            if not isinstance(owner,str) or not owner:raise ValueError("连接身份无效")
+            action=q.get("action","list")
+            if action=="state":
+                with self.jobs_lock:return dict(items=list(self.snapshots.get(owner,[])),
+                    jobs=[{key:value for key,value in job.items() if key!="owner"} for job in self.jobs.values()
+                          if job["owner"]==owner and job["status"] in ("queued","running")])
+            if action=="job":
+                with self.jobs_lock:
+                    job=self.jobs.get(q.get("job_id"))
+                    if job is None or job["owner"]!=owner:raise ValueError("冻结任务不存在或属于其他手机")
+                    return dict(job={key:value for key,value in job.items() if key!="owner"})
+            if action=="submit":
+                operation=q.get("operation")
+                if operation not in ("freeze","resume","close"):raise ValueError("无效的应用冻结操作")
+                with self.jobs_lock:
+                    if self.closed:raise ValueError("接收端正在退出")
+                    if any(job["status"] in ("queued","running") for job in self.jobs.values()):
+                        raise ValueError("上一项冻结或解冻仍在处理，请等待结果")
+                    while len(self.jobs)>=100:self.jobs.pop(next(iter(self.jobs)))
+                    job=dict(id=uuid.uuid4().hex,owner=owner,status="queued",operation=operation)
+                    self.jobs[job["id"]]=job
+                    request=dict(action=operation,owner=owner)
+                    for key in ("path","freeze_id"):
+                        if key in q:request[key]=q[key]
+                    threading.Thread(target=self._finish_job,args=(job,request),name="app-freeze-job",daemon=True).start()
+                    return dict(job={key:value for key,value in job.items() if key!="owner"})
+            if action not in ("list","freeze","resume","close"):raise ValueError("无效的应用冻结操作")
+            # Legacy callers retain their synchronous protocol.
+            result=self._rpc(dict(q,owner=owner))
+            if "items" in result:
+                with self.jobs_lock:self.snapshots[owner]=result["items"]
+            return result
         except (OSError,ValueError) as exc:raise error(str(exc))
 
     def prepare_upgrade(self):
         with self.lock:
+            with self.jobs_lock:
+                if any(job["status"] in ("queued","running") for job in self.jobs.values()):
+                    raise ValueError("应用操作仍在处理，请等待冻结、解冻或关闭完成后升级")
             if self.recovering is not None or self.failure:raise ValueError("冻结恢复未确认完成，请先恢复应用后再升级")
             if self.process is not None:self._rpc(dict(action="release_all"))
+            with self.jobs_lock:self.snapshots.clear()
 
     def _heartbeat(self):
         while not self.closed:

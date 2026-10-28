@@ -6,9 +6,18 @@ import androidx.appcompat.app.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.aicode.lancmd.net.ConnectionManager
 import com.aicode.lancmd.net.FileTransfer
@@ -39,7 +48,7 @@ class TaskManagerActivity : MiuixActivity() {
     internal var results by mutableStateOf<List<String>>(emptyList())
     private var resultsExpanded by mutableStateOf(false)
 
-    private val selection = linkedMapOf<String, JSONObject>()
+    private val selection = mutableStateMapOf<String, JSONObject>()
     private var restoreKeys = setOf<String>()
     private var busy = false
     internal var batchBusy by mutableStateOf(false)
@@ -48,6 +57,8 @@ class TaskManagerActivity : MiuixActivity() {
     private var lastResult: String? = null
     private var lastError = false
     private var items = listOf<JSONObject>()
+
+    private var settingsExpanded by mutableStateOf(false)
 
     private fun key(item: JSONObject) = "${item.optInt("pid")}:${item.optString("created")}"
 
@@ -63,15 +74,16 @@ class TaskManagerActivity : MiuixActivity() {
     }
 
     @Composable
-    private fun Screen() = Page("任务管理器") {
+    private fun Screen() = FixedPage("任务管理器") {
         if (results.isNotEmpty()) SectionCard("逐项结果") {
             RowItem(
                 title = if (resultsExpanded) "收起逐项结果" else "展开逐项结果（${results.size}）"
             ) { resultsExpanded = !resultsExpanded }
-            if (resultsExpanded) Note(results.joinToString("\n").take(100_000))
+            if (resultsExpanded) Column(Modifier.heightIn(max=144.dp).verticalScroll(rememberScrollState())) { Note(results.joinToString("\n").take(100_000)) }
         }
         SectionCard {
             Field(label = "搜索名称、PID 或路径", value = query, onValueChange = { query = it; filter() })
+            if(settingsExpanded) {
             ChoiceField(
                 items = sorts, title = "排序",
                 selectedIndex = sortIndex,
@@ -83,7 +95,9 @@ class TaskManagerActivity : MiuixActivity() {
                 title = "每 3 秒刷新",
                 summary = "选择按 PID 和创建时间保留"
             )
+            }
             ActionRow {
+                SelectionAction(if(settingsExpanded)"收起设置" else "排序 / 刷新",selected=settingsExpanded,modifier=Modifier.weight(1f)){settingsExpanded=!settingsExpanded}
                 Action("刷新", modifier = Modifier.weight(1f)) { refresh() }
                 Action(
                     if (multi) "退出多选" else "多选",
@@ -108,15 +122,15 @@ class TaskManagerActivity : MiuixActivity() {
                 status("已请求停止，当前请求返回后不再结束后续进程")
             }
         }
-        SectionCard("进程") {
-            if (shown.isEmpty()) EmptyNote("没有匹配的进程。")
-            shown.forEach { item ->
+        LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+            if(shown.isEmpty())item{EmptyNote("没有匹配的进程。")}
+            items(shown,key={key(it)}) { item ->
                 val cpu = if (item.isNull("cpu")) "采样中"
                 else String.format(Locale.US, "%.1f%%", item.optDouble("cpu"))
                 val title = "${item.optString("name")} · ${item.optInt("pid")}"
                 val summary = "CPU $cpu · ${FileTransfer.humanSize(item.optLong("memory"))}" +
                     if (!item.optBoolean("can_terminate")) " · 受保护 / 受限" else ""
-                if (multi) SuperCheckbox(
+                if (multi) SelectionRow(
                     title = title,
                     summary = summary,
                     checked = selection.containsKey(key(item)),

@@ -11,6 +11,9 @@
     <attr name="lcDim" format="color" />
     <attr name="lcConsole" format="color" />
     <attr name="lcOverlay" format="color" />
+    <attr name="lcDanger" format="color" />
+    <attr name="lcWarn" format="color" />
+    <attr name="lcSuccess" format="color" />
     <!-- 主题色 -->
     <attr name="lcAccent" format="color" />
     <attr name="lcAccentDim" format="color" />

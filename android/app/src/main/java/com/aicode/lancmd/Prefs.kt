@@ -78,6 +78,12 @@ object Prefs {
     fun accent(ctx: Context): String = sp(ctx).getString(KEY_ACCENT, "") ?: ""
     fun tone(ctx: Context): String = sp(ctx).getString(KEY_TONE, "") ?: ""
 
+    fun uiStyle(ctx: Context): String = sp(ctx).getString("ui_style", "kernel")?.takeIf { it in listOf("kernel", "miuix") } ?: "kernel"
+    fun saveUiStyle(ctx: Context, value: String) {
+        require(value in listOf("kernel", "miuix"))
+        sp(ctx).edit().putString("ui_style", value).apply()
+    }
+
     fun saveTheme(ctx: Context, accent: String, tone: String) {
         sp(ctx).edit().putString(KEY_ACCENT, accent).putString(KEY_TONE, tone).apply()
     }

@@ -47,7 +47,7 @@ class NativeProcesses:
             return item
         finally:
             if own:self.kernel.CloseHandle(handle)
-    def list(self):
+    def list(self,name=None):
         class Entry(ctypes.Structure):
             _fields_=[("dwSize",w.DWORD),("usage",w.DWORD),("pid",w.DWORD),("heap",ctypes.c_size_t),("module",w.DWORD),("threads",w.DWORD),("parent",w.DWORD),("priority",w.LONG),("flags",w.DWORD),("exe",w.WCHAR*260)]
         self.kernel.CreateToolhelp32Snapshot.argtypes=[w.DWORD,w.DWORD];self.kernel.CreateToolhelp32Snapshot.restype=w.HANDLE
@@ -59,7 +59,7 @@ class NativeProcesses:
             entry=Entry();entry.dwSize=ctypes.sizeof(entry)
             more=self.kernel.Process32FirstW(snapshot,ctypes.byref(entry))
             while more and len(items)<2000:
-                if entry.pid:items.append(dict(self.info(entry.pid,entry.exe),parent=entry.parent,threads=entry.threads))
+                if entry.pid and (name is None or entry.exe.casefold()==name.casefold()):items.append(dict(self.info(entry.pid,entry.exe),parent=entry.parent,threads=entry.threads))
                 more=self.kernel.Process32NextW(snapshot,ctypes.byref(entry))
         finally:self.kernel.CloseHandle(snapshot)
         return items

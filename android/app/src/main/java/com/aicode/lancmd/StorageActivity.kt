@@ -12,14 +12,21 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.painterResource
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import androidx.compose.ui.unit.dp
 import com.aicode.lancmd.net.ConnectionManager
 import com.aicode.lancmd.net.FileTransfer
@@ -60,12 +67,16 @@ class StorageActivity : MiuixActivity() {
     internal var visible by mutableStateOf<List<JSONObject>>(emptyList())
     internal var multi by mutableStateOf(false)
     internal var selectionSummary by mutableStateOf("")
+    internal var listingBusy by mutableStateOf(false)
+    private var listingMessage by mutableStateOf("正在读取磁盘与目录…")
     internal var operationsBusy by mutableStateOf(false)
     internal var transferText by mutableStateOf("")
     /** 批量操作的逐项结果，和旧版顶部的「展开逐项结果」一致。 */
     internal var results by mutableStateOf<List<String>>(emptyList())
     private var resultsExpanded by mutableStateOf(false)
     private var delaySeconds by mutableStateOf(0)
+    private var toolsExpanded by mutableStateOf(false)
+    private var disksExpanded by mutableStateOf(false)
 
     private val highlightName by lazy { intent.getStringExtra("highlight").orEmpty() }
     private val highlightFolder by lazy { intent.getStringExtra("path").orEmpty() }
@@ -74,11 +85,12 @@ class StorageActivity : MiuixActivity() {
     private var pendingDownload = ""
     private var uploadTarget = ""
     private var loading: Job? = null
+    private var listingSequence=0
     private var transfer: Job? = null
     private var remoteJob: String? = null
     private var lastResult: String? = null
     private var lastError = false
-    private val selection = linkedMapOf<String, JSONObject>()
+    private val selection = mutableStateMapOf<String, JSONObject>()
     private var restoreKeys = setOf<String>()
     private var pendingTreeItems = listOf<JSONObject>()
     private var pendingTreeBase = ""
@@ -172,9 +184,16 @@ class StorageActivity : MiuixActivity() {
         content { Screen() }
         updateSelection()
         task {
-            val storage = storageCall("storage")
+            if(path.isNotBlank())load(path)
+            val storage = try {storageCall("storage",timeout=6000)}
+            catch(e:CancellationException){throw e}
+            catch(e:Exception) {
+                if(path.isBlank())load("")
+                if(disks.isEmpty())status("磁盘容量暂不可用，仍可输入目录重试；慢盘占位任务可在更多工具中取消",true)
+                return@task
+            }
             renderDisks(storage.getJSONArray("drives"))
-            load(path.ifBlank { storage.optString("home") })
+            if(path.isBlank())load(storage.optString("home"))
             val jobs = runCatching { storageCall("file_jobs") }.getOrNull()?.optJSONArray("jobs")
             if (jobs != null && !operationsBusy) {
                 val active = (0 until jobs.length()).map { jobs.getJSONObject(it) }
@@ -194,9 +213,9 @@ class StorageActivity : MiuixActivity() {
             RowItem(if (resultsExpanded) "收起逐项结果" else "展开逐项结果（${results.size}）") {
                 resultsExpanded = !resultsExpanded
             }
-            if (resultsExpanded) Note(results.joinToString("\n").take(100_000))
+            if (resultsExpanded) Column(Modifier.heightIn(max=144.dp).verticalScroll(rememberScrollState())) { Note(results.joinToString("\n").take(100_000)) }
         }
-        if (!multi && !operationsBusy) Row(
+        if (disksExpanded && !multi && !operationsBusy) Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                 .padding(horizontal = 12.dp, vertical = 4.dp)
         ) {
@@ -211,7 +230,7 @@ class StorageActivity : MiuixActivity() {
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                 .padding(horizontal = 8.dp)
         ) {
-            crumbs.forEach { crumb -> Action(crumb.label) { load(crumb.target) } }
+            crumbs.forEach { crumb -> SelectionAction(crumb.label) { load(crumb.target) } }
         }
         SectionCard {
             ActionRow {
@@ -220,7 +239,7 @@ class StorageActivity : MiuixActivity() {
                 Action("新建", modifier = Modifier.weight(1f)) { newItem() }
                 Action("上传", modifier = Modifier.weight(1f)) { upload() }
             }
-            ActionRow {
+            if(toolsExpanded)ActionRow {
                 Action("占位文件", modifier = Modifier.weight(1f)) { openPlaceholder() }
                 Action("文件任务", modifier = Modifier.weight(1f)) { showFileJobs() }
                 Action("延迟计划", modifier = Modifier.weight(1f)) { showFilePlans() }
@@ -228,7 +247,9 @@ class StorageActivity : MiuixActivity() {
             }
             Field(label = "搜索当前目录", value = query, onValueChange = { query = it; filter() })
             ActionRow {
-                Action("延迟 ${delaySeconds}s", modifier = Modifier.weight(1f)) {
+                SelectionAction("磁盘",selected=disksExpanded,modifier=Modifier.weight(1f)){disksExpanded=!disksExpanded}
+                SelectionAction("更多工具",selected=toolsExpanded,modifier=Modifier.weight(1f)){toolsExpanded=!toolsExpanded}
+                SelectionAction("延迟 ${delaySeconds}s", modifier = Modifier.weight(1f)) {
                     FileDelay.choose(this@StorageActivity) { delaySeconds = FileDelay.seconds(this@StorageActivity) }
                 }
                 Action(
@@ -256,7 +277,8 @@ class StorageActivity : MiuixActivity() {
                     }
             }
         }
-        if (visible.isEmpty()) EmptyNote("此目录为空，或没有匹配的名称。")
+        if(listingBusy) {Note("目录加载中，返回和其他操作仍可使用…")}
+        else if(visible.isEmpty())EmptyNote(listingMessage)
         LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
             items(visible) { item ->
                 val name = item.optString("name")
@@ -268,14 +290,21 @@ class StorageActivity : MiuixActivity() {
                     if (item.optBoolean("hidden")) append(" · 隐藏")
                     if (item.optBoolean("system")) append(" · 系统")
                 }
-                if (multi) SuperCheckbox(
+                if (multi) SelectionRow(
                     title = name,
                     summary = summary,
                     checked = selection.containsKey(itemKey(item)),
                     onCheckedChange = { toggleSelection(item) },
                     enabled = !operationsBusy
-                ) else RowItem(name, summary, enabled = !operationsBusy) {
-                    if (item.optBoolean("dir")) load(joinPath(path, name)) else fileActions(item)
+                ) else Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        RowItem(name,summary,enabled=!operationsBusy,onLongClick={fileActions(item)}) {
+                            if(item.optBoolean("dir"))load(joinPath(path,name)) else fileActions(item)
+                        }
+                    }
+                    IconButton(enabled=!operationsBusy,onClick={fileActions(item)}) {
+                        Icon(painterResource(R.drawable.ic_more),"操作：$name")
+                    }
                 }
             }
         }
@@ -321,8 +350,9 @@ class StorageActivity : MiuixActivity() {
             Disk(
                 path = drive.optString("path"),
                 percent = percent,
-                detail = "${FileTransfer.humanSize(drive.optLong("free"))} 可用 / " +
-                    FileTransfer.humanSize(drive.optLong("total")),
+                detail = if(drive.has("ready") && !drive.optBoolean("ready"))"磁盘忙碌或暂不可用 · 仍可尝试打开"
+                else "${FileTransfer.humanSize(drive.optLong("free"))} 可用 / " +
+                    FileTransfer.humanSize(drive.optLong("total")) + if(drive.optBoolean("pending") || drive.optBoolean("stale"))" · 上次容量" else "",
                 tight = percent > 90
             )
         }
@@ -330,20 +360,23 @@ class StorageActivity : MiuixActivity() {
 
     internal fun load(target: String, notice: String? = null) {
         loading?.cancel()
+        val sequence=++listingSequence
         loading = task {
+            listingBusy=true
             status("正在读取目录…")
-            val result = storageCall("ls", JSONObject().put("path", target))
+            try {
+            val result = storageCall("ls", JSONObject().put("path", target),timeout=8000)
             val changed = path != result.getString("path")
             if (changed && restoreKeys.isEmpty()) {
                 selection.clear(); multi = false; lastResult = null; lastError = false; results = emptyList()
             }
             path = result.getString("path")
             val items = result.getJSONArray("items")
-            entries = (0 until items.length()).map { items.getJSONObject(it) }
+            entries = withContext(Dispatchers.Default) { (0 until items.length()).map { items.getJSONObject(it) }
                 .sortedWith(
                     compareByDescending<JSONObject> { it.optBoolean("dir") }
                         .thenBy { it.optString("name").lowercase() }
-                )
+                ) }
             val current = entries.associateBy { itemKey(it) }
             selection.keys.retainAll(current.keys)
             for (id in selection.keys.toList()) selection[id] = current.getValue(id)
@@ -364,6 +397,12 @@ class StorageActivity : MiuixActivity() {
                 lastResult ?: if (entries.isEmpty()) "此目录为空" else "${entries.size} 项 · 长按多选，点击单项操作",
                 lastError
             )
+            listingMessage=if(entries.isEmpty())"此目录为空" else "没有匹配名称；可以清空搜索后查看"
+            } catch(e:CancellationException) {throw e}
+            catch(e:Exception) {
+                listingMessage="目录暂未加载：${e.message ?: "磁盘无响应"}。点击刷新可重试；也可在更多工具中取消占位任务。"
+                status(listingMessage,true)
+            } finally {if(sequence==listingSequence)listingBusy=false}
         }
     }
 
@@ -846,7 +885,7 @@ class StorageActivity : MiuixActivity() {
         val base = path
         val text = dialogInput(text = original ?: "")
         val dialog = WorkspaceDialog.Builder(this).setTitle(if (item == null) "新建文件夹" else "重命名")
-            .setView(text).setNegativeButton("取消", null)
+            .setView(text).focusInput(text,selectAll=item!=null).setNegativeButton("取消", null)
             .setPositiveButton("保存", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -862,7 +901,7 @@ class StorageActivity : MiuixActivity() {
                         "rename",
                         JSONObject().put("path", joinPath(base, original!!)).put("to", joinPath(base, name))
                     )
-                    load(base)
+                    load(base,if(item==null)"文件夹已创建：$name" else "已重命名：$original → $name")
                 }
             }
         }
@@ -904,7 +943,7 @@ class StorageActivity : MiuixActivity() {
                 "创建后直接进入编辑。BAT/CMD 中文通常使用 GBK，VBS 建议 UTF-16 LE；不会自动运行脚本。" +
                     "\n编码可在编辑页调整。"
             )
-            .setView(box).setNegativeButton("取消", null)
+            .setView(box).focusInput(name,selectAll=true).setNegativeButton("取消", null)
             .setPositiveButton("创建并编辑", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {

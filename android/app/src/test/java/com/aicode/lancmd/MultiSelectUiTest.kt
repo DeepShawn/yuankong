@@ -7,6 +7,10 @@ import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import androidx.appcompat.app.AlertDialog
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import org.junit.Rule
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
 import kotlinx.coroutines.Job
@@ -34,6 +38,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 @ConscryptMode(ConscryptMode.Mode.OFF)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class MultiSelectUiTest {
+    @get:Rule val compose=createEmptyComposeRule()
     @Before fun before()=disconnect()
     @After fun after()=disconnect()
     private fun disconnect() {
@@ -49,6 +54,7 @@ class MultiSelectUiTest {
         fail("UI did not settle")
     }
     private fun preview(v:View,name:String,height:Int=891) {
+        compose.waitForIdle()
         v.measure(View.MeasureSpec.makeMeasureSpec(411,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(height,View.MeasureSpec.EXACTLY));v.layout(0,0,411,height)
         val bitmap=Bitmap.createBitmap(411,height,Bitmap.Config.ARGB_8888);v.draw(Canvas(bitmap))
         File("build/ui-previews/$name.png").apply { parentFile!!.mkdirs() }.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) };bitmap.recycle()
@@ -116,6 +122,24 @@ class MultiSelectUiTest {
             c.pause().stop().destroy()
         }
     }
+    @Test fun processSelectionCheckmarksFollowCountPreservingChanges() {
+        Stub().use {stub ->
+            stub.install();val controller=Robolectric.buildActivity(TaskManagerActivity::class.java).setup();val page=controller.get()
+            try {
+                waitFor{page.shown.size==4}
+                compose.runOnIdle{page.toggleMulti()}
+                val first=page.shown[0];val second=page.shown[1]
+                fun node(item:JSONObject)=compose.onNodeWithText("${item.optString("name")} · ${item.optInt("pid")}")
+                node(first).assertIsOff().performSemanticsAction(SemanticsActions.OnClick){it()}
+                node(first).assertIsOn()
+                compose.runOnIdle{page.toggle(first);page.toggle(second)}
+                node(first).assertIsOff();node(second).assertIsOn()
+                compose.runOnIdle{page.clearSelection()}
+                node(second).assertIsOff()
+            }finally{controller.pause().stop().destroy()}
+        }
+    }
+
     @Test fun oldReceiverDisablesForceDisconnectWithCompleteUpgradeInstructions() {
         Stub().use { stub->
             // 设备页已迁移到 Compose（miuix）：按页面状态断言强制断开不可用、安全弹出仍可用。

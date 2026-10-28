@@ -50,8 +50,12 @@ jobs:
         run: python -m unittest discover -s tools -p test_process_metadata.py -v
       - name: File transfer regression
         run: python -m unittest discover -s tools -p test_file_operations.py -v
+      - name: Busy USB listing and disk query isolation
+        run: python -m unittest discover -s tools -p test_storage_reads.py -v
       - name: Pointer input and cleanup regression
         run: python -m unittest discover -s tools -p test_pointer.py -v
+      - name: Cursor visibility scope and automatic recovery
+        run: python -m unittest discover -s tools -p test_cursor_visibility.py -v
       - name: Session isolation and revocation
         run: python -m unittest discover -s tools -p test_remote_features.py -v
       - name: Native Windows features

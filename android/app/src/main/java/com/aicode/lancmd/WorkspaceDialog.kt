@@ -11,6 +11,9 @@ import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ListView
@@ -103,16 +106,45 @@ class WorkspaceDialog private constructor(private val spec:Builder):AlertDialog(
         window?.setLayout((context.resources.displayMetrics.widthPixels-px(40)).coerceAtMost(px(560)),ViewGroup.LayoutParams.WRAP_CONTENT)
     }
     override fun dismiss() { super.dismiss();composition?.disposeComposition() }
+    override fun onStart() {
+        super.onStart()
+        // AlertDialog cannot discover editors inside the Compose AndroidView at
+        // creation time and otherwise leaves ALT_FOCUSABLE_IM set.
+        fun editor(view:View?):EditText? = when(view) {
+            is EditText -> view.takeIf{it.isEnabled}
+            is ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull{editor(view.getChildAt(it))}
+            else -> null
+        }
+        val input=spec.focusedInput ?: editor(spec.body) ?: return
+        window?.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+        window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+            if(spec.focusedInput!=null)WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE else WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED)
+        if(spec.focusedInput==null)return
+        fun focus() {
+            input.requestFocus()
+            if(spec.selectInput)input.selectAll() else input.setSelection(input.text.length)
+            input.post {
+                if(isShowing && input.isAttachedToWindow)
+                    (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(input,InputMethodManager.SHOW_IMPLICIT)
+            }
+        }
+        if(input.isAttachedToWindow)focus() else input.addOnAttachStateChangeListener(object:View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view:View){input.removeOnAttachStateChangeListener(this);focus()}
+            override fun onViewDetachedFromWindow(view:View){}
+        })
+    }
     class Builder(val ctx:Context) {
         internal var title:CharSequence?=null;internal var message:CharSequence?=null
         internal var body:View?=null;internal var items:Array<out CharSequence>?=null
         internal var selected:DialogInterface.OnClickListener?=null;internal var cancelable=true
+        internal var focusedInput:EditText?=null;internal var selectInput=false
         internal val buttons=linkedMapOf<Int,Pair<CharSequence,DialogInterface.OnClickListener?>>()
         fun setTitle(value:CharSequence?)=apply{title=value}
         fun setTitle(value:Int)=setTitle(ctx.getString(value))
         fun setMessage(value:CharSequence?)=apply{message=value}
         fun setMessage(value:Int)=setMessage(ctx.getString(value))
         fun setView(value:View)=apply{body=value}
+        fun focusInput(value:EditText,selectAll:Boolean=false)=apply{focusedInput=value;selectInput=selectAll}
         fun setItems(value:Array<out CharSequence>,listener:DialogInterface.OnClickListener?)=apply{items=value;selected=listener}
         fun setCancelable(value:Boolean)=apply{cancelable=value}
         fun setPositiveButton(text:CharSequence,listener:DialogInterface.OnClickListener?)=apply{buttons[BUTTON_POSITIVE]=text to listener}

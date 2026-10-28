@@ -62,7 +62,8 @@ class GesturesActivity : MiuixActivity() {
     }
 
     @Composable
-    private fun Screen() = Page("手势记录板") {
+    private fun Screen() = FixedPage("手势记录板") {
+        WorkingArea(board,Modifier.fillMaxWidth().weight(1f)) {
         SectionCard {
             SuperSwitch(
                 checked = dragMode,
@@ -72,7 +73,6 @@ class GesturesActivity : MiuixActivity() {
                 enabled = !recording && !playing
             )
         }
-        HostedView(board, Modifier.fillMaxWidth().height(300.dp).padding(horizontal = 12.dp, vertical = 6.dp))
         SectionCard {
             ActionRow {
                 Action(
@@ -109,6 +109,7 @@ class GesturesActivity : MiuixActivity() {
                 Action("取消播放", enabled = playing, modifier = Modifier.weight(1f)) { playback?.cancel() }
             }
             Note("按原时间间隔回放，单次最多 5 分钟；延迟由电脑计时。离开此页或断线会取消，并释放鼠标。最多保存 20 条手势。")
+        }
         }
     }
 

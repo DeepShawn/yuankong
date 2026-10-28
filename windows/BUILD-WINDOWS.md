@@ -45,6 +45,7 @@ PyInstaller 产物需连同 `LanCmdCapture.exe` 分发。它与主发布 ZIP 使
 python3 -m unittest discover -s tools -p test_remote_features.py -v
 python3 -m unittest discover -s tools -p test_file_operations.py -v
 python3 -m unittest discover -s tools -p test_pointer.py -v
+python3 -m unittest discover -s tools -p test_cursor_visibility.py -v
 # Windows 下先编译 LanCmdCtl.exe，再运行启动器参数回归
 python -m unittest discover -s tools -p test_launcher.py -v
 ```
