@@ -54,6 +54,7 @@ class ApplicationsActivity:MiuixActivity() {
     }
     private fun refresh(force:Boolean=false) {
         catalogPoll?.cancel()
+        if(force && !busy)operationText=""
         catalogLoading=true
         catalogPoll=task {
             try {
@@ -64,7 +65,7 @@ class ApplicationsActivity:MiuixActivity() {
                     apps=array(result,"items")
                     catalogLoading=result.optBoolean("loading")
                     if(result.optString("error").isNotBlank())throw IOException(result.optString("error"))
-                    if(!busy)status(if(catalogLoading)"正在后台识别应用，已显示的条目仍可操作…" else "已识别 ${apps.size} 个应用 · 本手机冻结 ${freezes.size} 个")
+                    if(!busy && operationText.isBlank())status(if(catalogLoading)"正在后台识别应用，已显示的条目仍可操作…" else "已识别 ${apps.size} 个应用 · 本手机冻结 ${freezes.size} 个")
                     if(catalogLoading)delay(1000)
                 }while(catalogLoading)
             }finally{catalogLoading=false}

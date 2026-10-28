@@ -3,6 +3,9 @@ package com.aicode.lancmd
 import android.content.Intent
 import android.os.Bundle
 import androidx.appcompat.app.AlertDialog
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -44,6 +47,7 @@ class PlaceholderFilesActivity : MiuixActivity() {
     internal var items by mutableStateOf<List<Item>>(emptyList())
     internal var busy by mutableStateOf(false)
     private var polling: Job? = null
+    private var detailsExpanded by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,44 +60,34 @@ class PlaceholderFilesActivity : MiuixActivity() {
     }
 
     @Composable
-    private fun Screen() = Page("隐藏系统占位文件") {
-        SectionCard("新占位文件") {
-            Field(label = "新文件完整路径", value = targetPath, onValueChange = { targetPath = it })
-            Field(
-                label = "占用大小（GB，支持小数，0 表示空文件）",
-                value = sizeText,
-                onValueChange = { sizeText = it.filter { c -> c.isDigit() || c == '.' }.take(14) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-            )
-            ChoiceField(
-                items = modes,
-                title = "生成模式",
-                selectedIndex = modeIndex,
-                onSelectedIndexChange = { modeIndex = it }
-            )
-            Note("稳定模式适度让行前台操作；快速模式优先生成速度。两种模式都优先预分配，响应变慢时自动减小批次。")
-            Note(
-                "创建隐藏＋系统属性的普通文件，优先自适应分批预分配真实空间，不支持时逐块写入；" +
-                    "不覆盖同名文件，保留至少 1 GB 可用空间。慢速 U 盘会自动缩小批次。"
-            )
-            Action("创建占位文件", enabled = !busy, primary = true) { confirmCreate() }
-        }
-        SectionCard("占位任务") {
-            Action("刷新占位任务", enabled = !busy) { refreshJobs() }
-            if (items.isEmpty()) EmptyNote("本次接收端运行期间暂无占位任务。重启后可在目标目录管理已完成文件。")
-            items.forEach { item ->
-                InfoItem(item.title, listOfNotNull(item.modeName, item.path, item.sizeLine).joinToString("\n"))
-                item.progress?.let { Progress(it) }
-                item.error?.let { Note(it) }
-                if (item.waitingDisk) Note("正在等待磁盘响应，进度暂未更新；取消会在当前磁盘调用返回后清理。")
-                if (item.canCancel) Action("取消创建", enabled = !busy) { cancel(item) }
-                else if (!item.active) Action("在文件管理定位", enabled = !busy) { locate(item) }
+    private fun Screen() = FixedPage("隐藏系统占位文件") {
+        SectionCard {
+            Field(label="新文件完整路径",value=targetPath,onValueChange={targetPath=it})
+            Field(label="占用大小（GB，支持小数，0 表示空文件）",value=sizeText,
+                onValueChange={sizeText=it.filter{c->c.isDigit() || c=='.'}.take(14)},
+                keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal))
+            ChoiceField(items=modes,title="生成模式",selectedIndex=modeIndex,onSelectedIndexChange={modeIndex=it})
+            ActionRow {
+                Action("创建占位文件",enabled=!busy,primary=true,modifier=Modifier.weight(1f)){confirmCreate()}
+                Action("刷新占位任务",enabled=!busy,modifier=Modifier.weight(1f)){refreshJobs()}
             }
+            SelectionAction(if(detailsExpanded)"收起说明" else "生成方式与清理说明",selected=detailsExpanded){detailsExpanded=!detailsExpanded}
         }
-        Note(
-            "Windows 资源管理器默认隐藏这类文件；开启显示受保护的操作系统文件后仍可查看。" +
-                "安卓文件管理始终列出，可直接删除释放空间。手机断线继续创建；取消、失败或接收端退出会清理未完成文件。"
-        )
+        LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+            if(detailsExpanded)item {SectionCard {
+                Note("两种模式都优先分批预分配真实空间，不支持时逐块写入。稳定模式让行前台；快速模式优先速度。不覆盖已有文件，保留至少 1 GB 可用空间。")
+                Note("文件带隐藏＋系统属性，安卓文件管理可见并可删除；Windows 显示受保护的系统文件后可见。手机断线继续创建，取消、失败或接收端退出会清理未完成文件。")
+            }}
+            if(items.isEmpty())item{EmptyNote("本次接收端暂无占位任务。重启后可在目标目录管理已完成文件。")}
+            items(items,key={it.id}) {item ->SectionCard {
+                InfoItem(item.title,listOfNotNull(item.modeName,item.path,item.sizeLine).joinToString("\n"))
+                item.progress?.let{Progress(it)}
+                item.error?.let{Note(it)}
+                if(item.waitingDisk)Note("正在等待磁盘响应；取消会在当前磁盘调用返回后清理。")
+                if(item.canCancel)Action("取消创建",enabled=!busy){cancel(item)}
+                else if(!item.active)Action("在文件管理定位",enabled=!busy){locate(item)}
+            }}
+        }
     }
 
     override fun onStart() {
