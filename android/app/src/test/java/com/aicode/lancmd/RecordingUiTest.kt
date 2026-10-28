@@ -68,7 +68,8 @@ class RecordingUiTest {
     @Test fun newPagesRenderAndKeepControlsReachable() {
         for ((type, name) in listOf(RecordingsActivity::class.java to "recordings", GesturesActivity::class.java to "gestures")) {
             val controller = Robolectric.buildActivity(type).setup()
-            val view = controller.get().window.decorView
+            val activity = controller.get()
+            val view = activity.window.decorView
             shadowOf(Looper.getMainLooper()).idle()
             view.measure(View.MeasureSpec.makeMeasureSpec(411, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(891, View.MeasureSpec.EXACTLY))
             view.layout(0, 0, 411, 891)
@@ -76,7 +77,17 @@ class RecordingUiTest {
             view.draw(Canvas(bitmap))
             val file = File("build/ui-previews/$name.png").apply { parentFile!!.mkdirs() }
             file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            assertTrue(findButtons(view).any { it.text.contains(if (name == "recordings") "开始录制" else "在电脑播放") })
+            assertTrue("页面应渲染出内容", file.length() > 3000)
+            if (name == "recordings") {
+                assertTrue(findButtons(view).any { it.text.contains("开始录制") })
+            } else {
+                // 手势页已迁移到 Compose（miuix）：回放入口由页面提供，
+                // 没有记录时不应提交回放。
+                val gestures = activity as GesturesActivity
+                gestures.confirmPlay()
+                shadowOf(Looper.getMainLooper()).idle()
+                assertNull(org.robolectric.shadows.ShadowDialog.getLatestDialog())
+            }
             controller.pause().stop().destroy()
         }
     }
