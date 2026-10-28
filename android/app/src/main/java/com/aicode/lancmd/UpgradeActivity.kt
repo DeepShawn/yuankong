@@ -27,6 +27,7 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
     private var targetVersion=""
     private var requestId=""
     private var monitor:Job?=null
+    private var resumedUpdate=false
 
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
@@ -34,7 +35,7 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
         peerId=state?.getString("peer_id") ?: Prefs.target(this)?.agentId.orEmpty()
         peerHost=state?.getString("peer_host") ?: origin?.host.orEmpty()
         peerPort=state?.getInt("peer_port") ?: origin?.port ?: 0
-        restarting=state?.getBoolean("restarting") ?: false
+        restarting=state?.getBoolean("restarting") ?: false;resumedUpdate=restarting
         targetVersion=state?.getString("target_version").orEmpty();requestId=state?.getString("request_id").orEmpty()
         current=state?.getString("current").orEmpty();directory=state?.getString("directory").orEmpty()
         content {
@@ -104,7 +105,12 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
             status(result.optString("message"))
             if(restarting)watchUpgrade()
         }catch(e:CancellationException){throw e}
-        catch(e:Exception){restarting=false;status(e.message ?: "升级请求失败",true)}
+        catch(e:Exception){
+            if(owner?.closed==true || e.message?.startsWith("请求超时")==true) {
+                status("提交后连接中断，正在等待原电脑并核对此次更新…")
+                watchUpgrade()
+            }else {restarting=false;status(e.message ?: "升级请求失败",true)}
+        }
         finally{busy=false}}
     }
 
@@ -118,7 +124,7 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
         monitor=task {
             val original=owner
             val deadline=System.currentTimeMillis()+150_000
-            var disconnected=original?.closed!=false
+            var disconnected=resumedUpdate || original?.closed!=false
             while(restarting && System.currentTimeMillis()<deadline) {
                 val connected=runCatching{ConnectionManager.sessionClient()}.getOrNull()
                 if(connected==null) {

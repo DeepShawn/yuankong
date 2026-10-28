@@ -26,7 +26,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk=[33],application=Application::class)
+@Config(sdk=[33],application=Application::class,qualifiers="w411dp-h891dp-mdpi")
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class UpgradeUiTest {
     @get:Rule val compose=createEmptyComposeRule()
@@ -34,22 +34,24 @@ class UpgradeUiTest {
     @After fun after()=disconnect()
     private fun disconnect(){ConnectionManager.stop();runBlocking{(ConnectionManager::class.java.getDeclaredField("loopJob").apply{isAccessible=true}.get(ConnectionManager) as? Job)?.join()};shadowOf(Looper.getMainLooper()).idle()}
     private fun waitFor(check:()->Boolean){val end=System.currentTimeMillis()+8000;while(System.currentTimeMillis()<end){shadowOf(Looper.getMainLooper()).idleFor(50,TimeUnit.MILLISECONDS);if(check())return;Thread.sleep(10)};fail("升级状态未更新")}
-    private fun confirm(stub:Stub){
-        waitFor{stub.requests.any{it.optString("cmd")=="upgrade"}}
-        compose.onNodeWithText("校验并安装").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
+    private fun confirm(stub:Stub,page:UpgradeActivity){
+        waitFor{page.note.startsWith("已读取")}
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("校验并安装"))
+        compose.onNodeWithText("校验并安装").performSemanticsAction(SemanticsActions.OnClick){it()}
         assertFalse(stub.requests.any{it.optString("action")=="apply"})
         compose.onNodeWithText("开始升级").performSemanticsAction(SemanticsActions.OnClick){it()}
-        waitFor{stub.requestId.isNotBlank()}
+        waitFor{stub.requestId.isNotBlank() && (stub.dropApplyReply || page.note.contains("准备退出旧接收端"))}
     }
 
     @Test fun installationConfirmsThenTracksTheSameComputerAcrossDisconnectAndRecreation() {
-        Stub().use {old ->Stub(version="3.4.2",phase="completed").use {fresh ->
+        Stub().use {old ->Stub(version="3.4.2",phase="starting").use {fresh ->
             old.install();val controller=Robolectric.buildActivity(UpgradeActivity::class.java).setup()
             try {
-                confirm(old);waitFor{controller.get().restarting}
+                confirm(old,controller.get());waitFor{controller.get().restarting}
                 old.client.close();ConnectionManager::class.java.getDeclaredField("client").apply{isAccessible=true}.set(ConnectionManager,null)
-                controller.recreate()
                 fresh.reportId=old.requestId;fresh.install()
+                waitFor{controller.get().note.contains("start.bat")}
+                controller.recreate();fresh.phase="completed"
                 waitFor{controller.get().note.contains("升级已完成") && !controller.get().restarting}
                 compose.onNodeWithText("3.4.2").assertExists()
                 assertTrue(fresh.requests.any{it.optString("cmd")=="upgrade" && !it.optBoolean("include_packages",true)})
@@ -61,7 +63,7 @@ class UpgradeUiTest {
         Stub().use {old ->Stub(version="3.4.2",phase="completed").use {fresh ->
             old.install();val controller=Robolectric.buildActivity(UpgradeActivity::class.java).setup();val page=controller.get()
             try {
-                confirm(old);fresh.reportId="0".repeat(32);old.client.close();fresh.install()
+                confirm(old,controller.get());fresh.reportId="0".repeat(32);old.client.close();fresh.install()
                 waitFor{page.note.contains("等待此次更新")}
                 assertTrue(page.restarting)
                 fresh.reportId=old.requestId
@@ -73,13 +75,24 @@ class UpgradeUiTest {
         Stub().use {old ->Stub(identity="different-pc").use {other ->
             old.install();val controller=Robolectric.buildActivity(UpgradeActivity::class.java).setup();val page=controller.get()
             try {
-                confirm(old);old.client.close();other.install()
+                confirm(old,controller.get());old.client.close();other.install()
                 waitFor{page.note.contains("另一台电脑")}
                 assertTrue(other.requests.isEmpty())
             }finally{controller.pause().stop().destroy()}
         }}
     }
-    private class Stub(val identity:String="same-pc",val version:String="3.4.1",val phase:String=""):Closeable {
+    @Test fun lostApplyReplyStillReconnectsAndChecksTheSubmittedRequest() {
+        Stub(dropApplyReply=true).use {old ->Stub(version="3.4.2",phase="completed").use {fresh ->
+            old.install();val controller=Robolectric.buildActivity(UpgradeActivity::class.java).setup();val page=controller.get()
+            try {
+                confirm(old,page);fresh.reportId=old.requestId;fresh.install()
+                waitFor{page.note.contains("升级已完成") && !page.restarting}
+                assertEquals(1,old.requests.count{it.optString("action")=="apply"})
+            }finally{controller.pause().stop().destroy()}
+        }}
+    }
+    private class Stub(val identity:String="same-pc",val version:String="3.4.1",phase:String="",val dropApplyReply:Boolean=false):Closeable {
+        @Volatile var phase=phase
         val server=ServerSocket(0);val client=AgentClient("127.0.0.1",server.localPort)
         val requests=CopyOnWriteArrayList<JSONObject>()
         @Volatile var requestId=""
@@ -90,6 +103,7 @@ class UpgradeUiTest {
                 while(true){val q=JSONObject(input.readLine()?:break);val result=JSONObject().put("id",q.getInt("id")).put("ok",true)
                     if(q.optString("action")=="apply") {
                         requestId=q.getString("request_id")
+                        if(dropApplyReply){requests.add(q);client.close();break}
                         result.put("restarting",true).put("version","3.4.2").put("request_id",requestId).put("message","准备退出旧接收端")
                     }else {
                         result.put("directory","C:\\LanCmd\\upgrade").put("current",version)
