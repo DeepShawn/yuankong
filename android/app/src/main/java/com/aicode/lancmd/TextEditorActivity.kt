@@ -9,6 +9,18 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -92,13 +104,15 @@ class TextEditorActivity : MiuixActivity() {
             }
         }
         SectionCard("内容",modifier=Modifier.weight(1f)) {
-            Field(
-                label = "电脑文件文本内容",
+            BasicTextField(
                 value = body,
                 onValueChange = { edit(it) },
+                enabled=editable,
                 singleLine = false,
-                maxLines = Int.MAX_VALUE,
-                modifier=Modifier.weight(1f)
+                textStyle=TextStyle(color=MiuixTheme.colorScheme.onSurface,fontSize=16.sp,lineHeight=23.sp),
+                cursorBrush=SolidColor(MiuixTheme.colorScheme.primary),
+                modifier=Modifier.weight(1f).fillMaxWidth().background(MiuixTheme.colorScheme.surfaceVariant,RoundedCornerShape(16.dp))
+                    .padding(14.dp).semantics{contentDescription="电脑文件文本内容"}
             )
             if(settingsExpanded)SuperSwitch(
                 checked = autoSave,

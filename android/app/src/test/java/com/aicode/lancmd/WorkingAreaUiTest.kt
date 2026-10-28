@@ -22,6 +22,7 @@ import org.robolectric.annotation.ConscryptMode
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class WorkingAreaUiTest {
     @get:Rule val compose=createComposeRule()
+    private fun height(node:SemanticsNodeInteraction)=node.getUnclippedBoundsInRoot().let{it.bottom-it.top}
     @Test fun bothPanesRemainUsableAndDividerCanEnlargeEitherPane() {
         compose.setContent {LanCmdMiuixTheme {
             val context=LocalContext.current
@@ -29,14 +30,16 @@ class WorkingAreaUiTest {
             WorkingArea(view,Modifier.size(360.dp,600.dp)) { Action("控制操作"){} }
         }}
         val picture=compose.onNodeWithTag("working-picture");val controls=compose.onNodeWithTag("working-controls")
-        val initial=picture.getUnclippedBoundsInRoot().height
-        assertTrue(initial>200.dp);assertTrue(controls.getUnclippedBoundsInRoot().height>180.dp)
+        val initial=height(picture)
+        assertTrue(initial>200.dp);assertTrue(height(controls)>180.dp)
         val divider=compose.onNodeWithContentDescription("调整画面与操作栏比例")
-        divider.performSemanticsAction(SemanticsActions.CustomActions){actions->actions.single{it.label=="增大画面"}.action()}
-        assertTrue(picture.getUnclippedBoundsInRoot().height>initial)
-        divider.performSemanticsAction(SemanticsActions.CustomActions){actions->repeat(2){actions.single{it.label=="增大操作栏"}.action()}}
-        assertTrue(picture.getUnclippedBoundsInRoot().height<initial)
-        assertTrue(controls.getUnclippedBoundsInRoot().height>180.dp)
+        val enlargePicture=divider.fetchSemanticsNode().config[SemanticsActions.CustomActions].single{it.label=="增大画面"}.action
+        compose.runOnIdle{assertTrue(enlargePicture())}
+        assertTrue(height(picture)>initial)
+        val enlargeControls=divider.fetchSemanticsNode().config[SemanticsActions.CustomActions].single{it.label=="增大操作栏"}.action
+        compose.runOnIdle{repeat(2){assertTrue(enlargeControls())}}
+        assertTrue(height(picture)<initial)
+        assertTrue(height(controls)>180.dp)
     }
     @Test fun visuallyCompactSelectionKeepsItsTouchTarget() {
         compose.setContent {LanCmdMiuixTheme {SelectionAction("触控",selected=true){}}}
