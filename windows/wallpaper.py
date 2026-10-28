@@ -31,13 +31,21 @@ class NativeWallpaper:
         self.image(path)
     def restore(self,snapshot):
         r=self.r
-        self.image((snapshot.get("WallPaper") or ("",r.REG_SZ))[0])
         with r.OpenKey(r.HKEY_CURRENT_USER,r"Control Panel\Desktop",0,r.KEY_SET_VALUE) as key:
             for name,record in snapshot.items():
                 if record is None:
                     try:r.DeleteValue(key,name)
                     except FileNotFoundError:pass
                 else:r.SetValueEx(key,name,0,record[1],record[0])
+        try:self.image((snapshot.get("WallPaper") or ("",r.REG_SZ))[0])
+        finally:
+            # SPI persists WallPaper itself; restore its original type/existence.
+            with r.OpenKey(r.HKEY_CURRENT_USER,r"Control Panel\Desktop",0,r.KEY_SET_VALUE) as key:
+                record=snapshot.get("WallPaper")
+                if record is None:
+                    try:r.DeleteValue(key,"WallPaper")
+                    except FileNotFoundError:pass
+                else:r.SetValueEx(key,"WallPaper",0,record[1],record[0])
 
 
 class Wallpaper:
