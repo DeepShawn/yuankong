@@ -167,6 +167,50 @@ abstract class MiuixActivity : AppCompatActivity() {
         noteFailed.value = failed
     }
 
+    private fun px(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    /**
+     * 供系统确认框内使用的输入框。确认与删除一类的弹窗仍用系统对话框，
+     * 这里让其中的控件与页面外观一致。
+     */
+    protected fun dialogInput(
+        hint: String = "",
+        text: String = "",
+        singleLine: Boolean = true,
+        enabled: Boolean = true
+    ): android.widget.EditText = android.widget.EditText(this).apply {
+        this.hint = hint
+        setText(text)
+        isEnabled = enabled
+        if (singleLine) setSingleLine()
+        setBackgroundResource(R.drawable.input_bg)
+        setTextColor(Themes.color(this@MiuixActivity, R.color.text))
+        setHintTextColor(Themes.color(this@MiuixActivity, R.color.dim))
+        setPadding(px(14), px(10), px(14), px(10))
+        textSize = 13.5f
+        minHeight = px(48)
+    }
+
+    /** 供系统确认框内使用的下拉框。 */
+    protected fun dialogSpinner(items: List<String>, selected: Int = 0): android.widget.Spinner =
+        android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(
+                this@MiuixActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                items
+            )
+            if (selected in items.indices) setSelection(selected)
+            setBackgroundResource(R.drawable.input_bg)
+            minimumHeight = px(48)
+            setPadding(px(14), paddingTop, px(14), paddingBottom)
+        }
+
+    /** 系统确认框内的纵向容器。 */
+    protected fun dialogBox(): android.widget.LinearLayout = android.widget.LinearLayout(this).apply {
+        orientation = android.widget.LinearLayout.VERTICAL
+        setPadding(px(20), 0, px(20), 0)
+    }
+
     protected fun task(block: suspend () -> Unit): Job = lifecycleScope.launch {
         try { block() }
         catch (e: CancellationException) { throw e }

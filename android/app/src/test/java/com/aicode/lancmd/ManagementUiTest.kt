@@ -218,9 +218,11 @@ class ManagementUiTest {
     }
     @Test fun registryRestoreAndScriptCancelKeepEntityIdSeparateFromRequestId() {
         Stub().use { stub->
-            stub.install();val controller=Robolectric.buildActivity(RegistryActivity::class.java).setup();val root=controller.get().window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("1 个子项") } }
-            buttons(root).single { it.text=="修改备份" }.performClick()
+            // 注册表页已迁移到 Compose（miuix）：由页面入口打开修改备份列表。
+            stub.install();val controller=Robolectric.buildActivity(RegistryActivity::class.java).setup()
+            val page=controller.get()
+            waitFor { page.keys.isNotEmpty() && !page.busy }
+            page.history();shadowOf(Looper.getMainLooper()).idle()
             waitFor { (ShadowDialog.getLatestDialog() as? AlertDialog)?.listView?.adapter?.count==1 }
             val history=ShadowDialog.getLatestDialog() as AlertDialog
             history.listView.performItemClick(null,0,0);shadowOf(Looper.getMainLooper()).idle()
@@ -244,16 +246,24 @@ class ManagementUiTest {
     @Test fun registryTasksBrowserAndHomeCardsRenderWithReachableConsole() {
         Stub().use { stub->
             stub.install()
-            for((type,name) in listOf(RegistryActivity::class.java to "registry-editor",TaskManagerActivity::class.java to "task-manager")) {
-                val controller=Robolectric.buildActivity(type).setup();val root=controller.get().window.decorView
-                val cmd=if(name=="registry-editor")"registry" else "tasks"
+            run {
+                val controller=Robolectric.buildActivity(TaskManagerActivity::class.java).setup()
+                val root=controller.get().window.decorView
                 waitFor {
                     val texts=all(root).filterIsInstance<TextView>().map { it.text.toString() }
-                    stub.requests.any { it.optString("cmd")==cmd } && texts.any {
-                        when(cmd) { "registry"->it.contains("1 个子项");else->it.contains("1 个进程") }
-                    }
+                    stub.requests.any { it.optString("cmd")=="tasks" } && texts.any { it.contains("1 个进程") }
                 };shadowOf(Looper.getMainLooper()).idle()
-                render(root,name);controller.pause().stop().destroy()
+                render(root,"task-manager");controller.pause().stop().destroy()
+            }
+            // 注册表页已迁移到 Compose（miuix）：核对读取到的子项与值，而不是查 TextView。
+            run {
+                val controller=Robolectric.buildActivity(RegistryActivity::class.java).setup()
+                val page=controller.get()
+                waitFor { stub.requests.any { it.optString("cmd")=="registry" } && page.keys.isNotEmpty() && !page.busy }
+                assertEquals(listOf("Software"),page.keys)
+                assertTrue(page.values.isEmpty())
+                shadowOf(Looper.getMainLooper()).idle()
+                render(page.window.decorView,"registry-editor");controller.pause().stop().destroy()
             }
             // 浏览器页已迁移到 Compose（miuix），文本不再是 TextView，
             // 这里只核对页面打开后向电脑读取了浏览器列表。
