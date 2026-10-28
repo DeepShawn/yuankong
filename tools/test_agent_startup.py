@@ -19,7 +19,9 @@ class IsolatedStartupTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.env = dict(os.environ, APPDATA=str(self.root), XDG_CONFIG_HOME=str(self.root))
-        self.command = [sys.executable, "-I", str(ROOT / "windows/lan_command_agent.py")]
+        # -I ignores PYTHONUTF8; mirror the native launcher's UTF-8 setting
+        # explicitly so redirected Chinese status output works on English Windows.
+        self.command = [sys.executable, "-I", "-X", "utf8", str(ROOT / "windows/lan_command_agent.py")]
 
     def test_status_imports_all_features_without_script_directory_on_python_path(self):
         result = subprocess.run(self.command + ["--status"], cwd=self.root, env=self.env,
@@ -38,7 +40,7 @@ class IsolatedStartupTest(unittest.TestCase):
         (config / "agent.json").write_text(json.dumps(dict(bind="127.0.0.1", port=port,
                                                           discovery_port=0)), encoding="utf-8")
         with (self.root / "output.log").open("wb") as output:
-            process = subprocess.Popen(self.command, cwd=self.root, env=self.env,
+            process = subprocess.Popen(self.command, cwd=ROOT.parent, env=self.env,
                                        stdin=subprocess.DEVNULL, stdout=output, stderr=output)
             try:
                 deadline = time.monotonic() + 20

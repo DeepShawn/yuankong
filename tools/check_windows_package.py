@@ -23,7 +23,7 @@ class PackagedStartupTest(unittest.TestCase):
         if os.name != "nt":
             raise RuntimeError("The actual portable package must be tested on Windows")
         cls.temp = tempfile.TemporaryDirectory(prefix="lancmd-shipped-")
-        cls.addClassCleanup(cls.temp.cleanup)
+        cls.addClassCleanup(cls.cleanup_package)
         cls.folder = Path(cls.temp.name)
         # Include characters that must survive CRT and CMD argument processing.
         destination = cls.folder / "便携接收端 & space ! %folder%"
@@ -48,6 +48,21 @@ class PackagedStartupTest(unittest.TestCase):
         output = (result.stdout + result.stderr).decode("utf-8", "replace")
         if result.returncode != 1 or "LanCmd Agent v" + cls.version not in output or "Traceback" in output:
             raise AssertionError("Shipped Python could not load receiver:\n" + output)
+
+    @classmethod
+    def cleanup_package(cls):
+        # A read-only firewall probe can briefly outlive a receiver terminated by
+        # the test and retain its inherited working directory. Do not hide a
+        # permanent leak, but wait for the real Windows handle to be released.
+        deadline = time.monotonic() + 20
+        while True:
+            try:
+                cls.temp.cleanup()
+                return
+            except PermissionError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(.2)
 
     def setUp(self):
         self.state = self.folder / uuid.uuid4().hex
