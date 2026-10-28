@@ -1,9 +1,9 @@
 package com.aicode.lancmd
 
+import android.content.Context
 import android.os.Bundle
 import android.view.ViewGroup
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -19,7 +19,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -41,9 +44,9 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.extra.SuperArrow
+import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
-import top.yukonga.miuix.kmp.theme.lightColorScheme
 
 /**
  * 界面迁移到 miuix（MIUI 风格的 Compose 组件库）的公共部分。
@@ -54,9 +57,35 @@ import top.yukonga.miuix.kmp.theme.lightColorScheme
  */
 @Composable
 fun LanCmdMiuixTheme(content: @Composable () -> Unit) {
-    MiuixTheme(
-        colors = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme(),
-        content = content
+    val context = LocalContext.current
+    val accent = Themes.accent(context).key
+    val tone = Themes.tone(context).key
+    val colors = remember(accent, tone) { lanCmdColors(context) }
+    MiuixTheme(colors = colors, content = content)
+}
+
+/**
+ * 把「外观主题」里选择的主题色与背景色调映射到 miuix 的配色。
+ *
+ * 复用 View 版同一套颜色标记（[Themes.color] 按当前主题解析），
+ * 所以两种页面在迁移期间颜色一致，用户的选择继续生效。
+ */
+private fun lanCmdColors(context: Context): Colors {
+    fun pick(id: Int) = Color(Themes.color(context, id))
+    return darkColorScheme(
+        primary = pick(R.color.accent),
+        onPrimary = pick(R.color.on_accent),
+        primaryContainer = pick(R.color.accent_dim),
+        onPrimaryContainer = pick(R.color.accent),
+        secondary = pick(R.color.accent_2),
+        background = pick(R.color.bg),
+        onBackground = pick(R.color.text),
+        surface = pick(R.color.surface),
+        onSurface = pick(R.color.text),
+        surfaceVariant = pick(R.color.surface_variant),
+        outline = pick(R.color.outline),
+        dividerLine = pick(R.color.outline_soft),
+        error = pick(R.color.danger)
     )
 }
 
@@ -86,6 +115,7 @@ abstract class MiuixActivity : AppCompatActivity() {
     protected val noteFailed = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        Themes.apply(this)
         super.onCreate(savedInstanceState)
         AppVisibility.install(application)
         origin
