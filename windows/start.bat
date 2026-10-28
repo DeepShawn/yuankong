@@ -91,6 +91,6 @@ rem LANCMD_UPGRADE_BOOTSTRAP_V1 - no pause, no GUI launcher, cmd /c exits.
 setlocal DisableDelayedExpansion
 cd /d "%~dp0"
 if not defined LANCMD_UPGRADE_STARTED exit /b 2
-if not exist "python\python.exe" exit /b 3
-"python\python.exe" -B "local_upgrade.py" --launch-receiver
+if not exist "python\pythonw.exe" exit /b 3
+"python\pythonw.exe" -B "local_upgrade.py" --launch-receiver
 exit /b %errorlevel%

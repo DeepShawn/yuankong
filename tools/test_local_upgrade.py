@@ -137,21 +137,24 @@ class NativeUpgradeTest(unittest.TestCase):
                 with mock.patch("local_upgrade.REQUIRED",names):manifest=build_manifest(payload,"3.4.2")
                 with zipfile.ZipFile(work/"package.zip","w") as archive:
                     for path in payload.iterdir():archive.write(path,"LanCmd-Windows/"+path.name)
-                parent=subprocess.Popen([sys.executable,"-c","import time;time.sleep(3)"],creationflags=0x08000000)
+                parent=subprocess.Popen([sys.executable,"-c","import pathlib,sys,time;p=pathlib.Path(sys.argv[1]);end=time.monotonic()+30\nwhile not p.exists() and time.monotonic()<end:time.sleep(.02)",str(work/"release-parent")],creationflags=0x08000000)
                 plan=dict(root=str(root),work=str(work),parent=parent.pid,state=str(Path(status_dir)/"status.json"),version="3.4.2",previous="3.4.1",request_id="a"*32,files=list(manifest["files"]))
                 write_json(work/"plan.json",plan);helper=None
-                bootstrap="import json,sys;sys.path.insert(0,sys.argv[1]);import local_upgrade as u;u.REQUIRED=set(json.loads(sys.argv[2]));u.helper(json.load(open(sys.argv[3])))"
+                bootstrap="import json,sys;sys.path.insert(0,sys.argv[1]);import local_upgrade as u;u.REQUIRED=set(json.loads(sys.argv[2]));u.helper(json.loads(__import__('pathlib').Path(sys.argv[3]).read_text(encoding='utf-8')))"
                 try:
-                    helper=subprocess.Popen([sys.executable,"-c",bootstrap,str(module.parent),json.dumps(sorted(names)),str(work/"plan.json")],creationflags=0x08000000)
+                    helper_log=(work/"helper.log").open("wb")
+                    self.addCleanup(helper_log.close)
+                    helper=subprocess.Popen([sys.executable,"-X","utf8","-c",bootstrap,str(module.parent),json.dumps(sorted(names)),str(work/"plan.json")],stdout=helper_log,stderr=helper_log,creationflags=0x08000000)
                     import time
-                    deadline=time.monotonic()+2
-                    while not (work/"ready").exists() and time.monotonic()<deadline:time.sleep(.02)
-                    self.assertTrue((work/"ready").exists());self.assertIsNone(parent.poll())
+                    deadline=time.monotonic()+8
+                    while not (work/"ready").exists() and helper.poll() is None and time.monotonic()<deadline:time.sleep(.02)
+                    self.assertTrue((work/"ready").exists(),(work/"helper.log").read_text(encoding="utf-8",errors="replace"));self.assertIsNone(parent.poll())
                     self.assertFalse((work/"stage").exists(),"不得在旧接收端退出前解压")
                     self.assertEqual(b"old",(root/"Start.exe").read_bytes())
-                    self.assertEqual(0,helper.wait(35));parent.wait(3)
+                    (work/"release-parent").touch()
+                    self.assertEqual(0,helper.wait(35),(work/"helper.log").read_text(encoding="utf-8",errors="replace"));parent.wait(3)
                     report=json.loads((Path(status_dir)/"status.json").read_text(encoding="utf-8"))
-                    self.assertEqual("rolled_back" if fails else "completed",report["status"],report)
+                    self.assertEqual("rolled_back" if fails else "completed",report["status"],str(report)+"\n"+"\n".join(p.read_text(encoding="utf-8",errors="replace") for p in work.glob("*.log")))
                     self.assertEqual("a"*32,report["request_id"])
                     kernel=ctypes.WinDLL("kernel32",use_last_error=True)
                     kernel.OpenProcess.argtypes=[w.DWORD,w.BOOL,w.DWORD];kernel.OpenProcess.restype=w.HANDLE
@@ -169,6 +172,7 @@ class NativeUpgradeTest(unittest.TestCase):
                 finally:
                     if parent.poll() is None:parent.terminate();parent.wait(3)
                     if helper is not None and helper.poll() is None:helper.terminate();helper.wait(3)
+                    helper_log.close()
                     runtime.rmdir()
 
 

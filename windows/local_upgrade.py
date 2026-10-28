@@ -359,6 +359,10 @@ class ReceiverStart:
                 info=json.loads(self.started.read_text(encoding="utf-8"))
                 if info.get("nonce")!=self.nonce:raise ValueError("启动回执不匹配")
                 self.receiver=WindowsProcess(info.get("pid"),info.get("created"),self.root/"python/pythonw.exe")
+            failure=self.started.with_suffix(".error")
+            if failure.exists():
+                info=json.loads(failure.read_text(encoding="utf-8"))
+                if info.get("nonce")==self.nonce:raise ValueError("start.bat 启动失败："+info.get("error","未知错误"))
             code=self.command.poll()
             if code is not None and (self.legacy or code!=0):raise ValueError("接收端启动命令失败，日志："+str(self.work))
             if self.receiver is not None:
@@ -449,7 +453,12 @@ def helper(plan):
 if __name__=="__main__":
     if sys.argv[1:]==["--launch-receiver"]:
         try:launch_receiver()
-        except Exception:sys.exit(2)
+        except Exception as exc:
+            try:
+                started=os.environ.get("LANCMD_UPGRADE_STARTED")
+                if started:write_json(Path(started).with_suffix(".error"),dict(nonce=os.environ.get("LANCMD_UPGRADE_NONCE"),error=str(exc)[:1600]))
+            except OSError:pass
+            sys.exit(2)
         sys.exit(0)
     if len(sys.argv)==3 and sys.argv[1]=="--apply":
         plan=json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
