@@ -67,6 +67,8 @@ class StorageActivity : MiuixActivity() {
     internal var visible by mutableStateOf<List<JSONObject>>(emptyList())
     internal var multi by mutableStateOf(false)
     internal var selectionSummary by mutableStateOf("")
+    internal var listingBusy by mutableStateOf(false)
+    private var listingMessage by mutableStateOf("正在读取磁盘与目录…")
     internal var operationsBusy by mutableStateOf(false)
     internal var transferText by mutableStateOf("")
     /** 批量操作的逐项结果，和旧版顶部的「展开逐项结果」一致。 */
@@ -83,6 +85,7 @@ class StorageActivity : MiuixActivity() {
     private var pendingDownload = ""
     private var uploadTarget = ""
     private var loading: Job? = null
+    private var listingSequence=0
     private var transfer: Job? = null
     private var remoteJob: String? = null
     private var lastResult: String? = null
@@ -181,9 +184,16 @@ class StorageActivity : MiuixActivity() {
         content { Screen() }
         updateSelection()
         task {
-            val storage = storageCall("storage")
+            if(path.isNotBlank())load(path)
+            val storage = try {storageCall("storage",timeout=6000)}
+            catch(e:CancellationException){throw e}
+            catch(e:Exception) {
+                if(path.isBlank())load("")
+                if(disks.isEmpty())status("磁盘容量暂不可用，仍可输入目录重试；慢盘占位任务可在更多工具中取消",true)
+                return@task
+            }
             renderDisks(storage.getJSONArray("drives"))
-            load(path.ifBlank { storage.optString("home") })
+            if(path.isBlank())load(storage.optString("home"))
             val jobs = runCatching { storageCall("file_jobs") }.getOrNull()?.optJSONArray("jobs")
             if (jobs != null && !operationsBusy) {
                 val active = (0 until jobs.length()).map { jobs.getJSONObject(it) }
@@ -267,7 +277,8 @@ class StorageActivity : MiuixActivity() {
                     }
             }
         }
-        if (visible.isEmpty()) EmptyNote("此目录为空，或没有匹配的名称。")
+        if(listingBusy) {Note("目录加载中，返回和其他操作仍可使用…")}
+        else if(visible.isEmpty())EmptyNote(listingMessage)
         LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
             items(visible) { item ->
                 val name = item.optString("name")
@@ -339,8 +350,9 @@ class StorageActivity : MiuixActivity() {
             Disk(
                 path = drive.optString("path"),
                 percent = percent,
-                detail = "${FileTransfer.humanSize(drive.optLong("free"))} 可用 / " +
-                    FileTransfer.humanSize(drive.optLong("total")),
+                detail = if(drive.has("ready") && !drive.optBoolean("ready"))"磁盘忙碌或暂不可用 · 仍可尝试打开"
+                else "${FileTransfer.humanSize(drive.optLong("free"))} 可用 / " +
+                    FileTransfer.humanSize(drive.optLong("total")) + if(drive.optBoolean("pending") || drive.optBoolean("stale"))" · 上次容量" else "",
                 tight = percent > 90
             )
         }
@@ -348,20 +360,23 @@ class StorageActivity : MiuixActivity() {
 
     internal fun load(target: String, notice: String? = null) {
         loading?.cancel()
+        val sequence=++listingSequence
         loading = task {
+            listingBusy=true
             status("正在读取目录…")
-            val result = storageCall("ls", JSONObject().put("path", target))
+            try {
+            val result = storageCall("ls", JSONObject().put("path", target),timeout=8000)
             val changed = path != result.getString("path")
             if (changed && restoreKeys.isEmpty()) {
                 selection.clear(); multi = false; lastResult = null; lastError = false; results = emptyList()
             }
             path = result.getString("path")
             val items = result.getJSONArray("items")
-            entries = (0 until items.length()).map { items.getJSONObject(it) }
+            entries = withContext(Dispatchers.Default) { (0 until items.length()).map { items.getJSONObject(it) }
                 .sortedWith(
                     compareByDescending<JSONObject> { it.optBoolean("dir") }
                         .thenBy { it.optString("name").lowercase() }
-                )
+                ) }
             val current = entries.associateBy { itemKey(it) }
             selection.keys.retainAll(current.keys)
             for (id in selection.keys.toList()) selection[id] = current.getValue(id)
@@ -382,6 +397,12 @@ class StorageActivity : MiuixActivity() {
                 lastResult ?: if (entries.isEmpty()) "此目录为空" else "${entries.size} 项 · 长按多选，点击单项操作",
                 lastError
             )
+            listingMessage=if(entries.isEmpty())"此目录为空" else "没有匹配名称；可以清空搜索后查看"
+            } catch(e:CancellationException) {throw e}
+            catch(e:Exception) {
+                listingMessage="目录暂未加载：${e.message ?: "磁盘无响应"}。点击刷新可重试；也可在更多工具中取消占位任务。"
+                status(listingMessage,true)
+            } finally {if(sequence==listingSequence)listingBusy=false}
         }
     }
 

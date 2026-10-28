@@ -1,6 +1,9 @@
 package com.aicode.lancmd
 
 import android.app.Application
+import android.content.Intent
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import android.os.Looper
 import android.view.View
 import android.view.WindowManager
@@ -93,7 +96,24 @@ class FolderActionsUiTest {
         }
     }
 
-    private class Stub:Closeable {
+    @Test fun initialDirectoryDoesNotWaitForAnUnrelatedSlowDriveScan() {
+        Stub(slowStorage=true).use {stub ->
+            stub.install()
+            val intent=Intent(RuntimeEnvironment.getApplication(),StorageActivity::class.java).putExtra("path","C:\\notes")
+            val controller=Robolectric.buildActivity(StorageActivity::class.java,intent).setup();val page=controller.get()
+            try {
+                waitFor{page.visible.size==2 && !page.listingBusy}
+                assertEquals("C:\\notes",page.path)
+                assertEquals(1L,stub.storageGate.count)
+                compose.runOnIdle{page.toggleMulti()}
+                compose.onNodeWithText("Photos").assertIsOff().performSemanticsAction(SemanticsActions.OnClick){it()}
+                compose.onNodeWithText("Photos").assertIsOn()
+            }finally{stub.storageGate.countDown();controller.pause().stop().destroy()}
+        }
+    }
+
+    private class Stub(private val slowStorage:Boolean=false):Closeable {
+        val storageGate=CountDownLatch(1)
         val requests=CopyOnWriteArrayList<JSONObject>();val server=ServerSocket(0);val client=AgentClient("127.0.0.1",server.localPort)
         var folder="Photos"
         val thread=Thread {
@@ -101,7 +121,7 @@ class FolderActionsUiTest {
                 val input=socket.getInputStream().bufferedReader();val output=socket.getOutputStream().bufferedWriter()
                 while(true){val q=JSONObject(input.readLine()?:break);val result=JSONObject().put("id",q.getInt("id")).put("ok",true)
                     when(q.optString("cmd")) {
-                        "storage"->result.put("home","C:\\notes").put("drives",JSONArray())
+                        "storage"->{if(slowStorage)storageGate.await(7,TimeUnit.SECONDS);result.put("home","C:\\notes").put("drives",JSONArray())}
                         "file_jobs"->result.put("jobs",JSONArray())
                         "ls"->result.put("path",q.optString("path").ifBlank{"C:\\notes"}).put("items",JSONArray().apply{if(q.optString("path")=="C:\\notes")put(JSONObject().put("name",folder).put("dir",true).put("mtime",1)).put(JSONObject().put("name","readme.txt").put("dir",false).put("mtime",1))})
                         "rename"->folder=q.getString("to").substringAfterLast('\\')
@@ -111,6 +131,6 @@ class FolderActionsUiTest {
             }}catch(_:IOException){}
         }.apply{isDaemon=true;start()}
         fun install(){runBlocking{withContext(Dispatchers.IO){client.connect()}};ConnectionManager::class.java.getDeclaredField("client").apply{isAccessible=true}.set(ConnectionManager,client)}
-        override fun close(){client.close();server.close();thread.join(2000)}
+        override fun close(){storageGate.countDown();client.close();server.close();thread.join(2000)}
     }
 }

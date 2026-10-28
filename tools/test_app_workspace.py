@@ -111,4 +111,53 @@ class NativeWorkspaceTest(unittest.TestCase):
                 process.terminate();process.wait(5)
 
 
+
+class ResponsiveOperationsTest(unittest.TestCase):
+    def test_slow_catalog_build_is_single_flight_and_returns_loading_without_holding_cache_lock(self):
+        release=threading.Event();entered=threading.Event();calls=[]
+        def records():calls.append(1);entered.set();release.wait(3);return []
+        catalog=AppCatalog(lambda path:None,SimpleNamespace(list=lambda:[]),SimpleNamespace(records=records))
+        try:
+            start=time.monotonic();result=catalog.request({'background':True},Error)
+            self.assertLess(time.monotonic()-start,.5);self.assertTrue(result['loading'])
+            self.assertTrue(entered.wait(1))
+            for _ in range(20):catalog.request({'background':True,'refresh':True},Error)
+            self.assertEqual(1,len(calls))
+        finally:release.set()
+        self.assertTrue(catalog.done.wait(1));self.assertFalse(catalog.request({'background':True},Error)['loading'])
+
+    def test_freeze_job_status_and_state_remain_available_during_a_slow_native_operation(self):
+        from app_freeze import AppFreeze
+        from unittest import mock
+        control=AppFreeze.__new__(AppFreeze)
+        control.jobs_lock=threading.RLock();control.jobs={};control.snapshots={};control.closed=False
+        entered=threading.Event();release=threading.Event()
+        def rpc(q):entered.set();release.wait(3);return dict(items=[dict(id='held',path=q.get('path'))])
+        control._rpc=mock.Mock(side_effect=rpc)
+        owner=SimpleNamespace(client_id='phone')
+        try:
+            result=control.request(dict(action='submit',operation='freeze',path='app.exe',owner='spoofed'),owner,Error)
+            self.assertTrue(entered.wait(1));job_id=result['job']['id']
+            start=time.monotonic()
+            self.assertEqual('running',control.request(dict(action='job',job_id=job_id),owner,Error)['job']['status'])
+            self.assertEqual([],control.request(dict(action='state'),owner,Error)['items'])
+            self.assertLess(time.monotonic()-start,.5)
+            with self.assertRaises(Error):control.request(dict(action='job',job_id=job_id),SimpleNamespace(client_id='other'),Error)
+            with self.assertRaises(Error):control.request(dict(action='submit',operation='close',path='other.exe'),owner,Error)
+        finally:release.set()
+        end=time.monotonic()+1
+        while control.jobs[job_id]['status']=='running' and time.monotonic()<end:time.sleep(.01)
+        self.assertEqual('completed',control.request(dict(action='job',job_id=job_id),owner,Error)['job']['status'])
+        self.assertEqual('held',control.request(dict(action='state'),owner,Error)['items'][0]['id'])
+        self.assertEqual('phone',control._rpc.call_args.args[0]['owner'])
+
+    def test_application_close_uses_verified_versions_skips_protected_and_releases_own_frozen_handles(self):
+        core,resumed=FreezeTest().core();ended=[]
+        core.backend.terminate=lambda pid,created:ended.append((pid,created))
+        core.request(dict(action='freeze',owner='phone',path='app.exe'))
+        result=core.request(dict(action='close',owner='phone',path='app.exe'))
+        self.assertEqual([(10,'100')],ended);self.assertEqual(1,result['closed'])
+        self.assertTrue(result['partial']);self.assertTrue(result['errors'])
+        self.assertFalse(result['items']);self.assertEqual([(10,'100')],resumed)
+
 if __name__=="__main__":unittest.main()

@@ -578,18 +578,18 @@ def cmd_info():
     }
 
 
+from storage_reads import BoundedReads, DriveUsage
+_drive_usage = DriveUsage(shutil.disk_usage)
+_directory_reads = BoundedReads()
+
+
 def _drives():
     if IS_WIN:
-        out = []
-        for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-            root = letter + ":\\"
-            if os.path.exists(root):
-                try:
-                    u = shutil.disk_usage(root)
-                    out.append({"path": root, "total": u.total, "free": u.free})
-                except Exception:
-                    out.append({"path": root, "total": 0, "free": 0})
-        return out
+        # GetLogicalDrives only reads the drive-letter mask. exists(root) and
+        # disk_usage on every letter used to block the whole serial RPC pipe.
+        mask=ctypes.windll.kernel32.GetLogicalDrives()
+        roots=[chr(65+index)+":\\" for index in range(26) if mask & (1<<index)]
+        return _drive_usage.snapshot(roots)
     try:
         u = shutil.disk_usage("/")
         return [{"path": "/", "total": u.total, "free": u.free}]
@@ -606,6 +606,14 @@ def cmd_storage():
 
 
 def cmd_ls(path):
+    target=os.path.abspath(os.path.expanduser(path or (os.environ.get("USERPROFILE") if IS_WIN else os.path.expanduser("~"))))
+    try:
+        return _directory_reads.read(os.path.normcase(target),lambda:_read_directory(target))
+    except TimeoutError as exc:
+        raise RpcError(str(exc))
+
+
+def _read_directory(path):
     target = path or (os.environ.get("USERPROFILE") if IS_WIN else os.path.expanduser("~"))
     target = os.path.expanduser(target)
     if not os.path.isdir(target):
@@ -1208,7 +1216,7 @@ def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures", "cursor_visibility"])
-        features.extend(["app_locks","app_catalog","app_freeze","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
+        features.extend(["app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
