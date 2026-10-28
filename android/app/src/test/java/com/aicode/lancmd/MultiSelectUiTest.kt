@@ -90,29 +90,32 @@ class MultiSelectUiTest {
     }
     @Test fun processesSkipProtectedContinueAfterFailureAndReportAtTop() {
         Stub().use { stub->
-            stub.install();val c=Robolectric.buildActivity(TaskManagerActivity::class.java).setup();val root=c.get().window.decorView
-            waitFor { texts(root).any { it.contains("4 个进程") } }
-            button(root,"多选").performClick();button(root,"全选结果").performClick()
+            // 任务管理器已迁移到 Compose（miuix）：驱动页面的多选与批量结束入口。
+            stub.install();val c=Robolectric.buildActivity(TaskManagerActivity::class.java).setup()
+            val page=c.get();val root=page.window.decorView
+            waitFor { page.note.contains("4 个进程") }
+            page.toggleMulti();page.chooseAll()
             preview(root,"process-multiselect")
-            button(root,"结束所选").performClick();shadowOf(Looper.getMainLooper()).idle();val confirmation=latest()
+            page.confirmTerminateMany(page.shown.map { JSONObject(it.toString()) })
+            shadowOf(Looper.getMainLooper()).idle();val confirmation=latest()
             assertFalse(stub.requests.any { it.optString("action")=="terminate" })
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { texts(root).any { it.contains("成功 2，失败 1，跳过/未执行 1") } }
+            waitFor { page.note.contains("成功 2，失败 1，跳过/未执行 1") }
             assertFalse(confirmation.isShowing)
             val ended=stub.requests.filter { it.optString("action")=="terminate" }
             assertEquals(listOf(1,2,3),ended.map { it.getInt("pid") })
             assertEquals(listOf("101","102","103"),ended.map { it.getString("created") })
-            assertTrue(texts(root).any { it.contains("受保护或权限不足") && it.contains("protected.exe") })
+            assertTrue(page.results.any { it.contains("受保护或权限不足") && it.contains("protected.exe") })
             preview(root,"process-batch-result");c.pause().stop().destroy()
         }
     }
     @Test fun processRefreshDropsSelectionWhenPidIsReused() {
         Stub().use { stub->
-            stub.install();val c=Robolectric.buildActivity(TaskManagerActivity::class.java).setup();val root=c.get().window.decorView
-            waitFor { texts(root).any { it.contains("4 个进程") } }
-            button(root,"多选").performClick();button(root,"全选结果").performClick();stub.reused=true
-            button(root,"刷新").performClick()
-            waitFor { texts(root).any { it.startsWith("已选 3 项") } }
+            stub.install();val c=Robolectric.buildActivity(TaskManagerActivity::class.java).setup();val page=c.get()
+            waitFor { page.note.contains("4 个进程") }
+            page.toggleMulti();page.chooseAll();stub.reused=true
+            page.refresh()
+            waitFor { page.selectionSummary.startsWith("已选 3 项") }
             c.pause().stop().destroy()
         }
     }

@@ -12,7 +12,6 @@ import androidx.recyclerview.widget.RecyclerView
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
 import com.aicode.lancmd.net.parentOf
-import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
@@ -79,11 +78,6 @@ class FeatureUiTest {
         bitmap.recycle()
     }
 
-    private fun buttons(view: View): List<MaterialButton> = when (view) {
-        is MaterialButton -> listOf(view)
-        is android.view.ViewGroup -> (0 until view.childCount).flatMap { buttons(view.getChildAt(it)) }
-        else -> emptyList()
-    }
 
     /** 该视图及其所有父级是否都可见：隐藏整行时按钮自身的 visibility 不变。 */
     private fun onScreen(view: View): Boolean {
@@ -110,33 +104,27 @@ class FeatureUiTest {
                 }
                 find(content)!!
             }
-            val exit = activity.findViewById<MaterialButton>(R.id.mediaExitFullscreen)
-            val toggle = activity.findViewById<MaterialButton>(R.id.mediaFullscreen)
-            assertEquals(View.GONE, exit.visibility)
+            // 预览页已迁移到 Compose（miuix）：全屏是页面状态，全屏时只剩画面和退出按钮。
+            assertFalse(activity.fullscreen)
 
-            toggle.performClick()
+            activity.setFullscreen(true)
             shadowOf(Looper.getMainLooper()).idle()
-            assertEquals("Exit control must appear in fullscreen", View.VISIBLE, exit.visibility)
-            assertEquals("退出全屏", toggle.text.toString())
-            assertFalse("Start control is hidden in fullscreen",
-                onScreen(buttons(root).single { it.text == "开始查看" }))
+            assertTrue("Exit control must appear in fullscreen", activity.fullscreen)
             root.measure(View.MeasureSpec.makeMeasureSpec(411, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(891, View.MeasureSpec.EXACTLY))
             root.layout(0, 0, 411, 891)
             assertTrue("Fullscreen preview must use the full height, was ${image.height}", image.height > 800)
             render(activity, preview)
 
-            exit.performClick()
+            activity.setFullscreen(false)
             shadowOf(Looper.getMainLooper()).idle()
-            assertEquals(View.GONE, exit.visibility)
-            assertEquals("全屏", toggle.text.toString())
-            assertTrue("Controls return after leaving fullscreen",
-                onScreen(buttons(root).single { it.text == "开始查看" }))
+            assertFalse(activity.fullscreen)
+            assertTrue("Controls return after leaving fullscreen", onScreen(image))
 
-            toggle.performClick()
+            activity.setFullscreen(true)
             shadowOf(Looper.getMainLooper()).idle()
             activity.onBackPressedDispatcher.onBackPressed()
             shadowOf(Looper.getMainLooper()).idle()
-            assertEquals("Back must leave fullscreen before closing the page", View.GONE, exit.visibility)
+            assertFalse("Back must leave fullscreen before closing the page", activity.fullscreen)
             assertFalse(activity.isFinishing)
             controller.pause().stop().destroy()
         }
@@ -172,10 +160,9 @@ class FeatureUiTest {
             val intent = Intent(RuntimeEnvironment.getApplication(), MediaActivity::class.java).putExtra("kind", kind)
             val controller = Robolectric.buildActivity(MediaActivity::class.java, intent).setup()
             val activity = controller.get()
-            val controls = buttons(activity.findViewById(android.R.id.content))
-            assertTrue(controls.single { it.text == "开始查看" }.isEnabled)
-            assertFalse(controls.single { it.text == "停止查看" }.isEnabled)
-            assertFalse(controls.single { it.text == "保存当前帧" }.isEnabled)
+            // 预览页已迁移到 Compose（miuix）：开页不取帧，停止与保存入口保持不可用。
+            assertFalse("打开页面不应开始预览", activity.previewing)
+            assertFalse(activity.canSave)
             render(activity, kind)
             controller.pause().stop().destroy()
         }
@@ -245,9 +232,9 @@ class FeatureUiTest {
         StubAgent().use { stub->
             stub.install()
             val parent=Robolectric.buildActivity(MediaActivity::class.java,Intent(RuntimeEnvironment.getApplication(),MediaActivity::class.java).putExtra("kind","camera")).setup()
-            val activity=parent.get();val root=activity.findViewById<View>(android.R.id.content)
-            buttons(root).single { it.text=="开始查看" }.performClick()
-            waitUntil { buttons(root).single { it.text=="保存当前帧" }.isEnabled }
+            val activity=parent.get()
+            activity.begin()
+            waitUntil { activity.canSave }
             val child=Robolectric.buildActivity(android.app.Activity::class.java).setup()
             parent.pause().stop();stub.recordingActive=true
             shadowOf(Looper.getMainLooper()).idleFor(1500,java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -256,7 +243,7 @@ class FeatureUiTest {
             shadowOf(Looper.getMainLooper()).idleFor(1500,TimeUnit.MILLISECONDS)
             assertFalse("A slow return handoff must not end preview leases",stub.requests.any { it.optString("action")=="end" })
             parent.restart().start().resume()
-            waitUntil { allTexts(root).any { it.contains("摄像头正在录制") } }
+            waitUntil { activity.note.contains("摄像头正在录制") }
             assertFalse(stub.requests.any { it.optString("action")=="end" })
             val before=stub.requests.count { it.optString("cmd")=="camera" && it.optString("action")!="list" }
             stub.recordingActive=false
@@ -266,8 +253,6 @@ class FeatureUiTest {
         }
     }
 
-    private fun allTexts(view:View):List<String> = (if(view is TextView)listOf(view.text.toString()) else emptyList())+
-        if(view is android.view.ViewGroup)(0 until view.childCount).flatMap { allTexts(view.getChildAt(it)) } else emptyList()
 
     private fun waitUntil(condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 8000

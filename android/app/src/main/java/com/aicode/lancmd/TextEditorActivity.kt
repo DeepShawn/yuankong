@@ -93,7 +93,8 @@ class TextEditorActivity : MiuixActivity() {
                 label = "电脑文件文本内容",
                 value = body,
                 onValueChange = { edit(it) },
-                singleLine = false
+                singleLine = false,
+                maxLines = 16
             )
             SuperSwitch(
                 checked = autoSave,

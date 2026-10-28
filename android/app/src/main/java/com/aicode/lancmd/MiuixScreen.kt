@@ -308,13 +308,19 @@ fun Progress(progress: Float?) {
     )
 }
 
-/** 带名称的输入框。 */
+/**
+ * 带名称的输入框。
+ *
+ * 多行输入必须给出 [maxLines]：页面主体是可滚动的，
+ * 高度不设上限的输入框会让测量没有收敛的高度。
+ */
 @Composable
 fun Field(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
     singleLine: Boolean = true,
+    maxLines: Int = if (singleLine) 1 else 8,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default
 ) {
     TextField(
@@ -322,6 +328,7 @@ fun Field(
         onValueChange = onValueChange,
         label = label,
         singleLine = singleLine,
+        maxLines = maxLines,
         keyboardOptions = keyboardOptions,
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
     )

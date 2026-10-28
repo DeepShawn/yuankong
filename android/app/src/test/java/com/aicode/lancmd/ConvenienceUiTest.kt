@@ -358,9 +358,11 @@ class ConvenienceUiTest {
         RuntimeEnvironment.getApplication().getSharedPreferences("command_lists", 0).edit().clear().commit()
         Stub().use { stub ->
             stub.install()
+            // 命令列表页已迁移到 Compose（miuix）：命令编辑仍是系统弹窗，列表与计划用页面状态断言。
             val controller = Robolectric.buildActivity(CommandsActivity::class.java).setup()
-            val root = controller.get().window.decorView
-            buttons(root).single { it.text == "添加命令" }.performClick()
+            val page = controller.get()
+            val root = page.window.decorView
+            page.editCommand(null)
             val edit = ShadowDialog.getLatestDialog() as AlertDialog
             shadowOf(Looper.getMainLooper()).idle() // Install the dialog's OnShow save handler before clicking.
             fun inputs(view: View): List<EditText> = when (view) {
@@ -370,33 +372,32 @@ class ConvenienceUiTest {
             }
             val fields = inputs(edit.window!!.decorView)
             assertEquals(2, fields.size)
-            fields[0].setText("echo delayed"); fields[1].setText("2")
+            fields.single { it.contentDescription == "命令内容" }.setText("echo delayed")
+            fields.single { it.contentDescription == "等待秒数" }.setText("2")
             edit.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             assertFalse("Saved command editor must close: ${fields.map { it.error }}", edit.isShowing)
+            assertEquals(listOf("echo delayed"), page.steps.map { it.line })
+            page.submit()
+            assertFalse(stub.requests.any { it.optString("cmd") == "commands" && it.optString("action") == "add" })
             fun texts(view: View): List<String> = when (view) {
                 is ViewGroup -> (0 until view.childCount).flatMap { texts(view.getChildAt(it)) }
                 is android.widget.TextView -> listOf(view.text.toString())
                 else -> emptyList()
             }
-            assertTrue("Saved command must appear in list: ${texts(root)}", texts(root).contains("echo delayed"))
-            buttons(root).single { it.text == "启动当前命令列表" }.performClick()
-            assertFalse(stub.requests.any { it.optString("cmd") == "commands" && it.optString("action") == "add" })
             val confirmation = ShadowDialog.getLatestDialog() as AlertDialog
             assertTrue("Start confirmation must describe the saved command", texts(confirmation.window!!.decorView).any { it.contains("共 1 条") })
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             try {
                 waitUntil { stub.requests.any { it.optString("cmd") == "commands" && it.optString("action") == "add" } }
             } catch (failure: AssertionError) {
-                throw AssertionError("Command submission failed. UI=${texts(root)}; RPC=${stub.requests}", failure)
+                throw AssertionError("Command submission failed. UI=${page.steps.map { it.line }}; RPC=${stub.requests}", failure)
             }
             val item = stub.requests.single { it.optString("cmd") == "commands" && it.optString("action") == "add" }.getJSONArray("items").getJSONObject(0)
             assertEquals("echo delayed", item.getString("line")); assertEquals(2, item.getInt("delay"))
             render(root, "command-lists")
             controller.pause().stop().destroy()
             val reopened = Robolectric.buildActivity(CommandsActivity::class.java).setup()
-            fun hasText(view: View): Boolean = (view is android.widget.TextView && view.text.toString() == "echo delayed") ||
-                (view is ViewGroup && (0 until view.childCount).any { hasText(view.getChildAt(it)) })
-            assertTrue(hasText(reopened.get().window.decorView))
+            assertEquals(listOf("echo delayed"), reopened.get().steps.map { it.line })
             reopened.pause().stop().destroy()
         }
     }
