@@ -27,7 +27,7 @@ object FileDelay {
         val count=seconds(context)
         for(left in count downTo 1) { pinnedCall(client,"ping");notice("将在 $left 秒后开始，需要手机保持连接");delay(1000) }
     }
-    private fun announce(context:Context,notice:(String)->Unit,message:String) { notice(message);(context as? FeatureActivity)?.fileOperationNotice(message) }
+    private fun announce(context:Context,notice:(String)->Unit,message:String) { notice(message) }
     suspend fun call(context:Context,client:AgentClient?,command:String,params:JSONObject,timeout:Long=30_000,notice:(String)->Unit={}):JSONObject {
         val count=seconds(context)
         if(count==0)return pinnedCall(client,command,params,timeout)

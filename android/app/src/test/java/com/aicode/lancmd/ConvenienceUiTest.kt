@@ -87,28 +87,33 @@ class ConvenienceUiTest {
     @Test fun devicePolicyNeedsPhoneConfirmationAndCanRestoreOriginalSettings() {
         Stub().use { stub ->
             stub.install()
+            // 设备页已迁移到 Compose（miuix）：策略入口由页面提供，仍必须经过手机确认框。
             val controller = Robolectric.buildActivity(DevicesActivity::class.java).setup()
-            val root = controller.get().window.decorView
-            fun lock() = buttons(root).single { it.text == "锁定" }
-            waitUntil { buttons(root).any { it.text == "锁定" && it.isEnabled } }
-            lock().performClick()
+            val page = controller.get()
+            val root = page.window.decorView
+            fun storage() = page.policies.single { it.scope == "storage" }
+            fun lock() = page.confirm("锁定？", "锁定", JSONObject().put("action", "policy").put("scope", "storage").put("mode", "blocked"))
+            waitUntil { page.policies.isNotEmpty() && !page.busy && page.admin }
+            assertEquals("允许访问", storage().mode)
+            lock()
             var dialog = ShadowDialog.getLatestDialog() as AlertDialog
             assertFalse(stub.requests.any { it.optString("action") == "policy" })
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
             assertFalse(stub.requests.any { it.optString("action") == "policy" })
-            lock().performClick()
+            lock()
             dialog = ShadowDialog.getLatestDialog() as AlertDialog
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitUntil { buttons(root).any { it.text == "解锁 / 恢复原策略" && it.isEnabled } }
+            waitUntil { storage().mode == "禁止访问" && !page.busy }
             val change = stub.requests.single { it.optString("action") == "policy" }
             assertEquals("storage", change.getString("scope"))
             assertEquals("blocked", change.getString("mode"))
             render(root, "removable-devices")
-            buttons(root).single { it.text == "解锁 / 恢复原策略" }.performClick()
+            assertTrue("锁定后才能恢复原策略", storage().managed)
+            page.confirm("解锁 / 恢复原策略？", "恢复", JSONObject().put("action", "policy").put("scope", "storage").put("mode", "allow"))
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitUntil { stub.requests.count { it.optString("action") == "policy" } == 2 &&
-                buttons(root).any { it.text == "锁定" && it.isEnabled } }
+            waitUntil { stub.requests.count { it.optString("action") == "policy" } == 2 && !page.busy }
             assertEquals("allow", stub.requests.last { it.optString("action") == "policy" }.getString("mode"))
+            assertEquals("允许访问", storage().mode)
             controller.pause().stop().destroy()
         }
     }
@@ -117,15 +122,18 @@ class ConvenienceUiTest {
         Stub().use { stub ->
             stub.admin = false
             stub.install()
+            // 设备页已迁移到 Compose（miuix）：按 admin 与设备标记判断可用性。
             val controller = Robolectric.buildActivity(DevicesActivity::class.java).setup()
-            val root = controller.get().window.decorView
-            waitUntil { buttons(root).any { it.text == "锁定" } }
-            assertTrue(buttons(root).filter { it.text != "刷新设备与策略" && it.text != "隐私设备 · 摄像头 / 麦克风" }.all { !it.isEnabled })
+            val page = controller.get()
+            waitUntil { page.policies.isNotEmpty() && !page.busy }
+            assertFalse("标准权限下不能改策略", page.admin)
             stub.admin = true
-            buttons(root).single { it.text == "刷新设备与策略" }.performClick()
-            waitUntil { buttons(root).any { it.text == "锁定" && it.isEnabled } }
-            assertFalse(buttons(root).single { it.text == "安全弹出 System USB" }.isEnabled)
-            assertTrue(buttons(root).single { it.text == "安全弹出 Test USB" }.isEnabled)
+            page.load()
+            waitUntil { page.admin && !page.busy }
+            val system = page.devices.single { it.name == "System USB" }
+            val removable = page.devices.single { it.name == "Test USB" }
+            assertTrue("系统磁盘禁止弹出", system.protectedDisk)
+            assertTrue(removable.ejectable && !removable.protectedDisk)
             controller.pause().stop().destroy()
         }
     }
@@ -134,14 +142,14 @@ class ConvenienceUiTest {
         Stub().use { first ->
             first.install()
             val controller = Robolectric.buildActivity(DevicesActivity::class.java).setup()
-            val root = controller.get().window.decorView
-            waitUntil { buttons(root).any { it.text == "锁定" && it.isEnabled } }
-            buttons(root).single { it.text == "锁定" }.performClick()
+            val page = controller.get()
+            waitUntil { page.policies.isNotEmpty() && !page.busy && page.admin }
+            page.confirm("锁定？", "锁定", JSONObject().put("action", "policy").put("scope", "storage").put("mode", "blocked"))
             val dialog = ShadowDialog.getLatestDialog() as AlertDialog
             Stub().use { second ->
                 second.install()
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-                waitUntil { buttons(root).single { it.text == "刷新设备与策略" }.isEnabled }
+                waitUntil { !page.busy }
                 assertFalse(first.requests.any { it.optString("action") == "policy" })
                 assertFalse(second.requests.any { it.optString("cmd") == "devices" })
             }
@@ -311,12 +319,14 @@ class ConvenienceUiTest {
         stopConnection()
         Stub().use { stub ->
             stub.install()
+            // 首页已迁移到 Compose（miuix）：终端类型与命令输入是页面状态。
             val activity = controller.get()
-            activity.findViewById<View>(R.id.btnShellPs).performClick()
-            activity.findViewById<View>(R.id.btnCommands).performClick()
+            activity.shell = "powershell"
+            CommandHints.show(activity, true) { line -> activity.commandLine = line }
+            shadowOf(Looper.getMainLooper()).idle()
             val dialog = ShadowDialog.getLatestDialog() as AlertDialog
             dialog.listView.performItemClick(null, 4, 4)
-            assertEquals("Get-Process", activity.findViewById<EditText>(R.id.etCmd).text.toString())
+            assertEquals("Get-Process", activity.commandLine)
             assertFalse(stub.requests.any { it.optString("cmd") == "exec" })
             controller.pause().stop().destroy()
         }
@@ -325,15 +335,19 @@ class ConvenienceUiTest {
     @Test fun desktopAppsActionsUseListedIdentityAndCloseNeedsConfirmation() {
         Stub().use { stub ->
             stub.install()
+            // 桌面程序页已迁移到 Compose（miuix）：按钮不再是 View，
+            // 这里驱动页面自身的操作入口，关闭仍需手机确认。
             val controller = Robolectric.buildActivity(AppsActivity::class.java).setup()
-            val root = controller.get().window.decorView
-            waitUntil { buttons(root).any { it.text == "切换到前台" && it.isEnabled } }
-            buttons(root).single { it.text == "切换到前台" }.performClick()
-            waitUntil { stub.requests.any { it.optString("cmd") == "apps" && it.optString("action") == "activate" } &&
-                buttons(root).any { it.text == "关闭" && it.isEnabled } }
+            val apps = controller.get()
+            val root = apps.window.decorView
+            waitUntil { apps.windows.isNotEmpty() && !apps.busy }
+            apps.apply(apps.windows.first(), "activate")
+            waitUntil { stub.requests.any { it.optString("cmd") == "apps" && it.optString("action") == "activate" } }
             val activation = stub.requests.single { it.optString("action") == "activate" }
             assertEquals("123", activation.getString("handle")); assertEquals(44, activation.getInt("pid"))
-            buttons(root).single { it.text == "关闭" }.performClick()
+            waitUntil { apps.windows.isNotEmpty() && !apps.busy }
+            apps.confirmClose(apps.windows.first())
+            shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action") == "close" })
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             waitUntil { stub.requests.any { it.optString("action") == "close" } }
@@ -346,9 +360,11 @@ class ConvenienceUiTest {
         RuntimeEnvironment.getApplication().getSharedPreferences("command_lists", 0).edit().clear().commit()
         Stub().use { stub ->
             stub.install()
+            // 命令列表页已迁移到 Compose（miuix）：命令编辑仍是系统弹窗，列表与计划用页面状态断言。
             val controller = Robolectric.buildActivity(CommandsActivity::class.java).setup()
-            val root = controller.get().window.decorView
-            buttons(root).single { it.text == "添加命令" }.performClick()
+            val page = controller.get()
+            val root = page.window.decorView
+            page.editCommand(null)
             val edit = ShadowDialog.getLatestDialog() as AlertDialog
             shadowOf(Looper.getMainLooper()).idle() // Install the dialog's OnShow save handler before clicking.
             fun inputs(view: View): List<EditText> = when (view) {
@@ -358,33 +374,32 @@ class ConvenienceUiTest {
             }
             val fields = inputs(edit.window!!.decorView)
             assertEquals(2, fields.size)
-            fields[0].setText("echo delayed"); fields[1].setText("2")
+            fields.single { it.contentDescription == "命令内容" }.setText("echo delayed")
+            fields.single { it.contentDescription == "等待秒数" }.setText("2")
             edit.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             assertFalse("Saved command editor must close: ${fields.map { it.error }}", edit.isShowing)
+            assertEquals(listOf("echo delayed"), page.steps.map { it.line })
+            page.submit()
+            assertFalse(stub.requests.any { it.optString("cmd") == "commands" && it.optString("action") == "add" })
             fun texts(view: View): List<String> = when (view) {
                 is ViewGroup -> (0 until view.childCount).flatMap { texts(view.getChildAt(it)) }
                 is android.widget.TextView -> listOf(view.text.toString())
                 else -> emptyList()
             }
-            assertTrue("Saved command must appear in list: ${texts(root)}", texts(root).contains("echo delayed"))
-            buttons(root).single { it.text == "启动当前命令列表" }.performClick()
-            assertFalse(stub.requests.any { it.optString("cmd") == "commands" && it.optString("action") == "add" })
             val confirmation = ShadowDialog.getLatestDialog() as AlertDialog
             assertTrue("Start confirmation must describe the saved command", texts(confirmation.window!!.decorView).any { it.contains("共 1 条") })
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             try {
                 waitUntil { stub.requests.any { it.optString("cmd") == "commands" && it.optString("action") == "add" } }
             } catch (failure: AssertionError) {
-                throw AssertionError("Command submission failed. UI=${texts(root)}; RPC=${stub.requests}", failure)
+                throw AssertionError("Command submission failed. UI=${page.steps.map { it.line }}; RPC=${stub.requests}", failure)
             }
             val item = stub.requests.single { it.optString("cmd") == "commands" && it.optString("action") == "add" }.getJSONArray("items").getJSONObject(0)
             assertEquals("echo delayed", item.getString("line")); assertEquals(2, item.getInt("delay"))
             render(root, "command-lists")
             controller.pause().stop().destroy()
             val reopened = Robolectric.buildActivity(CommandsActivity::class.java).setup()
-            fun hasText(view: View): Boolean = (view is android.widget.TextView && view.text.toString() == "echo delayed") ||
-                (view is ViewGroup && (0 until view.childCount).any { hasText(view.getChildAt(it)) })
-            assertTrue(hasText(reopened.get().window.decorView))
+            assertEquals(listOf("echo delayed"), reopened.get().steps.map { it.line })
             reopened.pause().stop().destroy()
         }
     }

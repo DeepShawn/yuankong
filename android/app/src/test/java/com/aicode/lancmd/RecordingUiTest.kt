@@ -7,7 +7,6 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewGroup
 import org.json.JSONArray
 import org.junit.Assert.*
 import org.junit.Test
@@ -18,6 +17,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.ConscryptMode
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowDialog
 import org.robolectric.shadows.ShadowSystemClock
 import java.io.File
 import java.time.Duration
@@ -68,7 +68,8 @@ class RecordingUiTest {
     @Test fun newPagesRenderAndKeepControlsReachable() {
         for ((type, name) in listOf(RecordingsActivity::class.java to "recordings", GesturesActivity::class.java to "gestures")) {
             val controller = Robolectric.buildActivity(type).setup()
-            val view = controller.get().window.decorView
+            val activity = controller.get()
+            val view = activity.window.decorView
             shadowOf(Looper.getMainLooper()).idle()
             view.measure(View.MeasureSpec.makeMeasureSpec(411, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(891, View.MeasureSpec.EXACTLY))
             view.layout(0, 0, 411, 891)
@@ -76,13 +77,27 @@ class RecordingUiTest {
             view.draw(Canvas(bitmap))
             val file = File("build/ui-previews/$name.png").apply { parentFile!!.mkdirs() }
             file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            assertTrue(findButtons(view).any { it.text.contains(if (name == "recordings") "开始录制" else "在电脑播放") })
+            assertTrue("页面应渲染出内容", file.length() > 3000)
+            if (name == "recordings") {
+                // 录制页已迁移到 Compose（miuix）：没有连接时列表为空，开始录制入口仍可弹出确认框。
+                val recordings = activity as RecordingsActivity
+                assertTrue(recordings.records.isEmpty())
+                recordings.confirmStart()
+                shadowOf(Looper.getMainLooper()).idle()
+                val confirmation = ShadowDialog.getLatestDialog()
+                assertTrue("开始录制入口应弹出确认框", confirmation != null && confirmation.isShowing)
+                confirmation.dismiss()
+            } else {
+                // 手势页已迁移到 Compose（miuix）：没有记录时回放入口保持不可用，
+                // 调用它也不会弹出确认框。
+                val gestures = activity as GesturesActivity
+                assertEquals(0, gestures.eventCount)
+                assertFalse(gestures.playing)
+                gestures.confirmPlay()
+                shadowOf(Looper.getMainLooper()).idle()
+                assertFalse("没有记录时不应开始回放", gestures.playing)
+            }
             controller.pause().stop().destroy()
         }
-    }
-    private fun findButtons(view: View): List<com.google.android.material.button.MaterialButton> = when (view) {
-        is com.google.android.material.button.MaterialButton -> listOf(view)
-        is ViewGroup -> (0 until view.childCount).flatMap { findButtons(view.getChildAt(it)) }
-        else -> emptyList()
     }
 }

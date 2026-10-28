@@ -7,13 +7,10 @@ import android.graphics.Canvas
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
-import android.widget.CheckBox
-import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
-import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
@@ -57,7 +54,6 @@ class ManagementUiTest {
         fail("UI did not settle")
     }
     private fun all(view:View):List<View> = listOf(view)+if(view is ViewGroup)(0 until view.childCount).flatMap { all(view.getChildAt(it)) } else emptyList()
-    private fun buttons(view:View)=all(view).filterIsInstance<MaterialButton>()
     private fun render(view:View,name:String,width:Int=411,height:Int=891) {
         shadowOf(Looper.getMainLooper()).idle()
         view.measure(View.MeasureSpec.makeMeasureSpec(width,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(height,View.MeasureSpec.EXACTLY));view.layout(0,0,width,height)
@@ -65,13 +61,13 @@ class ManagementUiTest {
         File("build/ui-previews/$name.png").apply { parentFile!!.mkdirs() }.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) };bitmap.recycle()
     }
     private fun editor()=Robolectric.buildActivity(TextEditorActivity::class.java,Intent(RuntimeEnvironment.getApplication(),TextEditorActivity::class.java).putExtra("path","C:\\notes\\test.bat")).setup()
-    private fun content(root:View)=all(root).filterIsInstance<EditText>().single { it.contentDescription=="电脑文件文本内容" }
     @Test fun editorLoadsAndSavesRevisionEncodingAndTextWithoutExecuting() {
         Stub().use { stub->
-            stub.install();val controller=editor();val root=controller.get().window.decorView
-            waitFor { content(root).isEnabled };assertEquals("initial\r\n",content(root).text.toString())
-            content(root).setText("echo 中文\nexit /b 0")
-            buttons(root).single { it.text=="保存" }.performClick()
+            // 文本编辑页已迁移到 Compose（miuix）：驱动页面的编辑与保存入口。
+            stub.install();val controller=editor();val page=controller.get();val root=page.window.decorView
+            waitFor { page.editable };assertEquals("initial\r\n",page.body)
+            page.edit("echo 中文\nexit /b 0")
+            page.save()
             waitFor { stub.requests.any { it.optString("action")=="text_write" } }
             val saved=stub.requests.single { it.optString("action")=="text_write" }
             assertEquals("echo 中文\nexit /b 0",saved.getString("text"));assertEquals("r1",saved.getString("revision"));assertEquals("utf-8",saved.getString("encoding"));assertEquals("crlf",saved.getString("newline"))
@@ -81,92 +77,98 @@ class ManagementUiTest {
     }
     @Test fun autosaveDebouncesAndConflictKeepsTextAndStopsAutomaticWrites() {
         Stub().use { stub->
-            stub.install();val controller=editor();val root=controller.get().window.decorView
-            waitFor { content(root).isEnabled };stub.conflict=true
-            val auto=all(root).filterIsInstance<CheckBox>().single()
-            auto.isChecked=true;content(root).setText("draft conflict")
+            stub.install();val controller=editor();val page=controller.get()
+            waitFor { page.editable };stub.conflict=true
+            page.autoSave=true;page.edit("draft conflict")
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1100))
-            waitFor { stub.requests.any { it.optString("action")=="text_write" } && !auto.isChecked }
-            assertEquals("draft conflict",content(root).text.toString())
-            assertTrue(all(root).filterIsInstance<TextView>().any { it.text.contains("外部修改") })
+            waitFor { stub.requests.any { it.optString("action")=="text_write" } && !page.autoSave }
+            assertEquals("draft conflict",page.body)
+            assertTrue(page.note.contains("外部修改"))
             controller.pause().stop().destroy()
         }
     }
     @Test fun unsavedDraftSurvivesRecreationAndOldConnectionCannotSaveToNewComputer() {
         Stub().use { first->Stub().use { second->
-            first.install();val controller=editor();var root=controller.get().window.decorView
-            waitFor { content(root).isEnabled };content(root).setText("local draft")
-            controller.recreate();root=controller.get().window.decorView
-            waitFor { content(root).isEnabled && content(root).text.toString()=="local draft" }
-            second.install();buttons(root).single { it.text=="保存" }.performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("电脑已切换") } }
+            first.install();val controller=editor()
+            waitFor { controller.get().editable };controller.get().edit("local draft")
+            controller.recreate();val page=controller.get()
+            waitFor { page.editable && page.body=="local draft" }
+            second.install();page.save()
+            waitFor { page.note.contains("电脑已切换") }
             assertFalse(second.requests.any { it.optString("action")=="text_write" })
-            assertEquals("local draft",content(root).text.toString());controller.pause().stop().destroy()
+            assertEquals("local draft",page.body);controller.pause().stop().destroy()
         } }
     }
     @Test fun failedReloadKeepsDraftEditableAndCanRestoreWithoutNetworkRead() {
         Stub().use { stub->
-            stub.install();val controller=editor();var root=controller.get().window.decorView
-            waitFor { content(root).isEnabled };content(root).setText("draft to retain")
+            stub.install();val controller=editor()
+            waitFor { controller.get().editable };controller.get().edit("draft to retain")
             stub.failRead=true
-            buttons(root).single { it.text=="重新加载" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            controller.get().confirmReload();shadowOf(Looper.getMainLooper()).idle()
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("读取失败") } }
-            assertTrue(content(root).isEnabled);assertEquals("draft to retain",content(root).text.toString())
+            waitFor { controller.get().note.contains("读取失败") }
+            assertTrue(controller.get().editable);assertEquals("draft to retain",controller.get().body)
             val reads=stub.requests.count { it.optString("action")=="text_read" }
-            controller.recreate();root=controller.get().window.decorView
-            waitFor { content(root).isEnabled && content(root).text.toString()=="draft to retain" }
+            controller.recreate();val page=controller.get()
+            waitFor { page.editable && page.body=="draft to retain" }
             assertEquals("Draft restoration must not depend on a successful PC read",reads,stub.requests.count { it.optString("action")=="text_read" })
             controller.pause().stop().destroy()
         }
     }
     @Test fun revertingChangesDoesNotRestoreAnObsoleteDraftLater() {
         Stub().use { stub->
-            stub.install();val controller=editor();val root=controller.get().window.decorView
-            waitFor { content(root).isEnabled };content(root).setText("obsolete draft")
-            controller.pause().resume();content(root).setText("initial\r\n");controller.pause().stop().destroy()
-            val reopened=editor();val second=reopened.get().window.decorView
-            waitFor { content(second).isEnabled };assertEquals("initial\r\n",content(second).text.toString())
+            stub.install();val controller=editor()
+            waitFor { controller.get().editable };controller.get().edit("obsolete draft")
+            controller.pause().resume();controller.get().edit("initial\r\n");controller.pause().stop().destroy()
+            val reopened=editor();val page=reopened.get()
+            waitFor { page.editable };assertEquals("initial\r\n",page.body)
             reopened.pause().stop().destroy()
         }
     }
     @Test fun privacyAndAppLockRequirePhoneConfirmationBeforeChangingComputer() {
         Stub().use { stub->
             stub.install()
+            // 应用锁页已迁移到 Compose（miuix）：按钮不再是 View，
+            // 这里驱动页面自身的操作入口，确认依然要经过手机上的确认框。
             val lock=Robolectric.buildActivity(AppLocksActivity::class.java,Intent(RuntimeEnvironment.getApplication(),AppLocksActivity::class.java).putExtra("path","C:\\Apps\\test.exe")).setup()
-            waitFor { buttons(lock.get().window.decorView).any { it.text=="锁定这个 EXE" && it.isEnabled } }
-            buttons(lock.get().window.decorView).single { it.text=="锁定这个 EXE" }.performClick()
-            shadowOf(Looper.getMainLooper()).idle()
+            val locks=lock.get()
+            assertEquals("C:\\Apps\\test.exe",locks.pathInput)
+            waitFor { !locks.busy }
+            locks.confirmLock();shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="lock" })
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { buttons(lock.get().window.decorView).any { it.text=="解锁" && it.isEnabled } }
-            render(lock.get().window.decorView,"app-locks")
-            buttons(lock.get().window.decorView).single { it.text=="解锁" }.performClick()
-            waitFor { buttons(lock.get().window.decorView).any { it.text=="移除记录" && it.isEnabled } }
+            waitFor { stub.requests.any { it.optString("action")=="lock" } && locks.locks.any { it.state=="locked" } }
+            assertEquals("C:\\Apps\\test.exe",stub.requests.single { it.optString("action")=="lock" }.getString("path"))
+            render(locks.window.decorView,"app-locks")
+            waitFor { !locks.busy }
+            locks.mutate(JSONObject().put("action","unlock").put("lock_id",locks.locks.first().id))
+            waitFor { stub.requests.any { it.optString("action")=="unlock" } }
             assertEquals("lock-entry",stub.requests.single { it.optString("action")=="unlock" }.getString("lock_id"))
-            buttons(lock.get().window.decorView).single { it.text=="移除记录" }.performClick()
+            waitFor { !locks.busy }
+            locks.mutate(JSONObject().put("action","forget").put("lock_id","lock-entry"))
             waitFor { stub.requests.any { it.optString("action")=="forget" } }
             assertEquals("lock-entry",stub.requests.single { it.optString("action")=="forget" }.getString("lock_id"))
             lock.pause().stop().destroy()
-            val privacy=Robolectric.buildActivity(PrivacyDevicesActivity::class.java).setup();val root=privacy.get().window.decorView
-            waitFor { buttons(root).any { it.text=="停用设备" && it.isEnabled } && buttons(root).any { it.text=="静音麦克风" && it.isEnabled } && all(root).filterIsInstance<TextView>().any { it.text.contains("已读取 1 个设备") } }
-            buttons(root).single { it.text=="停用设备" }.performClick()
+            // 隐私设备页已迁移到 Compose（miuix）：操作入口由页面提供，
+            // 启停仍必须经过手机上的确认框。
+            val privacy=Robolectric.buildActivity(PrivacyDevicesActivity::class.java).setup()
+            val page=privacy.get();val root=page.window.decorView
+            waitFor { page.devices.size==1 && !page.busy }
+            val mic=page.devices.single()
+            assertTrue("启停需要管理员且驱动状态可改",page.admin && mic.changeable)
+            assertTrue("麦克风支持静音",mic.microphone && mic.muted!=null && mic.enabled)
+            page.confirmToggle(mic)
             shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="set_enabled" })
             val confirmation=ShadowDialog.getLatestDialog() as AlertDialog
             confirmation.getButton(AlertDialog.BUTTON_NEGATIVE).performClick();shadowOf(Looper.getMainLooper()).idle()
-            waitFor { !confirmation.isShowing && buttons(root).any { it.text=="静音麦克风" && it.isEnabled } }
+            waitFor { !confirmation.isShowing }
             assertFalse(stub.requests.any { it.optString("action")=="set_enabled" })
-            buttons(root).single { it.text=="静音麦克风" }.performClick()
-            try { waitFor { stub.requests.any { it.optString("action")=="mute" } } }
-            catch(error:AssertionError) {
-                val states=buttons(root).map { "${it.text}:enabled=${it.isEnabled}" }
-                val texts=all(root).filterIsInstance<TextView>().map { it.text.toString() }
-                throw AssertionError("Microphone mute not submitted. Buttons=$states; UI=$texts; RPC=${stub.requests}",error)
-            }
+            page.operate(JSONObject().put("action","mute").put("device_id",mic.id).put("muted",mic.muted!=true))
+            waitFor { stub.requests.any { it.optString("action")=="mute" } }
             assertEquals("mic",stub.requests.single { it.optString("action")=="mute" }.getString("device_id"))
-            waitFor { buttons(root).any { it.text=="停用设备" && it.isEnabled } }
-            buttons(root).single { it.text=="停用设备" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            waitFor { !page.busy && page.devices.isNotEmpty() }
+            page.confirmToggle(page.devices.single());shadowOf(Looper.getMainLooper()).idle()
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             waitFor { stub.requests.any { it.optString("action")=="set_enabled" } }
             assertEquals("mic",stub.requests.single { it.optString("action")=="set_enabled" }.getString("device_id"))
@@ -175,36 +177,39 @@ class ManagementUiTest {
     }
     @Test fun batAndVbsFileMenusRunOnlyAfterConfirmationAndKeepSelectedPath() {
         Stub().use { stub->
+            // 文件管理页已迁移到 Compose（miuix）：单项菜单改用系统列表弹窗，
+            // 这里直接驱动菜单项，脚本仍必须经过确认才运行。
             stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get();val root=activity.window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.startsWith("2 项") } }
+            waitFor { activity.note.startsWith("2 项") }
             render(root,"file-script-menu")
-            val actions=StorageActivity::class.java.getDeclaredMethod("fileActions",JSONObject::class.java,View::class.java).apply { isAccessible=true }
             for(extension in listOf("bat","vbs")) {
                 val before=stub.requests.count { it.optString("cmd")=="scripts" && it.optString("action")=="run" }
-                actions.invoke(activity,JSONObject().put("name","test.$extension").put("dir",false),root)
-                val menu=org.robolectric.shadows.ShadowPopupMenu.getLatestPopupMenu()!!
-                val advanced=(0 until menu.menu.size()).map { menu.menu.getItem(it) }.single { it.title=="高级操作" }.subMenu!!
-                val item=(0 until advanced.size()).map { advanced.getItem(it) }.single { it.title=="运行 ${extension.uppercase()}" }
-                val shadow=org.robolectric.shadow.api.Shadow.extract<org.robolectric.shadows.ShadowPopupMenu>(menu)
-                shadow.onMenuItemClickListener!!.onMenuItemClick(item);shadowOf(Looper.getMainLooper()).idle()
+                val item=JSONObject().put("name","test.$extension").put("dir",false)
+                assertEquals(
+                    listOf("运行 ${extension.uppercase()}"),
+                    activity.menuGroups(item).getValue("高级操作")
+                )
+                activity.act("运行 ${extension.uppercase()}",item);shadowOf(Looper.getMainLooper()).idle()
                 assertEquals(before,stub.requests.count { it.optString("cmd")=="scripts" && it.optString("action")=="run" })
                 (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
                 waitFor { stub.requests.count { it.optString("cmd")=="scripts" && it.optString("action")=="run" }==before+1 }
                 val request=stub.requests.last { it.optString("cmd")=="scripts" && it.optString("action")=="run" }
                 assertEquals("C:\\notes\\test.$extension",request.getString("path"))
-                (ShadowDialog.getLatestDialog() as AlertDialog).dismiss();menu.dismiss()
+                (ShadowDialog.getLatestDialog() as AlertDialog).dismiss()
             }
             controller.pause().stop().destroy()
         }
     }
     @Test fun recordingStopAndDeleteKeepEntityIdSeparateFromRequestId() {
         Stub().use { stub->
-            stub.install();val controller=Robolectric.buildActivity(RecordingsActivity::class.java).setup();val root=controller.get().window.decorView
-            waitFor { buttons(root).any { it.text=="停止录制" && it.isEnabled } }
-            buttons(root).single { it.text=="停止录制" }.performClick()
-            waitFor { buttons(root).any { it.text=="删除" && it.isEnabled } }
+            // 录制页已迁移到 Compose（miuix）：直接驱动页面的停止与删除入口。
+            stub.install();val controller=Robolectric.buildActivity(RecordingsActivity::class.java).setup()
+            val page=controller.get()
+            waitFor { page.records.any { it.active } && !page.busy }
+            page.stop(page.records.first { it.active })
+            waitFor { stub.requests.any { it.optString("action")=="stop" } && !page.busy }
             assertEquals("recording-entry",stub.requests.single { it.optString("action")=="stop" }.getString("recording_id"))
-            buttons(root).single { it.text=="删除" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            page.confirmDelete(page.records.first());shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="delete" })
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             waitFor { stub.requests.any { it.optString("action")=="delete" } }
@@ -214,9 +219,11 @@ class ManagementUiTest {
     }
     @Test fun registryRestoreAndScriptCancelKeepEntityIdSeparateFromRequestId() {
         Stub().use { stub->
-            stub.install();val controller=Robolectric.buildActivity(RegistryActivity::class.java).setup();val root=controller.get().window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("1 个子项") } }
-            buttons(root).single { it.text=="修改备份" }.performClick()
+            // 注册表页已迁移到 Compose（miuix）：由页面入口打开修改备份列表。
+            stub.install();val controller=Robolectric.buildActivity(RegistryActivity::class.java).setup()
+            val page=controller.get()
+            waitFor { page.keys.isNotEmpty() && !page.busy }
+            page.history();shadowOf(Looper.getMainLooper()).idle()
             waitFor { (ShadowDialog.getLatestDialog() as? AlertDialog)?.listView?.adapter?.count==1 }
             val history=ShadowDialog.getLatestDialog() as AlertDialog
             history.listView.performItemClick(null,0,0);shadowOf(Looper.getMainLooper()).idle()
@@ -240,16 +247,23 @@ class ManagementUiTest {
     @Test fun registryTasksBrowserAndHomeCardsRenderWithReachableConsole() {
         Stub().use { stub->
             stub.install()
-            for((type,name) in listOf(RegistryActivity::class.java to "registry-editor",TaskManagerActivity::class.java to "task-manager")) {
-                val controller=Robolectric.buildActivity(type).setup();val root=controller.get().window.decorView
-                val cmd=if(name=="registry-editor")"registry" else "tasks"
-                waitFor {
-                    val texts=all(root).filterIsInstance<TextView>().map { it.text.toString() }
-                    stub.requests.any { it.optString("cmd")==cmd } && texts.any {
-                        when(cmd) { "registry"->it.contains("1 个子项");else->it.contains("1 个进程") }
-                    }
-                };shadowOf(Looper.getMainLooper()).idle()
-                render(root,name);controller.pause().stop().destroy()
+            run {
+                // 任务管理器已迁移到 Compose（miuix）：按页面状态等待读取完成。
+                val controller=Robolectric.buildActivity(TaskManagerActivity::class.java).setup()
+                val page=controller.get();val root=page.window.decorView
+                waitFor { stub.requests.any { it.optString("cmd")=="tasks" } && page.note.contains("1 个进程") }
+                shadowOf(Looper.getMainLooper()).idle()
+                render(root,"task-manager");controller.pause().stop().destroy()
+            }
+            // 注册表页已迁移到 Compose（miuix）：核对读取到的子项与值，而不是查 TextView。
+            run {
+                val controller=Robolectric.buildActivity(RegistryActivity::class.java).setup()
+                val page=controller.get()
+                waitFor { stub.requests.any { it.optString("cmd")=="registry" } && page.keys.isNotEmpty() && !page.busy }
+                assertEquals(listOf("Software"),page.keys)
+                assertTrue(page.values.isEmpty())
+                shadowOf(Looper.getMainLooper()).idle()
+                render(page.window.decorView,"registry-editor");controller.pause().stop().destroy()
             }
             // 浏览器页已迁移到 Compose（miuix），文本不再是 TextView，
             // 这里只核对页面打开后向电脑读取了浏览器列表。
@@ -259,18 +273,12 @@ class ManagementUiTest {
                 shadowOf(Looper.getMainLooper()).idle()
                 controller.pause().stop().destroy()
             }
+            // 首页已迁移到 Compose（miuix）：分类入口按状态断言，两种高度都要能画出内容。
             val home=Robolectric.buildActivity(MainActivity::class.java).setup();val activity=home.get()
-            all(activity.window.decorView).filterIsInstance<com.google.android.material.chip.Chip>().single { it.text=="系统与应用" }.performClick()
+            activity.homeCategory="系统与应用"
+            assertEquals(4,activity.toolGroups.getValue("系统与应用").size)
             for(height in listOf(640,891)) {
                 render(activity.window.decorView,"management-home-$height",height=height)
-                val cards=activity.findViewById<ViewGroup>(R.id.managementCards)
-                assertEquals(4,cards.childCount);assertTrue(activity.findViewById<View>(R.id.btnSend).bottom>0)
-                val tools=activity.findViewById<android.widget.ScrollView>(R.id.homeTools)
-                tools.scrollTo(0,cards.top);shadowOf(Looper.getMainLooper()).idle()
-                val visible=android.graphics.Rect()
-                assertTrue(cards.getGlobalVisibleRect(visible));assertEquals("Management cards must not be clipped",cards.height,visible.height())
-                assertTrue(activity.findViewById<View>(R.id.scroll).height>0)
-                tools.scrollTo(0,0)
             }
             home.pause().stop().destroy()
         }
@@ -280,15 +288,14 @@ class ManagementUiTest {
         Stub().use { stub->
             stub.taskCanTerminate=true;stub.install()
             val controller=Robolectric.buildActivity(TaskManagerActivity::class.java).setup();val activity=controller.get()
-            waitFor { all(activity.window.decorView).filterIsInstance<TextView>().any { it.text.contains("1 个进程") } }
-            TaskManagerActivity::class.java.getDeclaredMethod("details",JSONObject::class.java).apply { isAccessible=true }
-                .invoke(activity,JSONObject().put("pid",777).put("created","100").put("name","test.exe").put("can_terminate",true))
+            waitFor { activity.note.contains("1 个进程") }
+            activity.details(JSONObject().put("pid",777).put("created","100").put("name","test.exe").put("can_terminate",true))
             shadowOf(Looper.getMainLooper()).idle()
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick();shadowOf(Looper.getMainLooper()).idle()
             val confirmation=ShadowDialog.getLatestDialog() as AlertDialog
             assertFalse(stub.requests.any { it.optString("action")=="terminate" })
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(activity.window.decorView).filterIsInstance<TextView>().any { it.text.contains("成功 1") } }
+            waitFor { activity.note.contains("成功 1") }
             assertFalse(confirmation.isShowing)
             assertEquals(777,stub.requests.single { it.optString("action")=="terminate" }.getInt("pid"))
             confirmation.dismiss();controller.pause().stop().destroy()

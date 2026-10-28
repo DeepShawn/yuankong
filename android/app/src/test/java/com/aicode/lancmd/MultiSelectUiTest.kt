@@ -6,12 +6,9 @@ import android.graphics.Canvas
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
-import android.widget.EditText
-import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
-import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -45,8 +42,6 @@ class MultiSelectUiTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
     private fun all(v:View):List<View> = listOf(v)+if(v is ViewGroup)(0 until v.childCount).flatMap { all(v.getChildAt(it)) } else emptyList()
-    private fun texts(v:View)=all(v).filterIsInstance<TextView>().map { it.text.toString() }
-    private fun button(v:View,name:String)=all(v).filterIsInstance<MaterialButton>().single { it.text==name }
     private fun latest()=ShadowDialog.getLatestDialog() as AlertDialog
     private fun waitFor(check:()->Boolean) {
         val end=System.currentTimeMillis()+8000
@@ -60,20 +55,22 @@ class MultiSelectUiTest {
     }
     @Test fun fileSelectionSurvivesFilteringAndCopyMoveUseFrozenVersions() {
         Stub().use { stub->
+            // 文件管理页已迁移到 Compose（miuix）：搜索与多选是页面状态，
+            // 筛选不会丢掉搜索范围外的已选项，批量操作仍用冻结的文件版本。
             stub.install();val c=Robolectric.buildActivity(StorageActivity::class.java).setup();val a=c.get();val root=a.window.decorView
-            waitFor { texts(root).any { it.startsWith("2 项") } }
-            button(root,"占位文件").performClick()
+            waitFor { a.note.startsWith("2 项") }
+            a.openPlaceholder()
             assertEquals(PlaceholderFilesActivity::class.java.name,shadowOf(a).nextStartedActivity.component!!.className)
-            button(root,"多选").performClick();button(root,"全选结果").performClick()
-            val search=all(root).filterIsInstance<EditText>().single { it.contentDescription=="搜索文件名" }
-            search.setText("a.txt");assertTrue(texts(root).any { it.startsWith("已选 2 项") })
+            a.toggleMulti();a.chooseAll(false)
+            a.query="a.txt";a.search()
+            assertTrue(a.selectionSummary.startsWith("已选 2 项"))
             preview(root,"file-multiselect")
             for((label,operation) in listOf("复制" to "copy","移动" to "move")) {
-                button(root,label).performClick()
+                a.beginBatch(operation)
                 waitFor { latest().getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled==true }
                 latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick();shadowOf(Looper.getMainLooper()).idle()
                 val confirmation=latest();confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-                waitFor { stub.requests.any { it.optString("action")=="create" && it.optString("operation")==operation } && texts(root).any { it.startsWith("$label：成功 1，失败 1") } && button(root,"退出多选").isEnabled }
+                waitFor { stub.requests.any { it.optString("action")=="create" && it.optString("operation")==operation } && a.note.startsWith("$label：成功 1，失败 1") && !a.operationsBusy }
                 assertFalse(confirmation.isShowing)
                 val q=stub.requests.last { it.optString("action")=="create" }
                 assertEquals(operation,q.getString("operation"));assertEquals("C:\\data",q.getString("destination"))
@@ -81,59 +78,76 @@ class MultiSelectUiTest {
                 assertEquals(setOf("a".repeat(64),"b".repeat(64)),(0..1).map { q.getJSONArray("items").getJSONObject(it).getString("file_id") }.toSet())
                 preview(root,"file-batch-result")
                 preview(root,"file-batch-small",640)
-                assertTrue("At least one file row must remain reachable",all(root).filterIsInstance<androidx.recyclerview.widget.RecyclerView>().single().height>=72)
-                search.setText("");button(root,"全选结果").performClick()
+                assertTrue("至少要有一个文件条目可见",a.visible.isNotEmpty())
+                a.query="";a.search();a.chooseAll(false)
             }
-            button(root,"反选").performClick();assertTrue(texts(root).any { it.startsWith("已选 0 项") })
+            a.chooseAll(true);assertTrue(a.selectionSummary.startsWith("已选 0 项"))
             c.pause().stop().destroy()
         }
     }
     @Test fun processesSkipProtectedContinueAfterFailureAndReportAtTop() {
         Stub().use { stub->
-            stub.install();val c=Robolectric.buildActivity(TaskManagerActivity::class.java).setup();val root=c.get().window.decorView
-            waitFor { texts(root).any { it.contains("4 个进程") } }
-            button(root,"多选").performClick();button(root,"全选结果").performClick()
+            // 任务管理器已迁移到 Compose（miuix）：驱动页面的多选与批量结束入口。
+            stub.install();val c=Robolectric.buildActivity(TaskManagerActivity::class.java).setup()
+            val page=c.get();val root=page.window.decorView
+            waitFor { page.note.contains("4 个进程") }
+            page.toggleMulti();page.chooseAll()
             preview(root,"process-multiselect")
-            button(root,"结束所选").performClick();shadowOf(Looper.getMainLooper()).idle();val confirmation=latest()
+            page.confirmTerminateMany(page.shown.map { JSONObject(it.toString()) })
+            shadowOf(Looper.getMainLooper()).idle();val confirmation=latest()
             assertFalse(stub.requests.any { it.optString("action")=="terminate" })
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { texts(root).any { it.contains("成功 2，失败 1，跳过/未执行 1") } }
+            waitFor { page.note.contains("成功 2，失败 1，跳过/未执行 1") }
             assertFalse(confirmation.isShowing)
             val ended=stub.requests.filter { it.optString("action")=="terminate" }
             assertEquals(listOf(1,2,3),ended.map { it.getInt("pid") })
             assertEquals(listOf("101","102","103"),ended.map { it.getString("created") })
-            assertTrue(texts(root).any { it.contains("受保护或权限不足") && it.contains("protected.exe") })
+            assertTrue(page.results.any { it.contains("受保护或权限不足") && it.contains("protected.exe") })
             preview(root,"process-batch-result");c.pause().stop().destroy()
         }
     }
     @Test fun processRefreshDropsSelectionWhenPidIsReused() {
         Stub().use { stub->
-            stub.install();val c=Robolectric.buildActivity(TaskManagerActivity::class.java).setup();val root=c.get().window.decorView
-            waitFor { texts(root).any { it.contains("4 个进程") } }
-            button(root,"多选").performClick();button(root,"全选结果").performClick();stub.reused=true
-            button(root,"刷新").performClick()
-            waitFor { texts(root).any { it.startsWith("已选 3 项") } }
+            stub.install();val c=Robolectric.buildActivity(TaskManagerActivity::class.java).setup();val page=c.get()
+            waitFor { page.note.contains("4 个进程") }
+            page.toggleMulti();page.chooseAll();stub.reused=true
+            page.refresh()
+            waitFor { page.selectionSummary.startsWith("已选 3 项") }
             c.pause().stop().destroy()
         }
     }
     @Test fun oldReceiverDisablesForceDisconnectWithCompleteUpgradeInstructions() {
         Stub().use { stub->
-            stub.version="2.4.0";stub.install();val c=Robolectric.buildActivity(DevicesActivity::class.java).setup();val root=c.get().window.decorView
-            waitFor { texts(root).any { it.contains("替换完整 Windows 包") } }
-            assertFalse(button(root,"强制断开 Test USB").isEnabled)
-            assertTrue(button(root,"安全弹出 Test USB").isEnabled)
+            // 设备页已迁移到 Compose（miuix）：按页面状态断言强制断开不可用、安全弹出仍可用。
+            stub.version="2.4.0";stub.install();val c=Robolectric.buildActivity(DevicesActivity::class.java).setup()
+            val page=c.get()
+            waitFor { page.devices.isNotEmpty() && !page.busy }
+            assertFalse("旧接收端不应支持强制断开",page.connectionSupported)
+            assertTrue(usbUpgradeMessage(stub.version).contains("替换完整 Windows 包"))
+            assertTrue(page.admin)
+            val device=page.devices.single { it.name=="Test USB" }
+            assertTrue("安全弹出仍应可用",device.ejectable&&!device.protectedDisk)
             assertFalse(stub.requests.any { it.optString("action")=="force_disconnect" })
             c.pause().stop().destroy()
         }
     }
     @Test fun mismatchedReceiverModulesTranslateInvalidActionWithoutRetrying() {
         Stub().use { stub->
-            stub.install();val c=Robolectric.buildActivity(DevicesActivity::class.java).setup();val root=c.get().window.decorView
-            waitFor { all(root).filterIsInstance<MaterialButton>().any { it.text=="强制断开 Test USB" && it.isEnabled } }
-            button(root,"强制断开 Test USB").performClick();shadowOf(Looper.getMainLooper()).idle();val confirmation=latest()
+            // 设备页已迁移到 Compose（miuix）：经页面确认框触发强制断开，断言不重试且入口随后关闭。
+            stub.install();val c=Robolectric.buildActivity(DevicesActivity::class.java).setup()
+            val page=c.get()
+            waitFor { page.devices.isNotEmpty() && !page.busy && page.connectionSupported }
+            val device=page.devices.single { it.name=="Test USB" }
+            page.confirm(
+                "强制断开 ${device.name}？","测试确认",
+                JSONObject().put("action","force_disconnect").put("device_id",device.id)
+                    .put("confirm_data_loss",true)
+            )
+            shadowOf(Looper.getMainLooper()).idle();val confirmation=latest()
+            assertFalse(stub.requests.any { it.optString("action")=="force_disconnect" })
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { texts(root).any { it.contains("替换完整 Windows 包") } }
-            assertFalse(confirmation.isShowing);assertFalse(button(root,"强制断开 Test USB").isEnabled)
+            waitFor { !page.busy && !page.connectionSupported }
+            assertFalse(confirmation.isShowing)
             assertEquals(1,stub.requests.count { it.optString("action")=="force_disconnect" })
             c.pause().stop().destroy()
         }

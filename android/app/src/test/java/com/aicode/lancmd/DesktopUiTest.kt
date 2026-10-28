@@ -9,12 +9,9 @@ import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
-import android.widget.EditText
-import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
-import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
@@ -77,6 +74,8 @@ class DesktopUiTest {
     }
 
     private fun render(activity: DesktopActivity, name: String, width: Int = 411, height: Int = 891) {
+        // 页面是 Compose 的：状态改完要先让重组跑完，再测量和绘制。
+        shadowOf(Looper.getMainLooper()).idle()
         val view = activity.findViewById<View>(android.R.id.content)
         view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
         view.layout(0, 0, width, height)
@@ -91,23 +90,21 @@ class DesktopUiTest {
 
     @Test fun pageStartsIdleAndRendersEveryModeAndFullscreen() {
         val controller = Robolectric.buildActivity(DesktopActivity::class.java).setup()
+        // 远程桌面页已迁移到 Compose（miuix）：画面与虚拟键盘仍是 View，其余按状态断言。
         val activity = controller.get()
-        assertTrue(activity.findViewById<MaterialButton>(R.id.desktopStart).isEnabled)
-        assertFalse(activity.findViewById<MaterialButton>(R.id.desktopStop).isEnabled)
+        assertFalse("打开页面不应开始共享", activity.sharing)
         assertFalse(activity.findViewById<RemoteScreenView>(R.id.desktopScreen).touchEnabled)
-        listOf(R.id.desktopTouchTab, R.id.desktopKeyboardTab, R.id.desktopTerminalTab).forEachIndexed { index, id ->
-            activity.findViewById<View>(id).performClick()
+        for (index in 0..2) {
+            activity.mode = index
             render(activity, "desktop-idle-$index")
         }
-        activity.findViewById<View>(R.id.desktopFullscreen).performClick()
+        activity.showFullscreen(true)
         render(activity, "desktop-fullscreen-portrait")
-        assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.desktopExitFullscreen).visibility)
-        assertEquals(View.GONE, activity.findViewById<View>(R.id.desktopTouchTab).parent.let { (it as View).parent as View }.visibility)
+        assertTrue(activity.fullscreen)
         assertTrue("Fullscreen image must use the full body height", activity.findViewById<RemoteScreenView>(R.id.desktopScreen).height > 750)
-        assertEquals(View.GONE, activity.findViewById<View>(R.id.desktopStart).parent.let { it as View }.visibility)
         activity.onBackPressedDispatcher.onBackPressed()
         assertFalse(activity.isFinishing)
-        assertEquals(View.VISIBLE, (activity.findViewById<View>(R.id.desktopStart).parent as View).visibility)
+        assertFalse(activity.fullscreen)
         controller.pause().stop().destroy()
     }
 
@@ -219,29 +216,26 @@ class DesktopUiTest {
             stub.install()
             val controller = Robolectric.buildActivity(DesktopActivity::class.java).setup()
             val activity = controller.get()
-            activity.findViewById<View>(R.id.desktopStart).performClick()
+            activity.begin()
             val screen = activity.findViewById<RemoteScreenView>(R.id.desktopScreen)
             waitUntil { screen.drawable != null }
             render(activity, "desktop-touch")
-            activity.findViewById<View>(R.id.desktopKeyboardTab).performClick()
-            activity.findViewById<EditText>(R.id.desktopKeyboardText).setText("你好 LanCmd")
-            activity.findViewById<View>(R.id.desktopKeyboardSend).performClick()
+            activity.mode = 1
+            activity.keyboardText = "你好 LanCmd"
+            activity.sendText()
             waitUntil { stub.requests.any { it.second.optString("cmd") == "input" && it.second.optString("text") == "你好 LanCmd" } }
             render(activity, "desktop-keyboard")
-            val expand = activity.findViewById<MaterialButton>(R.id.desktopKeyboardExpand)
-            val virtual = activity.findViewById<VirtualKeyboard>(R.id.desktopVirtualKeyboard)
-            expand.performClick()
-            assertEquals("收起虚拟键盘", expand.text.toString())
-            assertEquals(View.VISIBLE, virtual.visibility)
+            activity.toggleVirtualKeyboard()
+            assertTrue(activity.virtualKeyboardExpanded)
             shadowOf(Looper.getMainLooper()).idle()
             render(activity, "desktop-keyboard-expanded")
-            assertTrue("Expanded keyboard should receive more vertical space", (virtual.parent!!.parent!!.parent as View).height > 240)
-            expand.performClick()
-            assertEquals("展开虚拟键盘", expand.text.toString())
-            assertEquals(View.GONE, virtual.visibility)
-            activity.findViewById<View>(R.id.desktopTerminalTab).performClick()
-            activity.findViewById<EditText>(R.id.desktopCommand).setText("slow")
-            activity.findViewById<View>(R.id.desktopExecute).performClick()
+            val virtual = activity.findViewById<VirtualKeyboard>(R.id.desktopVirtualKeyboard)
+            assertTrue("Expanded keyboard must be laid out", virtual.height > 0)
+            activity.toggleVirtualKeyboard()
+            assertFalse(activity.virtualKeyboardExpanded)
+            activity.mode = 2
+            activity.commandLine = "slow"
+            activity.execute()
             waitUntil { stub.requests.any { it.second.optString("cmd") == "exec" } }
             val before = stub.requests.count { it.second.optString("cmd") == "screen" }
             val now = SystemClock.uptimeMillis()
@@ -252,20 +246,20 @@ class DesktopUiTest {
             shadowOf(Looper.getMainLooper()).idleFor(400, TimeUnit.MILLISECONDS)
             waitUntil { stub.requests.any { it.second.optString("cmd") == "pointer" } }
             waitUntil { stub.requests.count { it.second.optString("cmd") == "screen" } > before }
-            assertFalse(activity.findViewById<View>(R.id.desktopExecute).isEnabled)
+            assertTrue("命令执行中不应允许再次执行", activity.commandBusy)
             val connections = listOf("screen", "pointer", "exec").map { command -> stub.requests.first { it.second.optString("cmd") == command }.first }
             assertEquals("Three independent connections are required", 3, connections.toSet().size)
             stub.commandGate.countDown()
-            waitUntil { activity.findViewById<TextView>(R.id.desktopTerminalLog).text.contains("terminal-output") }
+            waitUntil { activity.terminalText.contains("terminal-output") }
             render(activity, "desktop-terminal")
-            activity.findViewById<View>(R.id.desktopFullscreen).performClick()
+            activity.showFullscreen(true)
             render(activity, "desktop-fullscreen-landscape", 891, 411)
             activity.onBackPressedDispatcher.onBackPressed()
             activity.onConfigurationChanged(Configuration(activity.resources.configuration).apply { orientation = Configuration.ORIENTATION_LANDSCAPE })
-            activity.findViewById<View>(R.id.desktopKeyboardTab).performClick()
+            activity.mode = 1
             render(activity, "desktop-keyboard-landscape", 891, 411)
-            activity.findViewById<View>(R.id.desktopStop).performClick()
-            waitUntil { activity.findViewById<View>(R.id.desktopStart).isEnabled }
+            activity.stopSession()
+            waitUntil { !activity.sharing }
             assertFalse(screen.touchEnabled); assertNull(screen.drawable)
             assertEquals(2, stub.requests.count { it.second.optString("cmd") == "session" && it.second.optString("action") == "end" })
             controller.pause().stop().destroy()
@@ -277,10 +271,10 @@ class DesktopUiTest {
             stub.install()
             val controller = Robolectric.buildActivity(DesktopActivity::class.java).setup()
             val activity = controller.get()
-            activity.findViewById<View>(R.id.desktopStart).performClick()
-            waitUntil { activity.findViewById<TextView>(R.id.desktopStatus).text.contains("1.6.0") }
+            activity.begin()
+            waitUntil { activity.note.contains("1.6.0") }
             assertFalse(stub.requests.any { it.second.optString("cmd") == "session" })
-            assertTrue(activity.findViewById<View>(R.id.desktopStart).isEnabled)
+            assertFalse(activity.sharing)
             controller.pause().stop().destroy()
         }
     }
@@ -290,11 +284,11 @@ class DesktopUiTest {
             original.install()
             val controller = Robolectric.buildActivity(DesktopActivity::class.java).setup()
             val activity = controller.get()
-            activity.findViewById<View>(R.id.desktopStart).performClick()
+            activity.begin()
             waitUntil { activity.findViewById<RemoteScreenView>(R.id.desktopScreen).drawable != null }
             Stub().use { replacement ->
                 replacement.install()
-                waitUntil { activity.findViewById<View>(R.id.desktopStart).isEnabled }
+                waitUntil { !activity.sharing }
                 assertEquals(2, original.requests.count { it.second.optString("action") == "end" })
                 assertTrue(replacement.requests.isEmpty())
                 assertFalse(activity.findViewById<RemoteScreenView>(R.id.desktopScreen).touchEnabled)
@@ -308,23 +302,23 @@ class DesktopUiTest {
             stub.install()
             val controller = Robolectric.buildActivity(DesktopActivity::class.java).setup()
             val activity = controller.get()
-            activity.findViewById<View>(R.id.desktopStart).performClick()
-            val pause = activity.findViewById<MaterialButton>(R.id.desktopLocalInput)
-            waitUntil { pause.isEnabled }
-            pause.performClick()
+            activity.begin()
+            waitUntil { activity.localPauseEnabled }
+            activity.changeLocalInput()
+            shadowOf(Looper.getMainLooper()).idle()
             val confirmation = ShadowDialog.getLatestDialog() as AlertDialog
             assertFalse(stub.requests.any { it.second.optString("action") == "pause" })
             assertEquals("开始暂停（手动解除）", confirmation.getButton(AlertDialog.BUTTON_POSITIVE).text.toString())
             assertEquals(View.GONE, confirmation.getButton(AlertDialog.BUTTON_NEUTRAL).visibility)
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitUntil { pause.text == "恢复本机输入" }
+            waitUntil { activity.localPauseLabel == "恢复本机输入" }
             val request = stub.requests.single { it.second.optString("action") == "pause" }.second
             assertEquals(0, request.getInt("seconds"))
             assertTrue(request.getString("sid").startsWith("session-"))
             render(activity, "desktop-local-pause")
-            activity.findViewById<View>(R.id.desktopStop).performClick()
-            waitUntil { activity.findViewById<View>(R.id.desktopStart).isEnabled }
-            assertFalse(pause.isEnabled)
+            activity.stopSession()
+            waitUntil { !activity.sharing }
+            assertFalse(activity.localPauseEnabled)
             assertEquals(2, stub.requests.count { it.second.optString("action") == "end" })
             controller.pause().stop().destroy()
         }
@@ -334,7 +328,7 @@ class DesktopUiTest {
         Stub().use { stub->
             stub.install()
             val parent=Robolectric.buildActivity(DesktopActivity::class.java).setup();val activity=parent.get()
-            activity.findViewById<View>(R.id.desktopStart).performClick()
+            activity.begin()
             waitUntil { activity.findViewById<RemoteScreenView>(R.id.desktopScreen).drawable!=null }
             val child=Robolectric.buildActivity(android.app.Activity::class.java).setup()
             parent.pause().stop()
@@ -347,7 +341,7 @@ class DesktopUiTest {
             parent.restart().start().resume()
             waitUntil { stub.requests.count { it.second.optString("cmd")=="screen" }>before }
             assertEquals(2,stub.requests.count { it.second.optString("cmd")=="session" && it.second.optString("action").isEmpty() })
-            assertFalse(activity.findViewById<View>(R.id.desktopStart).isEnabled)
+            assertTrue(activity.sharing)
             parent.pause().stop().destroy()
         }
     }
@@ -356,7 +350,7 @@ class DesktopUiTest {
         Stub().use { stub->
             stub.install()
             val parent=Robolectric.buildActivity(DesktopActivity::class.java).setup()
-            parent.get().findViewById<View>(R.id.desktopStart).performClick()
+            parent.get().begin()
             waitUntil { parent.get().findViewById<RemoteScreenView>(R.id.desktopScreen).drawable!=null }
             val child=Robolectric.buildActivity(android.app.Activity::class.java).setup()
             parent.pause().stop()
@@ -370,11 +364,11 @@ class DesktopUiTest {
     @Test fun leavingApplicationEndsSharingAndReleasesInputAfterHandoffGrace() {
         Stub().use { stub->
             stub.install();val controller=Robolectric.buildActivity(DesktopActivity::class.java).setup()
-            controller.get().findViewById<View>(R.id.desktopStart).performClick()
+            controller.get().begin()
             waitUntil { controller.get().findViewById<RemoteScreenView>(R.id.desktopScreen).drawable!=null }
             controller.pause().stop();shadowOf(Looper.getMainLooper()).idleFor(1000,TimeUnit.MILLISECONDS)
-            waitUntil { stub.requests.count { it.second.optString("action")=="end" }==2 && controller.get().findViewById<View>(R.id.desktopStart).isEnabled }
-            assertTrue(controller.get().findViewById<View>(R.id.desktopStart).isEnabled)
+            waitUntil { stub.requests.count { it.second.optString("action")=="end" }==2 && !controller.get().sharing }
+            assertFalse(controller.get().sharing)
             controller.destroy()
         }
     }

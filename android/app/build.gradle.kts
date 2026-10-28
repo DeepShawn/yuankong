@@ -21,8 +21,8 @@ android {
         applicationId = "com.aicode.lancmd"
         minSdk = 24
         targetSdk = 36
-        versionCode = 38
-        versionName = "3.2.2"
+        versionCode = 39
+        versionName = "3.3.0"
 
         ndk {
             // 目标机型为 arm64-v8a；当前无 JNI 代码，APK 在任意 ABI 上都能装
@@ -54,6 +54,14 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            // 逐个打印测试的开始与结果：界面迁移期间，一旦某个页面的布局测量
+            // 不收敛，测试进程会挂住而不是失败，日志里最后一个 STARTED 就是它。
+            all {
+                it.testLogging {
+                    events("started", "passed", "failed", "skipped")
+                    showStandardStreams = false
+                }
+            }
         }
     }
 

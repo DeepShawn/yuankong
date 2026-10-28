@@ -7,12 +7,9 @@ import android.graphics.Canvas
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
-import android.widget.EditText
-import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
-import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
@@ -55,7 +52,6 @@ class PlaceholderUiTest {
         fail("UI did not settle")
     }
     private fun all(view:View):List<View> = listOf(view)+if(view is ViewGroup)(0 until view.childCount).flatMap { all(view.getChildAt(it)) } else emptyList()
-    private fun buttons(root:View)=all(root).filterIsInstance<MaterialButton>()
     private fun latest()=ShadowDialog.getLatestDialog() as AlertDialog
     private fun choose(index:Int) { latest().listView.performItemClick(null,index,index.toLong());shadowOf(Looper.getMainLooper()).idle() }
     private fun render(view:View,name:String) {
@@ -76,23 +72,24 @@ class PlaceholderUiTest {
         Stub().use { stub->
             stub.install()
             val controller=Robolectric.buildActivity(PlaceholderFilesActivity::class.java,Intent(RuntimeEnvironment.getApplication(),PlaceholderFilesActivity::class.java).putExtra("directory","E:\\")).setup()
-            val root=controller.get().window.decorView
-            waitFor { stub.requests.any { it.optString("cmd")=="placeholders" } && buttons(root).single { it.text=="创建占位文件" }.isEnabled }
-            val size=all(root).filterIsInstance<EditText>().single { it.contentDescription=="占位文件大小 GB" };size.setText("500")
-            buttons(root).single { it.text=="创建占位文件" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            // 占位文件页已迁移到 Compose（miuix）：驱动页面入口，按任务状态断言。
+            val page=controller.get();val root=page.window.decorView
+            waitFor { stub.requests.any { it.optString("cmd")=="placeholders" } && !page.busy }
+            page.sizeText="500"
+            page.confirmCreate();shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="create" })
             latest().getButton(AlertDialog.BUTTON_NEGATIVE).performClick();shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="create" })
-            buttons(root).single { it.text=="创建占位文件" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            page.confirmCreate();shadowOf(Looper.getMainLooper()).idle()
             latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { buttons(root).any { it.text=="取消创建" } && buttons(root).single { it.text=="刷新占位任务" }.isEnabled }
+            waitFor { page.items.any { it.canCancel } && !page.busy }
             val request=stub.requests.single { it.optString("action")=="create" }
             assertEquals(500_000_000_000L,request.getLong("size"));assertEquals("E:\\LanCmd-placeholder.dat",request.getString("path"))
             assertEquals("stable",request.getString("mode"))
-            assertTrue(all(root).filterIsInstance<android.widget.ProgressBar>().any { it.isIndeterminate })
+            assertNull("正在检查阶段的进度未知",page.items.single().progress)
             render(root,"placeholder-files")
-            buttons(root).single { it.text=="取消创建" }.performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="已取消并清理" } }
+            page.cancel(page.items.single { it.canCancel })
+            waitFor { page.items.any { it.title=="已取消并清理" } }
             assertEquals("placeholder-job",stub.requests.single { it.optString("action")=="cancel" }.getString("job_id"))
             controller.pause().stop().destroy()
         }
@@ -100,12 +97,11 @@ class PlaceholderUiTest {
     @Test fun fastModeSurvivesRecreationAndIsSentToReceiver() {
         Stub().use { stub->
             stub.install();val controller=Robolectric.buildActivity(PlaceholderFilesActivity::class.java,Intent(RuntimeEnvironment.getApplication(),PlaceholderFilesActivity::class.java).putExtra("directory","E:\\")).setup()
-            var root=controller.get().window.decorView
-            all(root).filterIsInstance<android.widget.Spinner>().single { it.contentDescription=="占位文件生成模式" }.setSelection(1)
-            controller.recreate();root=controller.get().window.decorView
-            assertEquals(1,all(root).filterIsInstance<android.widget.Spinner>().single { it.contentDescription=="占位文件生成模式" }.selectedItemPosition)
-            waitFor { buttons(root).single { it.text=="创建占位文件" }.isEnabled }
-            buttons(root).single { it.text=="创建占位文件" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            controller.get().modeIndex=1
+            controller.recreate();val page=controller.get()
+            assertEquals(1,page.modeIndex)
+            waitFor { !page.busy }
+            page.confirmCreate();shadowOf(Looper.getMainLooper()).idle()
             latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             waitFor { stub.requests.any { it.optString("action")=="create" } }
             assertEquals("fast",stub.requests.single { it.optString("action")=="create" }.getString("mode"))
@@ -117,11 +113,11 @@ class PlaceholderUiTest {
         Stub().use { stub->
             stub.supportsModes=false;stub.install()
             val controller=Robolectric.buildActivity(PlaceholderFilesActivity::class.java,Intent(RuntimeEnvironment.getApplication(),PlaceholderFilesActivity::class.java).putExtra("directory","E:\\")).setup()
-            val root=controller.get().window.decorView
-            waitFor { buttons(root).single { it.text=="创建占位文件" }.isEnabled }
-            buttons(root).single { it.text=="创建占位文件" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            val page=controller.get()
+            waitFor { !page.busy }
+            page.confirmCreate();shadowOf(Looper.getMainLooper()).idle()
             latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("旧版不支持稳定模式") } }
+            waitFor { page.note.contains("旧版不支持稳定模式") }
             assertFalse(stub.requests.any { it.optString("action")=="create" })
             controller.pause().stop().destroy()
         }
@@ -131,27 +127,30 @@ class PlaceholderUiTest {
         Stub().use { stub->
             stub.jobState="checking";stub.slowCancel=true;stub.install()
             val controller=Robolectric.buildActivity(PlaceholderFilesActivity::class.java).setup()
-            val root=controller.get().window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="正在检查目录与磁盘容量" } && buttons(root).single { it.text=="刷新占位任务" }.isEnabled }
-            buttons(root).single { it.text=="取消创建" }.performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="正在取消，等待磁盘返回并清理" } && buttons(root).single { it.text=="刷新占位任务" }.isEnabled }
-            assertFalse(buttons(root).any { it.text=="在文件管理定位" || it.text=="取消创建" })
-            assertFalse(all(root).filterIsInstance<TextView>().any { it.text=="已取消并清理" })
-            stub.jobState="cleaning";buttons(root).single { it.text=="刷新占位任务" }.performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="正在关闭文件并清理" } && buttons(root).single { it.text=="刷新占位任务" }.isEnabled }
-            stub.jobState="cancelled";buttons(root).single { it.text=="刷新占位任务" }.performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="已取消并清理" } }
-            assertTrue(buttons(root).any { it.text=="在文件管理定位" })
+            val page=controller.get()
+            waitFor { page.items.any { it.title=="正在检查目录与磁盘容量" } && !page.busy }
+            page.cancel(page.items.single { it.canCancel })
+            waitFor { page.items.any { it.title=="正在取消，等待磁盘返回并清理" } && !page.busy }
+            val pending=page.items.single()
+            assertFalse("取消期间既不能再取消也不能定位",pending.canCancel || !pending.active)
+            stub.jobState="cleaning";page.refreshJobs()
+            waitFor { page.items.any { it.title=="正在关闭文件并清理" } && !page.busy }
+            stub.jobState="cancelled";page.refreshJobs()
+            waitFor { page.items.any { it.title=="已取消并清理" } }
+            val done=page.items.single()
+            assertFalse(done.active);assertFalse(done.canCancel)
             controller.pause().stop().destroy()
         }
     }
 
     @Test fun fileManagerOpensPlaceholderPageAndShowsHiddenFiles() {
         Stub().use { stub->
-            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get();val root=activity.window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="reserve.dat" } }
-            assertTrue(all(root).filterIsInstance<TextView>().any { it.text.contains("隐藏") && it.text.contains("系统") })
-            buttons(root).single { it.text=="占位文件" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            // 文件管理页已迁移到 Compose（miuix）：按页面状态断言隐藏 / 系统标记。
+            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get()
+            waitFor { activity.visible.any { it.optString("name")=="reserve.dat" } }
+            val reserve=activity.visible.single { it.optString("name")=="reserve.dat" }
+            assertTrue(reserve.optBoolean("hidden") && reserve.optBoolean("system"))
+            activity.openPlaceholder();shadowOf(Looper.getMainLooper()).idle()
             val opened=shadowOf(activity).nextStartedActivity
             assertEquals(PlaceholderFilesActivity::class.java.name,opened.component!!.className)
             assertEquals("E:\\",opened.getStringExtra("directory"))
@@ -160,10 +159,10 @@ class PlaceholderUiTest {
     }
     @Test fun usbSafeEjectAndForceDisconnectAreSeparateConfirmedActionsWithRestore() {
         Stub().use { stub->
-            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val root=controller.get().window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="reserve.dat" } }
+            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val storage=controller.get()
+            waitFor { storage.visible.any { it.optString("name")=="reserve.dat" } }
             fun select(force:Boolean) {
-                buttons(root).single { it.text=="U盘管理" }.performClick();shadowOf(Looper.getMainLooper()).idle();choose(if(force)1 else 0)
+                storage.usbActions();shadowOf(Looper.getMainLooper()).idle();choose(if(force)1 else 0)
                 waitFor { latest().listView?.adapter?.count==1 };choose(0)
             }
             select(false);assertFalse(stub.requests.any { it.optString("action")=="eject" })
@@ -179,9 +178,16 @@ class PlaceholderUiTest {
             val forced=stub.requests.single { it.optString("action")=="force_disconnect" }
             assertTrue(forced.getBoolean("confirm_data_loss"));assertEquals("USBSTOR\\TEST",forced.getString("device_id"))
             controller.pause().stop().destroy()
-            val devices=Robolectric.buildActivity(DevicesActivity::class.java).setup();val deviceRoot=devices.get().window.decorView
-            waitFor { buttons(deviceRoot).any { it.text=="恢复连接 · Test USB" && it.isEnabled } }
-            buttons(deviceRoot).single { it.text=="恢复连接 · Test USB" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            // 设备页已迁移到 Compose（miuix）：从页面状态取恢复记录，经确认框恢复连接。
+            val devices=Robolectric.buildActivity(DevicesActivity::class.java).setup();val page=devices.get()
+            waitFor { page.records.isNotEmpty() && !page.busy && page.admin && page.connectionSupported }
+            val record=page.records.single { it.name=="Test USB" }
+            assertTrue("强制断开的设备应可恢复",record.restorable)
+            page.confirm(
+                "恢复 USB 存储连接？","测试确认",
+                JSONObject().put("action","restore_connection").put("device_id",record.id)
+            )
+            shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="restore_connection" })
             latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             waitFor { stub.requests.any { it.optString("action")=="restore_connection" } }
@@ -191,12 +197,12 @@ class PlaceholderUiTest {
     }
     @Test fun pendingUsbConfirmationCannotDisconnectANewComputer() {
         Stub().use { first->Stub().use { second->
-            first.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val root=controller.get().window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="reserve.dat" } }
-            buttons(root).single { it.text=="U盘管理" }.performClick();shadowOf(Looper.getMainLooper()).idle();choose(1)
+            first.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val page=controller.get()
+            waitFor { page.visible.any { it.optString("name")=="reserve.dat" } }
+            page.usbActions();shadowOf(Looper.getMainLooper()).idle();choose(1)
             waitFor { latest().listView?.adapter?.count==1 };choose(0)
             second.install();latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("电脑连接已改变") } }
+            waitFor { page.note.contains("电脑连接已改变") }
             assertFalse((first.requests+second.requests).any { it.optString("action")=="force_disconnect" })
             controller.pause().stop().destroy()
         } }
@@ -204,20 +210,16 @@ class PlaceholderUiTest {
 
     @Test fun fileDeletionResultAppearsAtTopAndDismissesConfirmation() {
         Stub().use { stub->
-            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get();val root=activity.window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="reserve.dat" } }
-            StorageActivity::class.java.getDeclaredMethod("fileActions",JSONObject::class.java,View::class.java).apply { isAccessible=true }
-                .invoke(activity,JSONObject().put("name","reserve.dat").put("dir",false),root)
-            val menu=org.robolectric.shadows.ShadowPopupMenu.getLatestPopupMenu()!!
-            val item=(0 until menu.menu.size()).map { menu.menu.getItem(it) }.single { it.title=="删除" }
-            org.robolectric.shadow.api.Shadow.extract<org.robolectric.shadows.ShadowPopupMenu>(menu).onMenuItemClickListener!!.onMenuItemClick(item)
+            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get()
+            waitFor { activity.visible.any { it.optString("name")=="reserve.dat" } }
+            activity.act("删除",JSONObject().put("name","reserve.dat").put("dir",false))
             shadowOf(Looper.getMainLooper()).idle();val confirmation=latest()
             assertFalse(stub.requests.any { it.optString("cmd")=="rm" })
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("删除完成") } }
+            waitFor { activity.note.contains("删除完成") }
             assertFalse(confirmation.isShowing)
             assertEquals("E:\\reserve.dat",stub.requests.single { it.optString("cmd")=="rm" }.getString("path"))
-            confirmation.dismiss();menu.dismiss();controller.pause().stop().destroy()
+            confirmation.dismiss();controller.pause().stop().destroy()
         }
     }
 

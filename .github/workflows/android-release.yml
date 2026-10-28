@@ -54,6 +54,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Test Android with a live receiver
         shell: bash
+        # 测试通常 2 分钟内跑完；超时说明有测试挂住了，别白等满额的任务超时。
+        timeout-minutes: 12
         run: |
           set -euo pipefail
           export XDG_CONFIG_HOME="$RUNNER_TEMP/lancmd-test-config"

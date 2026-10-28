@@ -1,64 +1,95 @@
 package com.aicode.lancmd
 
 import android.os.Bundle
-import android.widget.LinearLayout
 import androidx.appcompat.app.AlertDialog
-import com.aicode.lancmd.net.ConnectionManager
-import com.google.android.material.button.MaterialButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import org.json.JSONObject
 
-class AppsActivity : FeatureActivity() {
-    private val origin by lazy { runCatching { ConnectionManager.sessionClient() }.getOrNull() }
-    private lateinit var refresh: MaterialButton
-    private lateinit var items: LinearLayout
-    private var busy = false
-    private val controls = ArrayList<MaterialButton>()
+/** 电脑上有窗口的桌面程序：切换前台、最小化或正常关闭。界面使用 miuix。 */
+class AppsActivity : MiuixActivity() {
+    internal class Window(
+        val title: String,
+        val name: String,
+        val pid: Int,
+        val handle: String,
+        val minimized: Boolean
+    )
+
+    internal var windows by mutableStateOf<List<Window>>(emptyList())
+    internal var busy by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setup("运行中的桌面程序", "查看有窗口的桌面应用，切换、最小化或正常关闭", scrollable = true)
-        origin
-        refresh = button("刷新程序列表") { load() }
-        body.addView(refresh, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(Ui.GAP) })
-        items = panel()
+        status("查看有窗口的桌面应用，切换、最小化或正常关闭")
+        content { Screen() }
         load()
+    }
+
+    @Composable
+    private fun Screen() = Page("运行中的桌面程序") {
+        SectionCard {
+            Action("刷新程序列表", enabled = !busy) { load() }
+        }
+        SectionCard("桌面窗口") {
+            if (windows.isEmpty()) EmptyNote("没有可管理的桌面窗口。")
+            windows.forEach { window ->
+                val detail = "${window.name} · PID ${window.pid}" + if (window.minimized) " · 已最小化" else ""
+                InfoItem(window.title.ifBlank { window.name }, detail)
+                ActionRow {
+                    Action("切换到前台", enabled = !busy, modifier = Modifier.weight(1f)) {
+                        apply(window, "activate")
+                    }
+                    Action("最小化", enabled = !busy, modifier = Modifier.weight(1f)) {
+                        apply(window, "minimize")
+                    }
+                    Action("关闭", enabled = !busy, modifier = Modifier.weight(1f)) {
+                        confirmClose(window)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun change(window: Window, action: String): JSONObject = JSONObject()
+        .put("action", action).put("handle", window.handle).put("pid", window.pid)
+
+    internal fun apply(window: Window, action: String) = load(change(window, action))
+
+    internal fun confirmClose(window: Window) {
+        AlertDialog.Builder(this).setTitle("关闭 ${window.title}？")
+            .setMessage("向此窗口发送正常关闭请求，未保存内容由该程序处理。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("关闭") { _, _ -> load(change(window, "close")) }
+            .show()
     }
 
     private fun load(params: JSONObject = JSONObject()) {
         if (busy) return
-        busy = true; refresh.isEnabled = false; controls.forEach { it.isEnabled = false }
+        busy = true
         task {
             try {
                 if (params.length() > 0) pinnedCall(origin, "apps", params)
                 val result = pinnedCall(origin, "apps")
-                items.removeAllViews(); controls.clear()
                 val list = result.getJSONArray("items")
-                items.addView(Ui.sectionLabel(this@AppsActivity, "桌面窗口"))
-                if (list.length() == 0) items.addView(emptyState("没有可管理的桌面窗口。"))
-                for (i in 0 until list.length()) {
-                    val app = list.getJSONObject(i)
-                    if (i > 0) items.addView(divider(), Ui.dividerParams(this@AppsActivity))
-                    items.addView(listRow(app.optString("title").ifBlank { app.optString("name") },
-                        "${app.optString("name")} · PID ${app.optInt("pid")}",
-                        icon = R.drawable.ic_desktop,
-                        trailing = if (app.optBoolean("minimized")) Ui.text(this@AppsActivity, "已最小化", Ui.TEXT_LABEL, R.color.dim).apply {
-                            setBackgroundResource(R.drawable.pill_bg); setPadding(dp(10), dp(4), dp(10), dp(4))
-                        } else null))
-                    val keys = listOf("切换到前台" to "activate", "最小化" to "minimize", "关闭" to "close").map { (title, action) ->
-                        val change = JSONObject().put("action", action).put("handle", app.getString("handle")).put("pid", app.getInt("pid"))
-                        button(title) {
-                            if (action == "close") AlertDialog.Builder(this@AppsActivity).setTitle("关闭 ${app.optString("title")}？")
-                                .setMessage("向此窗口发送正常关闭请求，未保存内容由该程序处理。")
-                                .setNegativeButton("取消", null).setPositiveButton("关闭") { _, _ -> load(change) }.show()
-                            else load(change)
-                        }.apply { textSize = Ui.TEXT_CAPTION }
-                            .also { if (action == "close") danger(it) }
-                            .also { controls.add(it) }
-                    }
-                    items.addView(actions(*keys.toTypedArray()))
+                windows = (0 until list.length()).map { index ->
+                    val app = list.getJSONObject(index)
+                    Window(
+                        title = app.optString("title"),
+                        name = app.optString("name"),
+                        pid = app.optInt("pid"),
+                        handle = app.getString("handle"),
+                        minimized = app.optBoolean("minimized")
+                    )
                 }
-                status(if (list.length() == 0) "没有可管理的桌面窗口" else "${list.length()} 个桌面窗口；关闭请求不会强制结束进程")
-            } finally { busy = false; refresh.isEnabled = true }
+                status(
+                    if (list.length() == 0) "没有可管理的桌面窗口"
+                    else "${list.length()} 个桌面窗口；关闭请求不会强制结束进程"
+                )
+            } finally { busy = false }
         }
     }
 }

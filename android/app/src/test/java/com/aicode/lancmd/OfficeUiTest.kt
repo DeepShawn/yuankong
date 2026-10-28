@@ -3,13 +3,9 @@ package com.aicode.lancmd
 import android.app.Application
 import android.content.Intent
 import android.os.Looper
-import android.view.View
-import android.view.ViewGroup
-import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
-import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -36,23 +32,22 @@ class OfficeUiTest {
     @Before fun before(){disconnect();RuntimeEnvironment.getApplication().getSharedPreferences("file-operations",0).edit().clear().commit()}
     @After fun after(){disconnect();RuntimeEnvironment.getApplication().getSharedPreferences("file-operations",0).edit().clear().commit();File(RuntimeEnvironment.getApplication().filesDir,"office-documents").deleteRecursively()}
     private fun disconnect(){ConnectionManager.stop();runBlocking { (ConnectionManager::class.java.getDeclaredField("loopJob").apply { isAccessible=true }.get(ConnectionManager) as? Job)?.join() };shadowOf(Looper.getMainLooper()).idle()}
-    private fun all(v:View):List<View> = listOf(v)+if(v is ViewGroup)(0 until v.childCount).flatMap { all(v.getChildAt(it)) } else emptyList()
-    private fun button(root:View,name:String)=all(root).filterIsInstance<MaterialButton>().single { it.text==name }
     private fun waitFor(check:()->Boolean) { val end=System.currentTimeMillis()+8000;while(System.currentTimeMillis()<end){shadowOf(Looper.getMainLooper()).idle();if(check())return;Thread.sleep(10)};fail("Office UI did not settle") }
     private fun activity()=Robolectric.buildActivity(OfficeDocumentActivity::class.java,Intent(RuntimeEnvironment.getApplication(),OfficeDocumentActivity::class.java).putExtra("path","C:\\docs\\report.docx").putExtra("file_id","original"))
     @Test fun phoneEditorUsesWritableContentUriAndUploadChecksOriginalVersion() {
         Stub().use { stub->
-            stub.install();val c=activity().setup();val a=c.get();val root=a.window.decorView
-            button(root,"手机 WPS 编辑").performClick()
-            waitFor { shadowOf(a).peekNextStartedActivity()!=null }
+            // Office 页已迁移到 Compose（miuix）：直接驱动页面入口，按页面状态断言。
+            stub.install();val c=activity().setup();val a=c.get()
+            a.phone(true)
+            waitFor { shadowOf(a).peekNextStartedActivity()!=null && !a.busy }
             val launch=shadowOf(a).nextStartedActivity
             val editor=if(launch.action==Intent.ACTION_CHOOSER)launch.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!! else launch
             assertEquals(Intent.ACTION_EDIT,editor.action);assertEquals("content",editor.data!!.scheme)
             assertTrue(editor.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION!=0)
             a.contentResolver.openOutputStream(editor.data!!,"w")!!.use { it.write("edited".toByteArray()) }
-            button(root,"回传覆盖电脑原件").performClick();shadowOf(Looper.getMainLooper()).idle()
+            a.confirmUpload();shadowOf(Looper.getMainLooper()).idle()
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("已保存到电脑") } }
+            waitFor { a.note.contains("已保存到电脑") }
             assertEquals("original",stub.requests.single { it.optString("cmd")=="upload" && it.optString("action")=="begin" }.getString("file_id"))
             assertEquals("edited",File(RuntimeEnvironment.getApplication().filesDir,"office-documents").walkTopDown().single { it.name=="report.docx" }.readText())
             c.pause().stop().destroy()
@@ -60,8 +55,8 @@ class OfficeUiTest {
     }
     @Test fun pcWpsBackgroundOpenUsesTypedOptionsWithoutShellCommand() {
         Stub().use { stub->
-            stub.install();val c=activity().setup();val root=c.get().window.decorView
-            button(root,"电脑 WPS 在当前窗口下方打开").performClick()
+            stub.install();val c=activity().setup()
+            c.get().computer(true)
             waitFor { stub.requests.any { it.optString("cmd")=="files" } }
             val q=stub.requests.single { it.optString("cmd")=="files" }
             assertEquals("open",q.getString("action"));assertEquals("wps",q.getString("application"));assertTrue(q.getBoolean("background"))
@@ -72,9 +67,9 @@ class OfficeUiTest {
     @Test fun delayedRemoteFileActionIsQueuedOnWindowsWithSecondsAndOriginalParams() {
         Stub().use { stub->
             stub.install();RuntimeEnvironment.getApplication().getSharedPreferences("file-operations",0).edit().putInt("delay",12).commit()
-            val c=activity().setup();val root=c.get().window.decorView
-            button(root,"电脑 WPS 打开").performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="电脑已打开" } }
+            val c=activity().setup();val a=c.get()
+            a.computer(false)
+            waitFor { a.note=="电脑已打开" }
             val q=stub.requests.single { it.optString("cmd")=="file_schedule" && it.optString("action")=="add" }
             assertEquals(12,q.getInt("delay"));assertEquals("files",q.getString("command"));assertEquals("wps",q.getJSONObject("params").getString("application"))
             assertFalse(stub.requests.any { it.optString("cmd")=="files" });c.pause().stop().destroy()
