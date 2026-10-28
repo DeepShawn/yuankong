@@ -115,16 +115,12 @@ class PowerConfirmTest {
     /**
      * 直接调用确认入口。
      *
-     * 不走按钮点击是因为按钮外层有「未连接就别操作」的前置判断，
+     * 不走菜单点击是因为菜单项外层有「未连接就别操作」的前置判断，
      * 而 ConnectionManager.isConnected() 看的是真实 socket，
      * 单测里没有真连接。本测试要验的是确认流程本身，不是那个前置判断。
      */
     private fun triggerPower(activity: MainActivity, action: String, label: String) {
-        val m = MainActivity::class.java.getDeclaredMethod(
-            "confirmPower", String::class.java, String::class.java
-        )
-        m.isAccessible = true
-        m.invoke(activity, action, label)
+        activity.confirmPower(action, label)
         shadowOf(Looper.getMainLooper()).idle()
     }
 
