@@ -19,7 +19,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 import java.text.DateFormat
 import java.util.Date
 
@@ -76,17 +75,17 @@ class FileSearchActivity : MiuixActivity() {
     private fun Screen() = Page("文件搜索") {
         SectionCard {
             Field(label = "文件名、关键词或 *.docx", value = query, onValueChange = { typed(it) })
-            SuperDropdown(
+            ChoiceField(
                 items = scopes, title = "搜索范围",
                 selectedIndex = scopeIndex,
                 onSelectedIndexChange = { scopeIndex = it; search(true) }
             )
-            SuperDropdown(
+            ChoiceField(
                 items = kinds, title = "结果类型",
                 selectedIndex = kindIndex,
                 onSelectedIndexChange = { kindIndex = it; search(true) }
             )
-            SuperDropdown(
+            ChoiceField(
                 items = sorts, title = "排序方式",
                 selectedIndex = sortIndex,
                 onSelectedIndexChange = { sortIndex = it; search(true) }

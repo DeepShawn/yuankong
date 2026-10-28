@@ -23,7 +23,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 import top.yukonga.miuix.kmp.extra.SuperSwitch
 import java.io.File
 import java.text.DateFormat
@@ -132,7 +131,7 @@ class RecordingsActivity : MiuixActivity() {
     @Composable
     private fun Screen() = Page("录音 / 录屏 / 摄像头") {
         SectionCard("录制设置") {
-            SuperDropdown(
+            ChoiceField(
                 items = modes,
                 title = "录制内容",
                 selectedIndex = modeIndex,
@@ -143,13 +142,13 @@ class RecordingsActivity : MiuixActivity() {
                 onCheckedChange = { withAudio = it },
                 title = "视频同时录制麦克风声音"
             )
-            SuperDropdown(
+            ChoiceField(
                 items = microphoneNames,
                 title = "麦克风",
                 selectedIndex = microphoneIndex.coerceAtMost(microphoneNames.size - 1),
                 onSelectedIndexChange = { microphoneIndex = it }
             )
-            SuperDropdown(
+            ChoiceField(
                 items = cameraNames,
                 title = "摄像头",
                 summary = "仅摄像头模式使用",

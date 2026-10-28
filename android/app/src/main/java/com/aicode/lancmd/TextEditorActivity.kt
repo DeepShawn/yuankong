@@ -14,7 +14,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 import top.yukonga.miuix.kmp.extra.SuperSwitch
 import java.io.File
 import java.security.MessageDigest
@@ -77,12 +76,12 @@ class TextEditorActivity : MiuixActivity() {
     private fun Screen() = Page("文本编辑") {
         SectionCard {
             InfoItem(path.substringAfterLast('\\').substringAfterLast('/'), path)
-            SuperDropdown(
+            ChoiceField(
                 items = ENCODING_NAMES, title = "编码",
                 selectedIndex = encodingIndex,
                 onSelectedIndexChange = { encodingIndex = it; changed() }
             )
-            SuperDropdown(
+            ChoiceField(
                 items = NEWLINE_NAMES, title = "换行",
                 selectedIndex = newlineIndex,
                 onSelectedIndexChange = { newlineIndex = it; changed() }

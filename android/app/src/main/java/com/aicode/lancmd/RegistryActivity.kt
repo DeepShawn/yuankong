@@ -11,7 +11,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import org.json.JSONArray
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 
 /** 浏览与编辑电脑注册表，并可恢复修改备份。界面使用 miuix。 */
 class RegistryActivity : MiuixActivity() {
@@ -44,13 +43,13 @@ class RegistryActivity : MiuixActivity() {
     @Composable
     private fun Screen() = Page("注册表编辑器") {
         SectionCard("位置") {
-            SuperDropdown(
+            ChoiceField(
                 items = roots,
                 title = "根键",
                 selectedIndex = rootIndex,
                 onSelectedIndexChange = { rootIndex = it }
             )
-            SuperDropdown(
+            ChoiceField(
                 items = listOf("64 位视图", "32 位视图"),
                 title = "注册表视图",
                 selectedIndex = viewIndex,

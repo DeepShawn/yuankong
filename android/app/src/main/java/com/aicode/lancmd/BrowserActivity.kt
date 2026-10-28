@@ -11,7 +11,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -29,7 +28,6 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.extra.SuperArrow
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** 向电脑发送网址，并保存常用网址。界面使用 miuix。 */
@@ -38,13 +36,16 @@ class BrowserActivity : MiuixActivity() {
 
     private var address by mutableStateOf("")
     private var linkName by mutableStateOf("")
-    private var browserIndex by mutableIntStateOf(0)
-    private var browserNames by mutableStateOf(listOf("Windows 默认浏览器"))
-    private var ids = listOf("default")
+    private data class Browser(val id: String, val name: String)
+    private var browsers by mutableStateOf(listOf(Browser("default", "Windows 默认浏览器")))
+    private var selectedBrowser by mutableStateOf("default")
     private var links by mutableStateOf<List<Pair<String, String>>>(emptyList())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        address = savedInstanceState?.getString("address").orEmpty()
+        linkName = savedInstanceState?.getString("linkName").orEmpty()
+        selectedBrowser = savedInstanceState?.getString("browser") ?: "default"
         status("发送 HTTP / HTTPS 网址，由电脑浏览器打开。浏览器窗口会按打开网页的正常行为显示。")
         links = readLinks()
         content { Page() }
@@ -77,11 +78,11 @@ class BrowserActivity : MiuixActivity() {
                         label = "网址",
                         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
                     )
-                    SuperDropdown(
-                        items = browserNames,
+                    ChoiceField(
+                        items = browsers.map { it.name },
                         title = "使用浏览器",
-                        selectedIndex = browserIndex,
-                        onSelectedIndexChange = { browserIndex = it }
+                        selectedIndex = browsers.indexOfFirst { it.id == selectedBrowser }.coerceAtLeast(0),
+                        onSelectedIndexChange = { index -> browsers.getOrNull(index)?.let { selectedBrowser = it.id } }
                     )
                     TextButton(
                         text = "在电脑打开网址",
@@ -135,9 +136,15 @@ class BrowserActivity : MiuixActivity() {
     private fun discover() = task {
         val result = pinnedCall(origin, "browser")
         val items = result.getJSONArray("items")
-        ids = listOf("default") + (0 until items.length()).map { items.getJSONObject(it).getString("id") }
-        browserNames = listOf("Windows 默认浏览器") + (0 until items.length()).map { items.getJSONObject(it).getString("name") }
-        if (browserIndex >= browserNames.size) browserIndex = 0
+        val found = (0 until items.length()).mapNotNull { index ->
+            items.optJSONObject(index)?.let { item ->
+                val id = item.optString("id")
+                val name = item.optString("name")
+                if (id.isBlank() || name.isBlank()) null else Browser(id, name)
+            }
+        }
+        browsers = (listOf(Browser("default", "Windows 默认浏览器")) + found).distinctBy { it.id }
+        if (browsers.none { it.id == selectedBrowser }) selectedBrowser = "default"
         status("已读取 ${items.length()} 个注册浏览器")
     }
 
@@ -150,7 +157,7 @@ class BrowserActivity : MiuixActivity() {
         val url = normalized(value)
         task {
             pinnedCall(origin, "browser", JSONObject().put("action", "open").put("url", url)
-                .put("browser", ids.getOrElse(browserIndex) { "default" }))
+                .put("browser", selectedBrowser))
             status("已发送到电脑：$url")
         }
     }
@@ -191,5 +198,11 @@ class BrowserActivity : MiuixActivity() {
         if (index !in links.indices) return
         writeLinks(links.filterIndexed { position, _ -> position != index })
         status("已删除保存的网址")
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("address", address); outState.putString("linkName", linkName)
+        outState.putString("browser", selectedBrowser)
+        super.onSaveInstanceState(outState)
     }
 }

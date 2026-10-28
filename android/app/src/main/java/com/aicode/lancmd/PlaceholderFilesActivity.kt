@@ -17,7 +17,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 import java.math.BigDecimal
 
 /** 创建隐藏＋系统属性的占位文件，实际占用磁盘空间。界面使用 miuix。 */
@@ -66,7 +65,7 @@ class PlaceholderFilesActivity : MiuixActivity() {
                 onValueChange = { sizeText = it.filter { c -> c.isDigit() || c == '.' }.take(14) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
             )
-            SuperDropdown(
+            ChoiceField(
                 items = modes,
                 title = "生成模式",
                 selectedIndex = modeIndex,

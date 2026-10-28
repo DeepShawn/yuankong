@@ -17,7 +17,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
@@ -62,7 +61,7 @@ class CommandsActivity : MiuixActivity() {
     @Composable
     private fun Screen() = Page("命令列表 / 延迟执行") {
         SectionCard("命令列表") {
-            SuperDropdown(
+            ChoiceField(
                 items = names, title = "当前列表",
                 selectedIndex = selected.coerceIn(0, (names.size - 1).coerceAtLeast(0)),
                 onSelectedIndexChange = { selected = it; refreshLists() }

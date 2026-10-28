@@ -44,7 +44,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 import top.yukonga.miuix.kmp.extra.SuperSwitch
 import kotlin.coroutines.coroutineContext
 
@@ -238,7 +237,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
     private fun TerminalPanel() {
         SectionCard {
             Note(terminalText.takeLast(4000))
-            SuperDropdown(
+            ChoiceField(
                 items = shells, title = "终端类型",
                 selectedIndex = shellIndex,
                 onSelectedIndexChange = { shellIndex = it },

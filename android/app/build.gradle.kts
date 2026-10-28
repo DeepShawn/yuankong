@@ -95,6 +95,8 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-android:0.8.8")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("androidx.compose.ui:ui-test-junit4:1.10.3")
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.10.3")
     // Robolectric 自带 conscrypt，而它只打包 linux-x86_64 的 .so，
     // 在 aarch64 上会 UnsatisfiedLinkError。排除后用 JDK 自带 SSL 实现。
     testImplementation("org.robolectric:robolectric:4.13") {

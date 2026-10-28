@@ -37,7 +37,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 import kotlin.coroutines.coroutineContext
 
 /** 电脑屏幕与摄像头实时预览，支持全屏。界面使用 miuix。 */
@@ -103,7 +102,7 @@ class MediaActivity : MiuixActivity() {
             }
         } else Page(if (camera) "摄像头" else "电脑屏幕") {
             if (camera) SectionCard {
-                SuperDropdown(
+                ChoiceField(
                     items = deviceNames, title = "摄像头设备",
                     selectedIndex = deviceIndex.coerceIn(0, (deviceNames.size - 1).coerceAtLeast(0)),
                     onSelectedIndexChange = { deviceIndex = it },

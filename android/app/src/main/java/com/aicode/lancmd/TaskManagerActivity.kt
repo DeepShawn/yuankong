@@ -20,7 +20,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import top.yukonga.miuix.kmp.extra.SuperCheckbox
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 import top.yukonga.miuix.kmp.extra.SuperSwitch
 import java.util.Locale
 
@@ -73,7 +72,7 @@ class TaskManagerActivity : MiuixActivity() {
         }
         SectionCard {
             Field(label = "搜索名称、PID 或路径", value = query, onValueChange = { query = it; filter() })
-            SuperDropdown(
+            ChoiceField(
                 items = sorts, title = "排序",
                 selectedIndex = sortIndex,
                 onSelectedIndexChange = { sortIndex = it; filter() }
