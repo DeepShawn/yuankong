@@ -15,13 +15,14 @@ sys.path.insert(0,str(ROOT/"windows"))
 import test_placeholder_files as fixtures
 import test_device_management as device_fixtures
 import test_privacy_recovery as property_fixtures
-from placeholder_files import PlaceholderFiles,NativeAllocation,NativeBackend,FastAllocationUnsupported,FastAllocationCancelled,RESERVE_BYTES
+from placeholder_files import PlaceholderFiles,NativeAllocation,NativeBackend,FastAllocationUnsupported,FastAllocationCancelled,RESERVE_BYTES,ALLOCATION_MAX,WritePacer
 from device_management import UsbHardware
 from device_property_change import change_state,USB_DISK_CLASSES
 
 
 class QuickAllocation(fixtures.Allocation):
-    def reserve(self,size,progress,cancelled):
+    def reserve(self,size,progress,cancelled,mode="fast",pause=None):
+        self.backend.requested_modes.append(mode)
         if self.backend.entered:
             self.backend.entered.set();self.backend.release.wait(3)
         if self.backend.mode=="unsupported":
@@ -34,7 +35,7 @@ class QuickAllocation(fixtures.Allocation):
 
 
 class QuickBackend(fixtures.Backend):
-    def __init__(self):super().__init__();self.mode="fast";self.creates=0
+    def __init__(self):super().__init__();self.mode="fast";self.creates=0;self.requested_modes=[]
     def create(self,path):
         self.creates+=1
         return QuickAllocation(path,self) if self.creates==1 else fixtures.Allocation(path,self)
@@ -57,6 +58,13 @@ class FastStrategyTest(unittest.TestCase):
         result=self.wait(self.start());self.assertEqual("completed",result["status"],result)
         self.assertEqual("preallocate",result["method"]);self.assertEqual(4097,result["written"])
         self.assertEqual(b"\0"*4097,self.path.read_bytes())
+        self.assertEqual("stable",result["mode"]);self.assertEqual(["stable"],self.backend.requested_modes)
+    def test_explicit_fast_mode_is_forwarded_and_invalid_modes_are_rejected(self):
+        with self.assertRaises(fixtures.Error):
+            self.manager.request(dict(action="create",path=str(self.path),size=4097,mode="invalid"),self.owner,fixtures.Error)
+        job=self.manager.request(dict(action="create",path=str(self.path),size=4097,mode="fast"),self.owner,fixtures.Error)["job"]
+        self.assertEqual("completed",self.wait(job)["status"])
+        self.assertEqual(["fast"],self.backend.requested_modes)
     def test_partial_unsupported_reservation_is_removed_before_full_stream_fallback(self):
         self.backend.mode="unsupported";result=self.wait(self.start())
         self.assertEqual("completed",result["status"],result);self.assertEqual("stream",result["method"])
@@ -80,13 +88,68 @@ class FastStrategyTest(unittest.TestCase):
         allocation.kernel.SetFileInformationByHandle.side_effect=apply
         allocation.inspect=lambda:dict(allocated=current[0]);progress=[]
         allocation.reserve(500_000_000_000,progress.append)
-        self.assertEqual((6,500_000_000_000),calls[-1]);self.assertLess(len(calls),40)
+        self.assertEqual((6,500_000_000_000),calls[-1])
+        # Every EOF update is bounded too; never defer it to one huge final call.
+        lengths=[amount for kind,amount in calls if kind==6]
+        self.assertTrue(all(0<b-a<=ALLOCATION_MAX for a,b in zip([0]+lengths,lengths)))
+        self.assertEqual(len(lengths),len([1 for kind,_ in calls if kind==5]))
         self.assertEqual(500_000_000_000,progress[-1]);allocation.kernel.SetFileValidData.assert_not_called()
     def test_native_reservation_can_cancel_between_segments(self):
         allocation=NativeAllocation.__new__(NativeAllocation);allocation.kernel=mock.Mock();allocation.handle=7
         allocation.inspect=lambda:dict(allocated=16*1024**3);progress=[]
         with self.assertRaises(FastAllocationCancelled):allocation.reserve(32*1024**3,progress.append,lambda:bool(progress))
-        self.assertEqual(1,allocation.kernel.SetFileInformationByHandle.call_count)
+        self.assertEqual(2,allocation.kernel.SetFileInformationByHandle.call_count)
+
+    def test_slow_allocation_reduces_batches_and_fast_storage_grows_again(self):
+        allocation=NativeAllocation.__new__(NativeAllocation);allocation.kernel=mock.Mock();allocation.handle=7
+        targets=[]
+        def apply(handle,kind,value,size):
+            if kind==5:targets.append(value._obj.value)
+            return True
+        allocation.kernel.SetFileInformationByHandle.side_effect=apply
+        allocation.inspect=lambda:dict(allocated=targets[-1])
+        clock=[0.0];calls=[0]
+        def tick():
+            if calls[0]%2:clock[0]+=2 if calls[0]<4 else .001
+            calls[0]+=1
+            return clock[0]
+        with mock.patch("placeholder_files.time.monotonic",side_effect=tick):allocation.reserve(64*1024**2)
+        deltas=[b-a for a,b in zip([0]+targets,targets)]
+        self.assertLess(deltas[1],deltas[0]);self.assertLess(deltas[2],deltas[1])
+        self.assertGreater(deltas[3],deltas[2])
+
+    def test_cancel_after_space_allocation_skips_potentially_slow_eof_update(self):
+        allocation=NativeAllocation.__new__(NativeAllocation);allocation.kernel=mock.Mock();allocation.handle=7
+        cancelled=[False]
+        def apply(*args):cancelled[0]=True;return True
+        allocation.kernel.SetFileInformationByHandle.side_effect=apply
+        with self.assertRaises(FastAllocationCancelled):allocation.reserve(16*1024**2,cancelled=lambda:cancelled[0])
+        self.assertEqual([5],[call.args[1] for call in allocation.kernel.SetFileInformationByHandle.call_args_list])
+
+    def test_stable_preallocation_stays_fast_but_bounds_bursts_and_yields(self):
+        allocation=NativeAllocation.__new__(NativeAllocation);allocation.kernel=mock.Mock();allocation.handle=7
+        targets=[]
+        def apply(handle,kind,value,size):
+            if kind==5:targets.append(value._obj.value)
+            return True
+        allocation.kernel.SetFileInformationByHandle.side_effect=apply
+        allocation.inspect=lambda:dict(allocated=targets[-1]);pause=mock.Mock(return_value=False)
+        allocation.reserve(128*1024**2,mode="stable",pause=pause)
+        self.assertTrue(all(b-a<=32*1024**2 for a,b in zip([0]+targets,targets)))
+        self.assertGreater(pause.call_count,0)
+        self.assertLess(sum(call.args[0] for call in pause.call_args_list),.1)
+
+    def test_stable_payload_pacing_caps_burst_credit_and_can_cancel_the_wait(self):
+        cancel=mock.Mock();cancel.wait.return_value=False
+        with mock.patch("placeholder_files.time.monotonic",return_value=0):
+            pacer=WritePacer();pacer.account(16*1024**2,cancel)
+            self.assertAlmostEqual(.125,cancel.wait.call_args.args[0])
+        # A stalled drive never accumulates unbounded credit for a later burst.
+        with mock.patch("placeholder_files.time.monotonic",return_value=50):
+            pacer.account(16*1024**2,cancel)
+            self.assertAlmostEqual(.125,cancel.wait.call_args.args[0])
+            cancel.wait.return_value=True
+            with self.assertRaises(FastAllocationCancelled):pacer.account(1024*1024,cancel)
 
 
 class UsbFallbackTest(unittest.TestCase):

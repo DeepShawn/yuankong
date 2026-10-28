@@ -13,10 +13,32 @@ import stat
 import threading
 import time
 import uuid
+from contextlib import contextmanager, nullcontext
 
 MAX_BYTES = 500_000_000_000
 RESERVE_BYTES = 1_000_000_000
 CHUNK_BYTES = 4 * 1024 * 1024
+ALLOCATION_MIN = 1024 * 1024
+ALLOCATION_MAX = 256 * 1024 * 1024
+FLUSH_BYTES = 64 * 1024 * 1024
+STABLE_ALLOCATION_MAX = 32 * 1024 * 1024
+STABLE_WRITE_RATE = 64 * 1024 * 1024
+
+
+class WritePacer:
+    """Small token bucket only for real payload writes, never logical allocation."""
+    def __init__(self):
+        self.credit=8*1024*1024
+        self.checked=time.monotonic()
+
+    def account(self,amount,cancel):
+        now=time.monotonic()
+        self.credit=min(8*1024*1024,self.credit+max(0,now-self.checked)*STABLE_WRITE_RATE)-amount
+        self.checked=now
+        if self.credit<0:
+            if cancel.wait(-self.credit/STABLE_WRITE_RATE):raise FastAllocationCancelled()
+            self.checked=time.monotonic()
+            self.credit=0
 
 
 class FastAllocationUnsupported(Exception):
@@ -27,7 +49,7 @@ class FastAllocationCancelled(Exception):
     pass
 
 
-def target_path(value):
+def target_path(value, check_disk=True):
     if not isinstance(value, str) or not value.strip() or len(value) > 32700 or "\0" in value:
         raise ValueError("请输入占位文件的完整路径")
     expanded = os.path.expanduser(value)
@@ -44,6 +66,8 @@ def target_path(value):
     if any(part.endswith((".", " ")) and part not in (".", "..") for part in raw.parts[1:-1]):
         raise ValueError("目录名含有 Windows 会改写的尾随点或空格")
     path = Path(os.path.abspath(expanded))
+    if not check_disk:
+        return path
     for parent in (path.parent, *path.parent.parents):
         info = parent.lstat()
         if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
@@ -133,9 +157,10 @@ class NativeAllocation:
     def write(self, data):
         return self.stream.write(data)
 
-    def reserve(self,size,progress=lambda amount:None,cancelled=lambda:False):
+    def reserve(self,size,progress=lambda amount:None,cancelled=lambda:False,mode="fast",pause=None):
         """Reserve real clusters in bounded steps; keep Windows zero-read semantics."""
         if type(size) is not int or not 0<=size<=MAX_BYTES:raise ValueError("占位大小无效")
+        if mode not in ("stable","fast"):raise ValueError("占位模式无效")
         if size==0:return
         def set_info(info_class,value):
             amount=ctypes.c_longlong(value)
@@ -145,16 +170,29 @@ class NativeAllocation:
                 raise ctypes.WinError(code)
         # No SetFileValidData and no sparse marking. Windows returns zeros for
         # bytes beyond valid-data length, while ordinary clusters are reserved.
-        step=16*1024**3
-        for start in range(0,size,step):
+        # A single 16 GiB allocation or one final huge EOF update can monopolize
+        # a USB controller. Bound BOTH operations and adapt to measured latency.
+        stable=mode=="stable"
+        maximum=STABLE_ALLOCATION_MAX if stable else ALLOCATION_MAX
+        step=(4 if stable else 8)*1024**2
+        start=0
+        while start<size:
             if cancelled():raise FastAllocationCancelled()
+            started=time.monotonic()
             target=min(size,start+step)
             set_info(5,max(4096,target))  # FileAllocationInfo
+            if cancelled():raise FastAllocationCancelled()
+            set_info(6,target)  # FileEndOfFileInfo; never one final whole-drive jump.
             actual=self.inspect()["allocated"]
             if actual<target:raise FastAllocationUnsupported("文件系统未确认实际空间预分配")
-            progress(min(size,actual))
+            progress(target)
+            elapsed=max(.001,time.monotonic()-started)
+            step=max(ALLOCATION_MIN,min(maximum,step*2,max(step//2,int(step*.25/elapsed))))
+            start=target
+            if stable and start<size:
+                if pause is None:time.sleep(.005)
+                elif pause(.005):raise FastAllocationCancelled()
         if cancelled():raise FastAllocationCancelled()
-        set_info(6,size)  # FileEndOfFileInfo; does not bypass valid-data protection.
 
     def flush(self):
         self.stream.flush()
@@ -198,6 +236,26 @@ class NativeAllocation:
 
 
 class NativeBackend:
+    @contextmanager
+    def background(self):
+        # Give interactive foreground I/O precedence without imposing a transfer
+        # rate limit when the drive is idle. Best effort; no elevation or UI.
+        kernel=handle=None
+        applied=False
+        try:
+            from ctypes import wintypes as w
+            kernel=ctypes.WinDLL("kernel32",use_last_error=True)
+            kernel.GetCurrentThread.restype=w.HANDLE
+            kernel.SetThreadPriority.argtypes=[w.HANDLE,ctypes.c_int]
+            handle=kernel.GetCurrentThread()
+            applied=bool(kernel.SetThreadPriority(handle,0x10000))
+        except (OSError,AttributeError):
+            pass
+        try:
+            yield
+        finally:
+            if applied:kernel.SetThreadPriority(handle,0x20000)
+
     def validate(self, path, size):
         from ctypes import wintypes as w
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -230,7 +288,16 @@ class PlaceholderFiles:
         atexit.register(self.close)
 
     def _public(self, job):
-        return dict(job["data"])
+        data=dict(job["data"])
+        data["cancel_requested"]=job["cancel"].is_set()
+        data["can_cancel"]=not job["done"].is_set() and not job.get("committing",False) and not job["cancel"].is_set()
+        data["idle_seconds"]=max(0,int(time.time()-data.get("updated",data["created"])))
+        if not job["done"].is_set():
+            if job["cancel"].is_set() and not job.get("committing"):
+                data["status"]="cancelling"
+            elif data["status"] in ("cancelled","failed","completed"):
+                data["status"]="cleaning"
+        return data
 
     def request(self, q, state, error):
         try:
@@ -249,26 +316,28 @@ class PlaceholderFiles:
                     job = self.jobs.get(q.get("job_id"))
                     if not job or job["owner"] != state.client_id:
                         raise ValueError("任务不存在或属于其他手机")
-                    if not job["done"].is_set():
+                    cancellable=not job["done"].is_set() and not job.get("committing")
+                    if cancellable:
                         job["cancel"].set()
-                    return {"cancel_requested": not job["done"].is_set()}
+                    return {"cancel_requested": cancellable}
                 if action != "create":
                     raise ValueError("无效的占位文件操作")
                 size = q.get("size")
                 if type(size) is not int or not 0 <= size <= MAX_BYTES:
                     raise ValueError("占位大小须为 0–500 GB 的整数字节数（1 GB = 1,000,000,000 字节）")
+                mode=q.get("mode","stable")
+                if mode not in ("stable","fast"):raise ValueError("请选择稳定或快速模式")
                 if self.stopped or any(not j["done"].is_set() for j in self.jobs.values()):
                     raise ValueError("当前有占位文件正在创建或接收端正在退出，请等待或取消")
-                path = target_path(q.get("path"))
-                self.backend.validate(path, size)
-                if size and self.backend.free(path) - size < RESERVE_BYTES:
-                    raise ValueError("磁盘空间不足：创建后须至少保留 1 GB 可用空间")
+                # Admission only performs lexical validation. All volume I/O is
+                # asynchronous so a stalled USB cannot hold the job registry lock.
+                path = target_path(q.get("path"), check_disk=False)
                 completed = [rid for rid, j in self.jobs.items() if j["done"].is_set()]
                 while len(self.jobs) >= 100 and completed:
                     self.jobs.pop(completed.pop(0))
                 rid = uuid.uuid4().hex
                 job = dict(owner=state.client_id, cancel=threading.Event(), done=threading.Event(),
-                           data=dict(id=rid, path=str(path), size=size, written=0, allocated=0, status="queued", created=time.time()))
+                           data=dict(id=rid, path=str(path), size=size, mode=mode, written=0, allocated=0, status="queued", created=time.time(), updated=time.time()))
                 self.jobs[rid] = job
                 worker = threading.Thread(target=self._run, args=(job, path), name="placeholder-file", daemon=True)
                 job["thread"] = worker
@@ -278,11 +347,23 @@ class PlaceholderFiles:
             raise error(str(exc))
 
     def _run(self, job, path):
+        with getattr(self.backend,"background",nullcontext)():
+            self._execute(job,path)
+
+    def _execute(self, job, path):
         allocation = None
         data = job["data"]
         try:
             if job["cancel"].is_set():
                 data["status"] = "cancelled"
+                return
+            data["status"]="checking"
+            path=target_path(str(path))
+            self.backend.validate(path,data["size"])
+            if data["size"] and self.backend.free(path)-data["size"]<RESERVE_BYTES:
+                raise ValueError("磁盘空间不足：创建后须至少保留 1 GB 可用空间")
+            if job["cancel"].is_set():
+                data["status"]="cancelled"
                 return
             allocation = self.backend.create(path)
             reserve=getattr(allocation,"reserve",None)
@@ -293,9 +374,10 @@ class PlaceholderFiles:
                         raise ValueError("空间已变化，快速分配后无法保留 1 GB，已取消")
                     def progress(amount):
                         data["written"]=min(amount,data["size"])
+                        data["updated"]=time.time()
                         if data["size"] and self.backend.free(path)<RESERVE_BYTES:
                             raise ValueError("分配后剩余空间不足 1 GB，已取消并清理")
-                    reserve(data["size"],progress,job["cancel"].is_set)
+                    reserve(data["size"],progress,job["cancel"].is_set,mode=data["mode"],pause=job["cancel"].wait)
                     info=allocation.inspect()
                     if info["size"]!=data["size"] or info["allocated"]<data["size"]:
                         raise FastAllocationUnsupported("未确认快速实际分配，改用逐块写入")
@@ -303,24 +385,44 @@ class PlaceholderFiles:
                 except FastAllocationUnsupported:
                     # Delete-pending cleanup releases any partial reservation before
                     # starting the conservative writer with a fresh exclusive file.
+                    data["status"]="cleaning"
                     allocation.close();allocation=None
                     if job["cancel"].is_set():data["status"]="cancelled";return
                     if data["size"] and self.backend.free(path)-data["size"]<RESERVE_BYTES:
                         raise ValueError("空间不足，无法回退写入；未完成文件已清理")
                     allocation=self.backend.create(path)
                     data.update(status="writing",method="stream",written=0)
-            block = bytes(CHUNK_BYTES) if data["written"]<data["size"] else b""
+            stable=data["mode"]=="stable"
+            chunk_bytes=min(CHUNK_BYTES,1024*1024) if stable else CHUNK_BYTES
+            flush_bytes=min(FLUSH_BYTES,16*1024*1024) if stable else FLUSH_BYTES
+            pacer=WritePacer() if stable else None
+            block = bytes(chunk_bytes) if data["written"]<data["size"] else b""
+            unflushed=0
             while data["written"] < data["size"]:
                 if job["cancel"].is_set():
                     data["status"] = "cancelled"
                     return
-                chunk = block[:min(CHUNK_BYTES, data["size"] - data["written"])]
+                chunk = block[:min(chunk_bytes, data["size"] - data["written"])]
                 if self.backend.free(path) - len(chunk) < RESERVE_BYTES:
                     raise ValueError("剩余空间已接近 1 GB，已停止并清理未完成文件")
                 count = allocation.write(chunk)
                 if not count:
                     raise OSError("写入未取得进展")
                 data["written"] += count
+                data["updated"]=time.time()
+                unflushed+=count
+                if pacer:pacer.account(count,job["cancel"])
+                if unflushed>=flush_bytes:
+                    if job["cancel"].is_set():
+                        data["status"]="cancelled"
+                        return
+                    data["status"]="flushing"
+                    allocation.flush()
+                    unflushed=0
+                    data.update(status="writing",updated=time.time())
+            if job["cancel"].is_set():
+                data["status"]="cancelled"
+                return
             data["status"] = "verifying"
             allocation.flush()
             info = allocation.inspect()
@@ -333,8 +435,12 @@ class PlaceholderFiles:
                 if job["cancel"].is_set():
                     data["status"] = "cancelled"
                     return
-                allocation.commit()
-                data.update(allocated=info["allocated"], status="completed")
+                # Claim the non-cancellable commit boundary under the lock, but
+                # never execute a potentially blocking device call while holding it.
+                job["committing"]=True
+                data["status"]="committing"
+            allocation.commit()
+            data.update(allocated=info["allocated"], status="completed")
         except FastAllocationCancelled:
             data["status"]="cancelled"
         except Exception as exc:
