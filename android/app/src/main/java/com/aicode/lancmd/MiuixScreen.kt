@@ -196,6 +196,7 @@ abstract class MiuixActivity : AppCompatActivity() {
             isAppearanceLightStatusBars=Themes.tone(this@MiuixActivity).light
             isAppearanceLightNavigationBars=Themes.tone(this@MiuixActivity).light
         }
+        if(android.os.Build.VERSION.SDK_INT<26 && Themes.tone(this).light)window.navigationBarColor=0xFF172131.toInt()
         AppVisibility.install(application)
         origin
     }

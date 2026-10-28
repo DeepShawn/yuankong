@@ -125,7 +125,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                     ) { begin() }
                     Action("停止共享", enabled = sharing, modifier = Modifier.weight(1f)) { stopSession() }
                 }
-            WorkingArea(screen,Modifier.fillMaxWidth().weight(1f),onResize={screen.cancelGesture()},horizontal=landscape) { Dock() }
+            WorkingArea(screen,Modifier.fillMaxWidth().weight(1f),controlFraction=if(mode==1 && virtualKeyboardExpanded).66f else .36f,onResize={screen.cancelGesture()},horizontal=landscape) { Dock() }
 
         }
     }
@@ -139,7 +139,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                         title,
                         selected = index == mode,
                         modifier = Modifier.weight(1f)
-                    ) { mode = index }
+                    ) { screen.cancelGesture();mode = index }
                 }
                 Action("全屏", modifier = Modifier.weight(1f)) { showFullscreen(true) }
             }
@@ -268,6 +268,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
     }
 
     internal fun toggleVirtualKeyboard() {
+        screen.cancelGesture()
         virtual.resetModifiers()
         virtualKeyboardExpanded = !virtualKeyboardExpanded
     }
