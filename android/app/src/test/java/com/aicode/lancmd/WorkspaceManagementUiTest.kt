@@ -1,23 +1,27 @@
 package com.aicode.lancmd
 
 import android.app.Application
+import android.os.Looper
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.semantics.SemanticsActions
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
+import org.junit.Before
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.ConscryptMode
 import java.io.Closeable
@@ -30,20 +34,36 @@ import java.util.concurrent.CopyOnWriteArrayList
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class WorkspaceManagementUiTest {
     @get:Rule val compose=createEmptyComposeRule()
-    @After fun after(){ConnectionManager.stop()}
+    @Before fun before()=disconnect()
+    @After fun after()=disconnect()
+    private fun disconnect() {
+        ConnectionManager.stop()
+        runBlocking { (ConnectionManager::class.java.getDeclaredField("loopJob").apply{isAccessible=true}.get(ConnectionManager) as? Job)?.join() }
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+    /** Network replies resume lifecycleScope on Android's paused test looper. */
+    private fun waitFor(condition:()->Boolean) {
+        val deadline=System.currentTimeMillis()+8000
+        while(System.currentTimeMillis()<deadline) {
+            shadowOf(Looper.getMainLooper()).idle()
+            if(condition())return
+            Thread.sleep(10)
+        }
+        fail("应用状态在 8 秒内没有更新")
+    }
     @Test fun installedApplicationFreezeRequiresConfirmationAndSupportsThaw() {
         Stub().use { stub ->
             stub.install();val controller=Robolectric.buildActivity(ApplicationsActivity::class.java).setup();val page=controller.get()
             try {
-                compose.waitUntil(8000){page.note.contains("已识别")}
+                waitFor{page.note.contains("已识别")}
                 compose.onNodeWithText("冻结").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
                 assertFalse(stub.requests.any{it.optString("action")=="freeze"})
                 compose.onNodeWithText("确认").performSemanticsAction(SemanticsActions.OnClick){it()}
-                try { compose.waitUntil(8000){stub.requests.any{it.optString("action")=="freeze"} && page.note.contains("冻结 1")} }
+                try { waitFor{stub.requests.any{it.optString("action")=="freeze"} && page.note.contains("冻结 1")} }
                 catch(error:Throwable){throw AssertionError("冻结后的状态=${page.note}; RPC=${stub.requests}",error)}
                 assertEquals("C:\\Apps\\demo.exe",stub.requests.single{it.optString("action")=="freeze"}.getString("path"))
                 compose.onNodeWithText("解冻").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
-                compose.waitUntil(8000){stub.requests.any{it.optString("action")=="resume"} && page.note.contains("冻结 0")}
+                waitFor{stub.requests.any{it.optString("action")=="resume"} && page.note.contains("冻结 0")}
                 assertEquals("held",stub.requests.single{it.optString("action")=="resume"}.getString("freeze_id"))
             }finally{controller.pause().stop().destroy()}
         }
@@ -52,11 +72,11 @@ class WorkspaceManagementUiTest {
         Stub().use { first ->Stub().use { second ->
             first.install();val controller=Robolectric.buildActivity(ApplicationsActivity::class.java).setup();val page=controller.get()
             try {
-                compose.waitUntil(8000){page.note.contains("已识别")}
+                waitFor{page.note.contains("已识别")}
                 second.install()
                 compose.onNodeWithText("启动").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
                 compose.onNodeWithText("确认").performSemanticsAction(SemanticsActions.OnClick){it()}
-                compose.waitUntil(8000){page.note.contains("电脑已切换")}
+                waitFor{page.note.contains("电脑已切换")}
                 assertFalse(first.requests.any{it.optString("cmd")=="files"})
                 assertFalse(second.requests.any{it.optString("cmd")=="files"})
             }finally{controller.pause().stop().destroy()}
