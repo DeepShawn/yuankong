@@ -164,8 +164,8 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     private fun Screen() = Scaffold(topBar={ WorkspaceHeader("LanCmd",subtitle=if(connected)"已连接 · 远程工作区" else "等待连接 · 远程工作区") }) { insets ->
         Column(modifier = Modifier.fillMaxSize().padding(insets)) {
             SectionCard {
-                InfoItem(deviceName.ifBlank { getString(R.string.status_idle) }, deviceSub)
-                if (latencyText.isNotBlank()) RowItem("延迟", latencyText) { pingOnce() }
+                if(latencyText.isNotBlank())RowItem(deviceName.ifBlank{getString(R.string.status_idle)},listOf(deviceSub,latencyText).filter{it.isNotBlank()}.joinToString(" · ")){pingOnce()}
+                else InfoItem(deviceName.ifBlank { getString(R.string.status_idle) }, deviceSub)
                 ActionRow {
                     Action("工具库", modifier = Modifier.weight(1f)) { ToolNavigator.show(this@MainActivity) }
                     Action("外观主题", modifier = Modifier.weight(1f)) { ThemeDialog(this@MainActivity).show() }
@@ -243,7 +243,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     private fun Console() {
         SectionCard("命令控制台") {
             if (consoleText.isBlank()) EmptyNote("连接后在下方输入命令，输出显示在这里。")
-            else Column(Modifier.fillMaxWidth().heightIn(max=240.dp).verticalScroll(rememberScrollState())) {
+            else Column(Modifier.fillMaxWidth().heightIn(max=360.dp).verticalScroll(rememberScrollState())) {
                 SelectionContainer { Note(consoleText.takeLast(8000)) }
             }
             Action("清空控制台") { consoleText = "" }
