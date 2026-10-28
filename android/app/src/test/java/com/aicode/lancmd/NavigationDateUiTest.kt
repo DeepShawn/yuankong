@@ -112,17 +112,22 @@ class NavigationDateUiTest {
     }
     @Test fun deviceFailureRemainsBesideItsCardAfterRefreshAndFiltering() {
         Stub().use { stub->
-            stub.install();val c=Robolectric.buildActivity(PrivacyDevicesActivity::class.java).setup();val root=c.get().window.decorView
-            waitFor { buttons(root).any { it.text=="停用设备" && it.isEnabled } }
-            buttons(root).single { it.contentDescription=="筛选摄像头" }.performClick()
-            buttons(root).single { it.text=="停用设备" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            // 隐私设备页已迁移到 Compose（miuix）：失败提示按设备编号留在该设备的卡片上，
+            // 刷新和切换分类都不会把它挪到全局状态里。
+            stub.install();val c=Robolectric.buildActivity(PrivacyDevicesActivity::class.java).setup()
+            val page=c.get();val root=page.window.decorView
+            waitFor { page.devices.isNotEmpty() && !page.busy }
+            page.selectedKind="camera"
+            val camera=page.devices.single { it.kind=="camera" }
+            page.confirmToggle(camera);shadowOf(Looper.getMainLooper()).idle()
             latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.contentDescription=="设备操作结果 camera" && it.text.contains("驱动拒绝") } && buttons(root).any { it.text=="刷新设备状态" && it.isEnabled } }
+            waitFor { page.feedback["camera"]?.first?.contains("驱动拒绝")==true && !page.busy }
+            assertTrue("失败提示应标记为错误",page.feedback.getValue("camera").second)
             preview(root,"privacy-device-failure")
-            buttons(root).single { it.contentDescription=="筛选麦克风" }.performClick()
-            assertFalse(all(root).filterIsInstance<TextView>().any { it.contentDescription=="设备操作结果 camera" })
-            buttons(root).single { it.contentDescription=="筛选摄像头" }.performClick()
-            assertTrue(all(root).filterIsInstance<TextView>().any { it.contentDescription=="设备操作结果 camera" })
+            page.selectedKind="microphone";shadowOf(Looper.getMainLooper()).idle()
+            assertTrue("切换分类不丢弃该设备的结果",page.feedback.containsKey("camera"))
+            page.selectedKind="camera";shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(page.feedback.getValue("camera").first.contains("驱动拒绝"))
             c.pause().stop().destroy()
         }
     }

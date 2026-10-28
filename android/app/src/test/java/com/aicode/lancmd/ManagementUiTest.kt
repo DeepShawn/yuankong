@@ -151,25 +151,26 @@ class ManagementUiTest {
             waitFor { stub.requests.any { it.optString("action")=="forget" } }
             assertEquals("lock-entry",stub.requests.single { it.optString("action")=="forget" }.getString("lock_id"))
             lock.pause().stop().destroy()
-            val privacy=Robolectric.buildActivity(PrivacyDevicesActivity::class.java).setup();val root=privacy.get().window.decorView
-            waitFor { buttons(root).any { it.text=="停用设备" && it.isEnabled } && buttons(root).any { it.text=="静音麦克风" && it.isEnabled } && all(root).filterIsInstance<TextView>().any { it.text.contains("已读取 1 个设备") } }
-            buttons(root).single { it.text=="停用设备" }.performClick()
+            // 隐私设备页已迁移到 Compose（miuix）：操作入口由页面提供，
+            // 启停仍必须经过手机上的确认框。
+            val privacy=Robolectric.buildActivity(PrivacyDevicesActivity::class.java).setup()
+            val page=privacy.get();val root=page.window.decorView
+            waitFor { page.devices.size==1 && !page.busy }
+            val mic=page.devices.single()
+            assertTrue("启停需要管理员且驱动状态可改",page.admin && mic.changeable)
+            assertTrue("麦克风支持静音",mic.microphone && mic.muted!=null && mic.enabled)
+            page.confirmToggle(mic)
             shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="set_enabled" })
             val confirmation=ShadowDialog.getLatestDialog() as AlertDialog
             confirmation.getButton(AlertDialog.BUTTON_NEGATIVE).performClick();shadowOf(Looper.getMainLooper()).idle()
-            waitFor { !confirmation.isShowing && buttons(root).any { it.text=="静音麦克风" && it.isEnabled } }
+            waitFor { !confirmation.isShowing }
             assertFalse(stub.requests.any { it.optString("action")=="set_enabled" })
-            buttons(root).single { it.text=="静音麦克风" }.performClick()
-            try { waitFor { stub.requests.any { it.optString("action")=="mute" } } }
-            catch(error:AssertionError) {
-                val states=buttons(root).map { "${it.text}:enabled=${it.isEnabled}" }
-                val texts=all(root).filterIsInstance<TextView>().map { it.text.toString() }
-                throw AssertionError("Microphone mute not submitted. Buttons=$states; UI=$texts; RPC=${stub.requests}",error)
-            }
+            page.operate(JSONObject().put("action","mute").put("device_id",mic.id).put("muted",mic.muted!=true))
+            waitFor { stub.requests.any { it.optString("action")=="mute" } }
             assertEquals("mic",stub.requests.single { it.optString("action")=="mute" }.getString("device_id"))
-            waitFor { buttons(root).any { it.text=="停用设备" && it.isEnabled } }
-            buttons(root).single { it.text=="停用设备" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            waitFor { !page.busy && page.devices.isNotEmpty() }
+            page.confirmToggle(page.devices.single());shadowOf(Looper.getMainLooper()).idle()
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             waitFor { stub.requests.any { it.optString("action")=="set_enabled" } }
             assertEquals("mic",stub.requests.single { it.optString("action")=="set_enabled" }.getString("device_id"))
