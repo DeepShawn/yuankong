@@ -25,9 +25,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** The picture and controls share all remaining space; neither is below a page scroll. */
 @Composable
-fun WorkingArea(view:View,modifier:Modifier=Modifier,controlFraction:Float=.42f,onResize:()->Unit={},controls:@Composable ColumnScope.()->Unit) {
+fun WorkingArea(view:View,modifier:Modifier=Modifier,controlFraction:Float=.42f,onResize:()->Unit={},horizontal:Boolean?=null,controls:@Composable ColumnScope.()->Unit) {
     var fraction by rememberSaveable { mutableFloatStateOf(controlFraction) }
-    val landscape=LocalConfiguration.current.orientation==Configuration.ORIENTATION_LANDSCAPE
+    val landscape=horizontal ?: (LocalConfiguration.current.orientation==Configuration.ORIENTATION_LANDSCAPE)
     val density=LocalDensity.current
     BoxWithConstraints(modifier.fillMaxSize()) {
         val availableWidth=maxWidth

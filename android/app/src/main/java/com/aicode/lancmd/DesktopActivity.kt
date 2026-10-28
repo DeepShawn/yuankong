@@ -125,7 +125,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                     ) { begin() }
                     Action("停止共享", enabled = sharing, modifier = Modifier.weight(1f)) { stopSession() }
                 }
-            WorkingArea(screen,Modifier.fillMaxWidth().weight(1f),onResize={screen.cancelGesture()}) { Dock() }
+            WorkingArea(screen,Modifier.fillMaxWidth().weight(1f),onResize={screen.cancelGesture()},horizontal=landscape) { Dock() }
 
         }
     }
