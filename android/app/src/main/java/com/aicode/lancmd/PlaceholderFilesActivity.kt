@@ -84,7 +84,7 @@ class PlaceholderFilesActivity : MiuixActivity() {
             if (items.isEmpty()) EmptyNote("本次接收端运行期间暂无占位任务。重启后可在目标目录管理已完成文件。")
             items.forEach { item ->
                 InfoItem(item.title, listOfNotNull(item.modeName, item.path, item.sizeLine).joinToString("\n"))
-                Progress(item.progress)
+                item.progress?.let { Progress(it) }
                 item.error?.let { Note(it) }
                 if (item.waitingDisk) Note("正在等待磁盘响应，进度暂未更新；取消会在当前磁盘调用返回后清理。")
                 if (item.canCancel) Action("取消创建", enabled = !busy) { cancel(item) }

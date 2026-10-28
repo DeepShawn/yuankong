@@ -349,9 +349,14 @@ fun HostedView(view: View, modifier: Modifier = Modifier) {
     )
 }
 
-/** 进度条；[progress] 为 null 时表示进度未知。 */
+/**
+ * 进度条。
+ *
+ * 只接受已知进度：miuix 的不确定进度是一条无限动画，每帧都要重组，
+ * 进度未知时由条目标题说明当前阶段，不画进度条。
+ */
 @Composable
-fun Progress(progress: Float?) {
+fun Progress(progress: Float) {
     LinearProgressIndicator(
         progress = progress,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)

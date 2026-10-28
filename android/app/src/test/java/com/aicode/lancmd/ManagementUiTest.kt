@@ -249,12 +249,11 @@ class ManagementUiTest {
         Stub().use { stub->
             stub.install()
             run {
+                // 任务管理器已迁移到 Compose（miuix）：按页面状态等待读取完成。
                 val controller=Robolectric.buildActivity(TaskManagerActivity::class.java).setup()
-                val root=controller.get().window.decorView
-                waitFor {
-                    val texts=all(root).filterIsInstance<TextView>().map { it.text.toString() }
-                    stub.requests.any { it.optString("cmd")=="tasks" } && texts.any { it.contains("1 个进程") }
-                };shadowOf(Looper.getMainLooper()).idle()
+                val page=controller.get();val root=page.window.decorView
+                waitFor { stub.requests.any { it.optString("cmd")=="tasks" } && page.note.contains("1 个进程") }
+                shadowOf(Looper.getMainLooper()).idle()
                 render(root,"task-manager");controller.pause().stop().destroy()
             }
             // 注册表页已迁移到 Compose（miuix）：核对读取到的子项与值，而不是查 TextView。
@@ -296,15 +295,14 @@ class ManagementUiTest {
         Stub().use { stub->
             stub.taskCanTerminate=true;stub.install()
             val controller=Robolectric.buildActivity(TaskManagerActivity::class.java).setup();val activity=controller.get()
-            waitFor { all(activity.window.decorView).filterIsInstance<TextView>().any { it.text.contains("1 个进程") } }
-            TaskManagerActivity::class.java.getDeclaredMethod("details",JSONObject::class.java).apply { isAccessible=true }
-                .invoke(activity,JSONObject().put("pid",777).put("created","100").put("name","test.exe").put("can_terminate",true))
+            waitFor { activity.note.contains("1 个进程") }
+            activity.details(JSONObject().put("pid",777).put("created","100").put("name","test.exe").put("can_terminate",true))
             shadowOf(Looper.getMainLooper()).idle()
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick();shadowOf(Looper.getMainLooper()).idle()
             val confirmation=ShadowDialog.getLatestDialog() as AlertDialog
             assertFalse(stub.requests.any { it.optString("action")=="terminate" })
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(activity.window.decorView).filterIsInstance<TextView>().any { it.text.contains("成功 1") } }
+            waitFor { activity.note.contains("成功 1") }
             assertFalse(confirmation.isShowing)
             assertEquals(777,stub.requests.single { it.optString("action")=="terminate" }.getInt("pid"))
             confirmation.dismiss();controller.pause().stop().destroy()

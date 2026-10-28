@@ -74,6 +74,8 @@ class DesktopUiTest {
     }
 
     private fun render(activity: DesktopActivity, name: String, width: Int = 411, height: Int = 891) {
+        // 页面是 Compose 的：状态改完要先让重组跑完，再测量和绘制。
+        shadowOf(Looper.getMainLooper()).idle()
         val view = activity.findViewById<View>(android.R.id.content)
         view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
         view.layout(0, 0, width, height)
