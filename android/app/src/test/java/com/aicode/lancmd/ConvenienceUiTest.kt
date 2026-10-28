@@ -87,28 +87,33 @@ class ConvenienceUiTest {
     @Test fun devicePolicyNeedsPhoneConfirmationAndCanRestoreOriginalSettings() {
         Stub().use { stub ->
             stub.install()
+            // 设备页已迁移到 Compose（miuix）：策略入口由页面提供，仍必须经过手机确认框。
             val controller = Robolectric.buildActivity(DevicesActivity::class.java).setup()
-            val root = controller.get().window.decorView
-            fun lock() = buttons(root).single { it.text == "锁定" }
-            waitUntil { buttons(root).any { it.text == "锁定" && it.isEnabled } }
-            lock().performClick()
+            val page = controller.get()
+            val root = page.window.decorView
+            fun storage() = page.policies.single { it.scope == "storage" }
+            fun lock() = page.confirm("锁定？", "锁定", JSONObject().put("action", "policy").put("scope", "storage").put("mode", "blocked"))
+            waitUntil { page.policies.isNotEmpty() && !page.busy && page.admin }
+            assertEquals("允许访问", storage().mode)
+            lock()
             var dialog = ShadowDialog.getLatestDialog() as AlertDialog
             assertFalse(stub.requests.any { it.optString("action") == "policy" })
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
             assertFalse(stub.requests.any { it.optString("action") == "policy" })
-            lock().performClick()
+            lock()
             dialog = ShadowDialog.getLatestDialog() as AlertDialog
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitUntil { buttons(root).any { it.text == "解锁 / 恢复原策略" && it.isEnabled } }
+            waitUntil { storage().mode == "禁止访问" && !page.busy }
             val change = stub.requests.single { it.optString("action") == "policy" }
             assertEquals("storage", change.getString("scope"))
             assertEquals("blocked", change.getString("mode"))
             render(root, "removable-devices")
-            buttons(root).single { it.text == "解锁 / 恢复原策略" }.performClick()
+            assertTrue("锁定后才能恢复原策略", storage().managed)
+            page.confirm("解锁 / 恢复原策略？", "恢复", JSONObject().put("action", "policy").put("scope", "storage").put("mode", "allow"))
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitUntil { stub.requests.count { it.optString("action") == "policy" } == 2 &&
-                buttons(root).any { it.text == "锁定" && it.isEnabled } }
+            waitUntil { stub.requests.count { it.optString("action") == "policy" } == 2 && !page.busy }
             assertEquals("allow", stub.requests.last { it.optString("action") == "policy" }.getString("mode"))
+            assertEquals("允许访问", storage().mode)
             controller.pause().stop().destroy()
         }
     }
@@ -117,15 +122,18 @@ class ConvenienceUiTest {
         Stub().use { stub ->
             stub.admin = false
             stub.install()
+            // 设备页已迁移到 Compose（miuix）：按 admin 与设备标记判断可用性。
             val controller = Robolectric.buildActivity(DevicesActivity::class.java).setup()
-            val root = controller.get().window.decorView
-            waitUntil { buttons(root).any { it.text == "锁定" } }
-            assertTrue(buttons(root).filter { it.text != "刷新设备与策略" && it.text != "隐私设备 · 摄像头 / 麦克风" }.all { !it.isEnabled })
+            val page = controller.get()
+            waitUntil { page.policies.isNotEmpty() && !page.busy }
+            assertFalse("标准权限下不能改策略", page.admin)
             stub.admin = true
-            buttons(root).single { it.text == "刷新设备与策略" }.performClick()
-            waitUntil { buttons(root).any { it.text == "锁定" && it.isEnabled } }
-            assertFalse(buttons(root).single { it.text == "安全弹出 System USB" }.isEnabled)
-            assertTrue(buttons(root).single { it.text == "安全弹出 Test USB" }.isEnabled)
+            page.load()
+            waitUntil { page.admin && !page.busy }
+            val system = page.devices.single { it.name == "System USB" }
+            val removable = page.devices.single { it.name == "Test USB" }
+            assertTrue("系统磁盘禁止弹出", system.protectedDisk)
+            assertTrue(removable.ejectable && !removable.protectedDisk)
             controller.pause().stop().destroy()
         }
     }
@@ -134,14 +142,14 @@ class ConvenienceUiTest {
         Stub().use { first ->
             first.install()
             val controller = Robolectric.buildActivity(DevicesActivity::class.java).setup()
-            val root = controller.get().window.decorView
-            waitUntil { buttons(root).any { it.text == "锁定" && it.isEnabled } }
-            buttons(root).single { it.text == "锁定" }.performClick()
+            val page = controller.get()
+            waitUntil { page.policies.isNotEmpty() && !page.busy && page.admin }
+            page.confirm("锁定？", "锁定", JSONObject().put("action", "policy").put("scope", "storage").put("mode", "blocked"))
             val dialog = ShadowDialog.getLatestDialog() as AlertDialog
             Stub().use { second ->
                 second.install()
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-                waitUntil { buttons(root).single { it.text == "刷新设备与策略" }.isEnabled }
+                waitUntil { !page.busy }
                 assertFalse(first.requests.any { it.optString("action") == "policy" })
                 assertFalse(second.requests.any { it.optString("cmd") == "devices" })
             }

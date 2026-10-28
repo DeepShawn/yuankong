@@ -206,12 +206,14 @@ class ManagementUiTest {
     }
     @Test fun recordingStopAndDeleteKeepEntityIdSeparateFromRequestId() {
         Stub().use { stub->
-            stub.install();val controller=Robolectric.buildActivity(RecordingsActivity::class.java).setup();val root=controller.get().window.decorView
-            waitFor { buttons(root).any { it.text=="停止录制" && it.isEnabled } }
-            buttons(root).single { it.text=="停止录制" }.performClick()
-            waitFor { buttons(root).any { it.text=="删除" && it.isEnabled } }
+            // 录制页已迁移到 Compose（miuix）：直接驱动页面的停止与删除入口。
+            stub.install();val controller=Robolectric.buildActivity(RecordingsActivity::class.java).setup()
+            val page=controller.get()
+            waitFor { page.records.any { it.active } && !page.busy }
+            page.stop(page.records.first { it.active })
+            waitFor { stub.requests.any { it.optString("action")=="stop" } && !page.busy }
             assertEquals("recording-entry",stub.requests.single { it.optString("action")=="stop" }.getString("recording_id"))
-            buttons(root).single { it.text=="删除" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            page.confirmDelete(page.records.first());shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="delete" })
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             waitFor { stub.requests.any { it.optString("action")=="delete" } }

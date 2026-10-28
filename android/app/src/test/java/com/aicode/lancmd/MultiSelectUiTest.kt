@@ -118,22 +118,36 @@ class MultiSelectUiTest {
     }
     @Test fun oldReceiverDisablesForceDisconnectWithCompleteUpgradeInstructions() {
         Stub().use { stub->
-            stub.version="2.4.0";stub.install();val c=Robolectric.buildActivity(DevicesActivity::class.java).setup();val root=c.get().window.decorView
-            waitFor { texts(root).any { it.contains("替换完整 Windows 包") } }
-            assertFalse(button(root,"强制断开 Test USB").isEnabled)
-            assertTrue(button(root,"安全弹出 Test USB").isEnabled)
+            // 设备页已迁移到 Compose（miuix）：按页面状态断言强制断开不可用、安全弹出仍可用。
+            stub.version="2.4.0";stub.install();val c=Robolectric.buildActivity(DevicesActivity::class.java).setup()
+            val page=c.get()
+            waitFor { page.devices.isNotEmpty() && !page.busy }
+            assertFalse("旧接收端不应支持强制断开",page.connectionSupported)
+            assertTrue(usbUpgradeMessage(stub.version).contains("替换完整 Windows 包"))
+            assertTrue(page.admin)
+            val device=page.devices.single { it.name=="Test USB" }
+            assertTrue("安全弹出仍应可用",device.ejectable&&!device.protectedDisk)
             assertFalse(stub.requests.any { it.optString("action")=="force_disconnect" })
             c.pause().stop().destroy()
         }
     }
     @Test fun mismatchedReceiverModulesTranslateInvalidActionWithoutRetrying() {
         Stub().use { stub->
-            stub.install();val c=Robolectric.buildActivity(DevicesActivity::class.java).setup();val root=c.get().window.decorView
-            waitFor { all(root).filterIsInstance<MaterialButton>().any { it.text=="强制断开 Test USB" && it.isEnabled } }
-            button(root,"强制断开 Test USB").performClick();shadowOf(Looper.getMainLooper()).idle();val confirmation=latest()
+            // 设备页已迁移到 Compose（miuix）：经页面确认框触发强制断开，断言不重试且入口随后关闭。
+            stub.install();val c=Robolectric.buildActivity(DevicesActivity::class.java).setup()
+            val page=c.get()
+            waitFor { page.devices.isNotEmpty() && !page.busy && page.connectionSupported }
+            val device=page.devices.single { it.name=="Test USB" }
+            page.confirm(
+                "强制断开 ${device.name}？","测试确认",
+                JSONObject().put("action","force_disconnect").put("device_id",device.id)
+                    .put("confirm_data_loss",true)
+            )
+            shadowOf(Looper.getMainLooper()).idle();val confirmation=latest()
+            assertFalse(stub.requests.any { it.optString("action")=="force_disconnect" })
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { texts(root).any { it.contains("替换完整 Windows 包") } }
-            assertFalse(confirmation.isShowing);assertFalse(button(root,"强制断开 Test USB").isEnabled)
+            waitFor { !page.busy && !page.connectionSupported }
+            assertFalse(confirmation.isShowing)
             assertEquals(1,stub.requests.count { it.optString("action")=="force_disconnect" })
             c.pause().stop().destroy()
         }

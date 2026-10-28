@@ -179,9 +179,16 @@ class PlaceholderUiTest {
             val forced=stub.requests.single { it.optString("action")=="force_disconnect" }
             assertTrue(forced.getBoolean("confirm_data_loss"));assertEquals("USBSTOR\\TEST",forced.getString("device_id"))
             controller.pause().stop().destroy()
-            val devices=Robolectric.buildActivity(DevicesActivity::class.java).setup();val deviceRoot=devices.get().window.decorView
-            waitFor { buttons(deviceRoot).any { it.text=="恢复连接 · Test USB" && it.isEnabled } }
-            buttons(deviceRoot).single { it.text=="恢复连接 · Test USB" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            // 设备页已迁移到 Compose（miuix）：从页面状态取恢复记录，经确认框恢复连接。
+            val devices=Robolectric.buildActivity(DevicesActivity::class.java).setup();val page=devices.get()
+            waitFor { page.records.isNotEmpty() && !page.busy && page.admin && page.connectionSupported }
+            val record=page.records.single { it.name=="Test USB" }
+            assertTrue("强制断开的设备应可恢复",record.restorable)
+            page.confirm(
+                "恢复 USB 存储连接？","测试确认",
+                JSONObject().put("action","restore_connection").put("device_id",record.id)
+            )
+            shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="restore_connection" })
             latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             waitFor { stub.requests.any { it.optString("action")=="restore_connection" } }
