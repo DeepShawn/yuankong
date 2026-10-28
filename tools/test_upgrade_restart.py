@@ -98,4 +98,29 @@ class UpgradeDisconnectTest(unittest.TestCase):
                 path.write_text(str(os.getpid()));agent.cleanup_pid();self.assertFalse(path.exists())
 
 
+@unittest.skipUnless(os.name=="nt","Windows exclusive listener rebinding")
+class NativeUpgradeConnectionTest(unittest.TestCase):
+    def test_disconnect_releases_exclusive_port_for_immediate_restart(self):
+        import lan_command_agent as agent
+        listener=agent.bind_listener(dict(bind="127.0.0.1",port=0),attempts=1)
+        port=listener.getsockname()[1];clients=[];accepted=[];new_listener=None
+        try:
+            for _ in range(2):
+                client=socket.create_connection(("127.0.0.1",port),timeout=2);clients.append(client)
+                peer,_=listener.accept();accepted.append(peer)
+            states=[SimpleNamespace(sock=peer,close_transfers=lambda:None) for peer in accepted]
+            with mock.patch.object(agent,'STOP',threading.Event()),mock.patch.object(agent,'_upgrade_exit_ready',threading.Event()),mock.patch.object(agent,'_connections',states),mock.patch.object(agent,'_tcp_listener',listener),mock.patch.object(agent._app_freeze,'close'),mock.patch.object(agent,'cleanup_pid'),mock.patch.object(agent.os,'_exit'):
+                agent.upgrade_stop()
+            # Do not wait for the phones to close their sides or for TIME_WAIT.
+            new_listener=agent.bind_listener(dict(bind="127.0.0.1",port=port),attempts=1)
+            with socket.create_connection(("127.0.0.1",port),timeout=2) as fresh:
+                peer,_=new_listener.accept()
+                with peer:peer.sendall(b"ready")
+                self.assertEqual(b"ready",fresh.recv(5))
+        finally:
+            listener.close()
+            if new_listener is not None:new_listener.close()
+            for sock in clients+accepted:sock.close()
+
+
 if __name__=='__main__':unittest.main()
