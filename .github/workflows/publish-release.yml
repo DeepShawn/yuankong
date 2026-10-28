@@ -131,6 +131,9 @@ jobs:
                       raise SystemExit('Missing SQLite runtime: ' + name)
               for name in ('storage_reads.py', 'cursor_visibility.py', 'start.bat'):
                   source = subprocess.check_output(['git', 'show', tag + ':windows/' + name])
+                  if name == 'start.bat':
+                      # Match .gitattributes: Git stores LF, checkout/package uses CRLF.
+                      source = source.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
                   if package.read('LanCmd-Windows/' + name) != source:
                       raise SystemExit('Windows startup file differs from tagged source: ' + name)
               for name in ('Start.exe', 'LanCmdAgent.exe', 'LanCmdCtl.exe', 'LanCmdCapture.exe', 'LanCmdRecord.exe'):
