@@ -2,7 +2,9 @@ package com.aicode.lancmd
 
 import android.content.Context
 import android.os.Bundle
+import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
@@ -322,6 +325,28 @@ fun ActionRow(content: @Composable RowScope.() -> Unit) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) { content() }
+}
+
+/**
+ * 承载一个自绘 View（画面、画板、虚拟键盘）。
+ *
+ * 每个节点自带容器，并在 update 时把 [view] 搬进来：同一个 View 实例可能出现在
+ * 界面的不同分支（例如全屏与非全屏），直接交给 AndroidView 的 factory 会让它
+ * 同时挂在两个节点上，然后被反复 attach / detach。
+ */
+@Composable
+fun HostedView(view: View, modifier: Modifier = Modifier) {
+    AndroidView(
+        factory = { FrameLayout(it) },
+        modifier = modifier,
+        update = { host ->
+            if (view.parent !== host) {
+                (view.parent as? ViewGroup)?.removeView(view)
+                host.removeAllViews()
+                host.addView(view, ViewGroup.LayoutParams(-1, -1))
+            }
+        }
+    )
 }
 
 /** 进度条；[progress] 为 null 时表示进度未知。 */

@@ -20,7 +20,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -98,7 +97,7 @@ class MediaActivity : MiuixActivity() {
     private fun Screen() {
         // 全屏只保留等比画面和退出按钮；画面本身继续按 FIT_CENTER 显示，黑边不裁切。
         if (fullscreen) Box(modifier = Modifier.fillMaxSize()) {
-            AndroidView(factory = { image }, modifier = Modifier.fillMaxSize())
+            HostedView(image, Modifier.fillMaxSize())
             Action("退出全屏", modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
                 showFullscreen(false)
             }
@@ -111,10 +110,7 @@ class MediaActivity : MiuixActivity() {
                     enabled = devicesReady
                 )
             }
-            AndroidView(
-                factory = { image },
-                modifier = Modifier.fillMaxWidth().height(320.dp).padding(horizontal = 12.dp, vertical = 6.dp)
-            )
+            HostedView(image, Modifier.fillMaxWidth().height(320.dp).padding(horizontal = 12.dp, vertical = 6.dp))
             SectionCard {
                 ActionRow {
                     Action(

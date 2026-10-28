@@ -9,7 +9,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
 import com.aicode.lancmd.net.ConnectionManager
 import com.aicode.lancmd.net.RemoteLease
@@ -96,11 +95,8 @@ class ControlActivity : MiuixActivity() {
             }
         }
         SectionCard("虚拟键盘") {
-            AndroidView(
-                factory = { keyboard },
-                update = { it.isEnabled = controlling },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
-            )
+            keyboard.isEnabled = controlling
+            HostedView(keyboard, Modifier.fillMaxWidth().height(300.dp).padding(vertical = 6.dp))
         }
         SectionCard("文字输入") {
             Field(

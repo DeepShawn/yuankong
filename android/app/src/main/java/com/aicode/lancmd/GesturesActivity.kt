@@ -12,7 +12,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import com.aicode.lancmd.net.RemoteLease
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -73,10 +72,7 @@ class GesturesActivity : MiuixActivity() {
                 enabled = !recording && !playing
             )
         }
-        AndroidView(
-            factory = { board },
-            modifier = Modifier.fillMaxWidth().height(300.dp).padding(horizontal = 12.dp, vertical = 6.dp)
-        )
+        HostedView(board, Modifier.fillMaxWidth().height(300.dp).padding(horizontal = 12.dp, vertical = 6.dp))
         SectionCard {
             ActionRow {
                 Action(

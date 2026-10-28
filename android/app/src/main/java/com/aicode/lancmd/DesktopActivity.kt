@@ -25,7 +25,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -113,7 +112,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
     private fun Screen() {
         // 全屏只保留画面和退出按钮。
         if (fullscreen) Box(modifier = Modifier.fillMaxSize()) {
-            AndroidView(factory = { screen }, modifier = Modifier.fillMaxSize())
+            HostedView(screen, Modifier.fillMaxSize())
             Action("退出全屏", modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
                 showFullscreen(false)
             }
@@ -131,18 +130,12 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
             }
             // 横屏把画面和控制区并排，竖屏上下排。
             if (landscape) Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                AndroidView(
-                    factory = { screen },
-                    modifier = Modifier.weight(1f).fillMaxHeight().padding(8.dp)
-                )
+                HostedView(screen, Modifier.weight(1f).fillMaxHeight().padding(8.dp))
                 Column(modifier = Modifier.width(300.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
                     Dock()
                 }
             } else Column(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                AndroidView(
-                    factory = { screen },
-                    modifier = Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp)
-                )
+                HostedView(screen, Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp))
                 Column(
                     modifier = Modifier.fillMaxWidth()
                         .height(if (mode == 1 && virtualKeyboardExpanded) 432.dp else 240.dp)
@@ -226,11 +219,10 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                 if (virtualKeyboardExpanded) "收起虚拟键盘" else "展开虚拟键盘",
                 enabled = sharing
             ) { toggleVirtualKeyboard() }
-            if (virtualKeyboardExpanded) AndroidView(
-                factory = { virtual },
-                update = { it.isEnabled = sharing },
-                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
-            )
+            if (virtualKeyboardExpanded) {
+                virtual.isEnabled = sharing
+                HostedView(virtual, Modifier.fillMaxWidth().height(300.dp).padding(vertical = 6.dp))
+            }
             Field(
                 label = "输入文字到电脑",
                 value = keyboardText,
