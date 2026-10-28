@@ -48,7 +48,7 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
                     if(report.isNotBlank())Note(report)
                     if(restarting) {
                         Note("更新会先断开连接，退出旧接收端，再解压替换并运行 start.bat；启动 CMD 自动退出。手机会等待原电脑重新连接并显示结果。")
-                        Action("重新检查连接"){ConnectionManager.retryNow();watchUpgrade()}
+                        Action("重新检查连接"){resumedUpdate=true;ConnectionManager.retryNow();watchUpgrade()}
                     }
                 }}
                 if(packages.isEmpty() && !restarting)item{EmptyNote("尚未发现 ZIP 升级包")}
