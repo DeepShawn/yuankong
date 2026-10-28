@@ -1,0 +1,111 @@
+package com.aicode.lancmd
+
+import android.app.Application
+import android.os.Looper
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import com.aicode.lancmd.net.AgentClient
+import com.aicode.lancmd.net.ConnectionManager
+import kotlinx.coroutines.*
+import org.json.JSONArray
+import org.json.JSONObject
+import org.junit.*
+import org.junit.Assert.*
+import org.junit.runner.RunWith
+import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.ConscryptMode
+import java.io.Closeable
+import java.io.IOException
+import java.net.ServerSocket
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk=[33],application=Application::class)
+@ConscryptMode(ConscryptMode.Mode.OFF)
+class UpgradeUiTest {
+    @get:Rule val compose=createEmptyComposeRule()
+    @Before fun before()=disconnect()
+    @After fun after()=disconnect()
+    private fun disconnect(){ConnectionManager.stop();runBlocking{(ConnectionManager::class.java.getDeclaredField("loopJob").apply{isAccessible=true}.get(ConnectionManager) as? Job)?.join()};shadowOf(Looper.getMainLooper()).idle()}
+    private fun waitFor(check:()->Boolean){val end=System.currentTimeMillis()+8000;while(System.currentTimeMillis()<end){shadowOf(Looper.getMainLooper()).idleFor(50,TimeUnit.MILLISECONDS);if(check())return;Thread.sleep(10)};fail("升级状态未更新")}
+    private fun confirm(stub:Stub){
+        waitFor{stub.requests.any{it.optString("cmd")=="upgrade"}}
+        compose.onNodeWithText("校验并安装").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
+        assertFalse(stub.requests.any{it.optString("action")=="apply"})
+        compose.onNodeWithText("开始升级").performSemanticsAction(SemanticsActions.OnClick){it()}
+        waitFor{stub.requestId.isNotBlank()}
+    }
+
+    @Test fun installationConfirmsThenTracksTheSameComputerAcrossDisconnectAndRecreation() {
+        Stub().use {old ->Stub(version="3.4.2",phase="completed").use {fresh ->
+            old.install();val controller=Robolectric.buildActivity(UpgradeActivity::class.java).setup()
+            try {
+                confirm(old);waitFor{controller.get().restarting}
+                old.client.close();ConnectionManager::class.java.getDeclaredField("client").apply{isAccessible=true}.set(ConnectionManager,null)
+                controller.recreate()
+                fresh.reportId=old.requestId;fresh.install()
+                waitFor{controller.get().note.contains("升级已完成") && !controller.get().restarting}
+                compose.onNodeWithText("3.4.2").assertExists()
+                assertTrue(fresh.requests.any{it.optString("cmd")=="upgrade" && !it.optBoolean("include_packages",true)})
+                assertEquals(1,old.requests.count{it.optString("action")=="apply"})
+            }finally{controller.pause().stop().destroy()}
+        }}
+    }
+    @Test fun reportsFromAnOlderUpgradeCannotCompleteTheCurrentOperation() {
+        Stub().use {old ->Stub(version="3.4.2",phase="completed").use {fresh ->
+            old.install();val controller=Robolectric.buildActivity(UpgradeActivity::class.java).setup();val page=controller.get()
+            try {
+                confirm(old);fresh.reportId="0".repeat(32);old.client.close();fresh.install()
+                waitFor{page.note.contains("等待此次更新")}
+                assertTrue(page.restarting)
+                fresh.reportId=old.requestId
+                waitFor{page.note.contains("升级已完成") && !page.restarting}
+            }finally{controller.pause().stop().destroy()}
+        }}
+    }
+    @Test fun reconnectionToAnotherComputerNeverReceivesUpgradeQueries() {
+        Stub().use {old ->Stub(identity="different-pc").use {other ->
+            old.install();val controller=Robolectric.buildActivity(UpgradeActivity::class.java).setup();val page=controller.get()
+            try {
+                confirm(old);old.client.close();other.install()
+                waitFor{page.note.contains("另一台电脑")}
+                assertTrue(other.requests.isEmpty())
+            }finally{controller.pause().stop().destroy()}
+        }}
+    }
+    private class Stub(val identity:String="same-pc",val version:String="3.4.1",val phase:String=""):Closeable {
+        val server=ServerSocket(0);val client=AgentClient("127.0.0.1",server.localPort)
+        val requests=CopyOnWriteArrayList<JSONObject>()
+        @Volatile var requestId=""
+        @Volatile var reportId=""
+        val thread=Thread {
+            try{server.accept().use {socket ->
+                val input=socket.getInputStream().bufferedReader();val output=socket.getOutputStream().bufferedWriter()
+                while(true){val q=JSONObject(input.readLine()?:break);val result=JSONObject().put("id",q.getInt("id")).put("ok",true)
+                    if(q.optString("action")=="apply") {
+                        requestId=q.getString("request_id")
+                        result.put("restarting",true).put("version","3.4.2").put("request_id",requestId).put("message","准备退出旧接收端")
+                    }else {
+                        result.put("directory","C:\\LanCmd\\upgrade").put("current",version)
+                            .put("items",JSONArray().put(JSONObject().put("name","LanCmd-Windows-3.4.2.zip").put("size",1234).put("sha256","a".repeat(64))))
+                            .put("status",JSONObject().put("status",phase).put("version","3.4.2").put("request_id",reportId))
+                    }
+                    requests.add(q);output.write(result.toString()+"\n");output.flush()
+                }
+            }}catch(_:IOException){}
+        }.apply{isDaemon=true;start()}
+        fun install(){
+            val app=RuntimeEnvironment.getApplication()
+            Prefs.saveTarget(app,Target("127.0.0.1",server.localPort,"Test PC",identity))
+            runBlocking{withContext(Dispatchers.IO){client.connect()}}
+            ConnectionManager::class.java.getDeclaredField("client").apply{isAccessible=true}.set(ConnectionManager,client)
+        }
+        override fun close(){client.close();server.close();thread.join(2000)}
+    }
+}

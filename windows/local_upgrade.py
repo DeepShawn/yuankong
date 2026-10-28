@@ -1,5 +1,5 @@
 """Local, explicitly selected portable ZIP upgrades. This module never uses a network."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import ctypes
 import hashlib
 import json
@@ -18,7 +18,8 @@ import zipfile
 
 LIMIT=512*1024*1024
 MANIFEST="release-manifest.json"
-REQUIRED={"LanCmdAgent.exe","LanCmdCtl.exe","Start.exe","lan_command_agent.py","local_upgrade.py","python/pythonw.exe","python/python311.dll"}
+REQUIRED={"LanCmdAgent.exe","LanCmdCtl.exe","Start.exe","start.bat","lan_command_agent.py","local_upgrade.py","python/pythonw.exe","python/python311.dll"}
+REMOTE_COMMANDS={"upgrade","capabilities","screen","camera","session","input","pointer","local_input","cursor","gestures"}
 
 class RecoveryError(OSError):pass
 
@@ -62,7 +63,7 @@ def build_manifest(root,release,source=""):
     files={}
     for path in sorted(root.rglob("*")):
         name=path.relative_to(root).as_posix()
-        if path.is_dir() or name==MANIFEST or name.split("/")[0] in ("upgrade","__pycache__"):continue
+        if path.is_dir() or name==MANIFEST or name.split("/")[0] in ("upgrade",".upgrade","__pycache__"):continue
         relative(name);info=ordinary(path)
         files[name]=dict(size=info.st_size,sha256=digest(path))
     if not REQUIRED.issubset(files):raise ValueError("Windows 包缺少必要运行文件")
@@ -74,7 +75,7 @@ def unpack(package,destination,current):
     """Validate all entries and hashes before touching the installed directory."""
     package=Path(package);info=ordinary(package)
     if info.st_size>LIMIT:raise ValueError("升级 ZIP 不得超过 512 MiB")
-    destination=Path(destination)
+    destination=Path(destination) if destination is not None else None
     with zipfile.ZipFile(package) as archive:
         members=archive.infolist()
         if len(members)>2000 or sum(m.file_size for m in members)>LIMIT:raise ValueError("升级包展开后过大或文件过多")
@@ -112,19 +113,23 @@ def unpack(package,destination,current):
             if entry is None or entry[0]!=name or entry[1].is_dir() or entry[1].file_size!=record["size"]:raise ValueError("升级包与清单不一致："+name)
         actual={key for key,(_,entry) in by_name.items() if not entry.is_dir()}
         if actual!=expected:raise ValueError("升级包含未列入清单的文件")
-        destination.mkdir(parents=True,exist_ok=False)
+        if destination is not None:destination.mkdir(parents=True,exist_ok=False)
         try:
             for name,record in files.items():
-                target=destination/str(relative(name));target.parent.mkdir(parents=True,exist_ok=True)
+                target=destination/str(relative(name)) if destination is not None else None
+                if target is not None:target.parent.mkdir(parents=True,exist_ok=True)
                 sha=hashlib.sha256();size=0
-                with archive.open(by_name[name.casefold()][1]) as source,target.open("xb") as out:
+                with archive.open(by_name[name.casefold()][1]) as source,(target.open("xb") if target is not None else nullcontext()) as out:
                     for block in iter(lambda:source.read(1024*1024),b""):
                         size+=len(block)
                         if size>record["size"]:raise ValueError("升级内容超过清单大小")
-                        sha.update(block);out.write(block)
+                        sha.update(block)
+                        if out is not None:out.write(block)
                 if size!=record["size"] or sha.hexdigest()!=record["sha256"]:raise ValueError("升级文件校验失败："+name)
-            write_json(destination/MANIFEST,manifest)
-        except Exception:shutil.rmtree(destination,ignore_errors=True);raise
+            if destination is not None:write_json(destination/MANIFEST,manifest)
+        except Exception:
+            if destination is not None:shutil.rmtree(destination,ignore_errors=True)
+            raise
     return manifest
 
 
@@ -174,16 +179,19 @@ def rollback(root,backup,entries):
 class LocalUpgrade:
     def __init__(self,root,state,release,busy=lambda:None,stop=lambda:None,prepare=lambda:None):
         self.root=Path(root);self.state=Path(state);self.release=release;self.busy=busy;self.stop=stop;self.prepare=prepare
-        self.lock=threading.RLock();self.active=0;self.draining=False
+        self.lock=threading.RLock();self.active=0;self.draining=False;self.commands={}
 
     @contextmanager
     def operation(self,command):
         with self.lock:
             if self.draining and command not in ("upgrade","capabilities"):raise ValueError("接收端正在升级，请稍后重连")
             self.active+=1
+            self.commands[command]=self.commands.get(command,0)+1
         try:yield
         finally:
-            with self.lock:self.active-=1
+            with self.lock:
+                self.active-=1;self.commands[command]-=1
+                if not self.commands[command]:self.commands.pop(command)
 
     def request(self,q,error):
         try:
@@ -192,7 +200,7 @@ class LocalUpgrade:
                 directory=self.root/"upgrade";directory.mkdir(exist_ok=True);ordinary(directory,True)
                 if q.get("action","list")=="list":
                     items=[]
-                    for path in list(directory.iterdir())[:200]:
+                    for path in (list(directory.iterdir())[:200] if q.get("include_packages",True) else []):
                         if len(items)>=5:break
                         if path.suffix.lower()!=".zip":continue
                         try:
@@ -204,43 +212,184 @@ class LocalUpgrade:
                     except (OSError,ValueError):pass
                     return dict(items=items,directory=str(directory),current=self.release,status=report)
                 if q.get("action")!="apply" or self.draining:raise ValueError("升级已经开始或操作无效")
+                request_id=q.get("request_id",uuid.uuid4().hex)
+                if not isinstance(request_id,str) or not re.fullmatch("[0-9a-f]{32}",request_id):raise ValueError("升级请求编号无效")
                 name=q.get("name")
                 if not isinstance(name,str) or Path(name).name!=name or "/" in name or "\\" in name or not name.lower().endswith(".zip"):raise ValueError("请选择 upgrade 中的 ZIP")
                 if getattr(sys,"frozen",False) or not (self.root/"python/pythonw.exe").is_file():raise ValueError("请先使用包含 python 文件夹的完整 Windows 便携包")
-                if self.active>1:raise ValueError("其他操作正在进行，请停止共享并稍后再试")
+                if any(command not in REMOTE_COMMANDS for command in self.commands):raise ValueError("其他文件或系统操作正在进行，请稍后再试")
                 reason=self.busy()
                 if reason:raise ValueError(reason)
                 self.draining=True
                 try:
-                    package=directory/name
-                    if not re.fullmatch("[0-9a-f]{64}",str(q.get("sha256",""))) or digest(package)!=q["sha256"]:raise ValueError("ZIP 在选择后已变化，请刷新升级列表")
+                    package=directory/name;ordinary(package)
+                    if not re.fullmatch("[0-9a-f]{64}",str(q.get("sha256",""))):raise ValueError("请刷新升级列表后选择 ZIP")
                     self.state.mkdir(parents=True,exist_ok=True)
-                    work=Path(tempfile.mkdtemp(prefix="lancmd-upgrade-",dir=self.state))
+                    # Stage and backup must share the installation's volume.
+                    # APPDATA is often C: while the portable receiver is on D:/USB.
+                    workspace=self.root/".upgrade";workspace.mkdir(exist_ok=True);ordinary(workspace,True)
+                    work=Path(tempfile.mkdtemp(prefix="run-",dir=workspace))
+                    process=None
                     try:
-                        manifest=unpack(package,work/"stage",self.release)
+                        copied=work/"package.zip";shutil.copyfile(package,copied)
+                        if digest(copied)!=q["sha256"]:raise ValueError("ZIP 在选择后已变化，请刷新升级列表")
+                        # Verify without extraction while the old receiver is live.
+                        # Actual extraction happens only after its process exits.
+                        manifest=unpack(copied,None,self.release)
                         self.prepare()
-                        if shutil.disk_usage(self.root).free<sum(v["size"] for v in manifest["files"].values())+64*1024*1024:raise ValueError("安装盘空间不足以保留回退备份")
+                        if shutil.disk_usage(self.root).free<sum(v["size"] for v in manifest["files"].values())*2+64*1024*1024:raise ValueError("安装盘空间不足以解压并保留回退备份")
                         runtime=work/"runtime";shutil.copytree(self.root/"python",runtime,symlinks=False)
                         shutil.copyfile(__file__,runtime/"local_upgrade.py")
-                        plan=dict(root=str(self.root),work=str(work),parent=os.getpid(),state=str(self.state/"upgrade-status.json"),version=manifest["version"],files=list(manifest["files"]))
+                        plan=dict(root=str(self.root),work=str(work),parent=os.getpid(),state=str(self.state/"upgrade-status.json"),version=manifest["version"],previous=self.release,request_id=request_id,files=list(manifest["files"]))
                         write_json(work/"plan.json",plan)
                         process=subprocess.Popen([str(runtime/"pythonw.exe"),str(runtime/"local_upgrade.py"),"--apply",str(work/"plan.json")],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=0x08000000,close_fds=True,cwd=str(runtime))
                         deadline=time.monotonic()+10
                         while not (work/"ready").exists():
                             if process.poll() is not None or time.monotonic()>deadline:raise ValueError("升级恢复进程未就绪，接收端保持运行")
                             time.sleep(.05)
-                        write_json(self.state/"upgrade-status.json",dict(status="prepared",version=manifest["version"],backup=str(work/"backup")))
-                    except Exception:shutil.rmtree(work,ignore_errors=True);raise
-                    threading.Timer(1.5,self.stop).start()
-                    return dict(restarting=True,version=manifest["version"],message="已校验本地 ZIP；正在关闭接收端并升级，请等待重连")
+                        write_json(self.state/"upgrade-status.json",dict(status="prepared",version=manifest["version"],request_id=request_id,backup=str(work/"backup")))
+                    except Exception:
+                        if process is not None and process.poll() is None:
+                            process.terminate();process.wait(timeout=5)
+                        shutil.rmtree(work,ignore_errors=True);raise
+                    def disconnect():
+                        try:write_json(self.state/"upgrade-status.json",dict(status="disconnecting",version=manifest["version"],request_id=request_id,backup=str(work/"backup")))
+                        finally:self.stop()
+                    threading.Timer(1.5,disconnect).start()
+                    return dict(restarting=True,version=manifest["version"],request_id=request_id,message="已校验本地 ZIP；将断开当前连接，解压替换后自动运行 start.bat 并关闭 CMD，请等待重连")
                 except Exception:self.draining=False;raise
         except (OSError,ValueError,TypeError,zipfile.BadZipFile) as exc:raise error(str(exc))
 
 
+
+def process_birth(kernel,handle):
+    from ctypes import wintypes as w
+    kernel.GetProcessTimes.argtypes=[w.HANDLE,*([ctypes.POINTER(w.FILETIME)]*4)]
+    birth,exit_,system,user=w.FILETIME(),w.FILETIME(),w.FILETIME(),w.FILETIME()
+    if not kernel.GetProcessTimes(handle,ctypes.byref(birth),ctypes.byref(exit_),ctypes.byref(system),ctypes.byref(user)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return str((birth.dwHighDateTime<<32)|birth.dwLowDateTime)
+
+
+class WindowsProcess:
+    """Hold the verified process handle; never terminate by a possibly reused PID."""
+    def __init__(self,pid,created=None,image=None):
+        from ctypes import wintypes as w
+        if type(pid) is not int or pid<=0:raise ValueError("启动进程编号无效")
+        self.pid=pid;self.handle=None
+        self.kernel=kernel=ctypes.WinDLL("kernel32",use_last_error=True)
+        kernel.OpenProcess.argtypes=[w.DWORD,w.BOOL,w.DWORD];kernel.OpenProcess.restype=w.HANDLE
+        kernel.WaitForSingleObject.argtypes=[w.HANDLE,w.DWORD]
+        kernel.TerminateProcess.argtypes=[w.HANDLE,w.UINT];kernel.CloseHandle.argtypes=[w.HANDLE]
+        self.handle=kernel.OpenProcess(0x101001,False,pid)  # synchronize/query/terminate
+        if not self.handle:raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            if created is not None and process_birth(kernel,self.handle)!=created:raise ValueError("启动进程已变化，未操作其他进程")
+            if image is not None:
+                kernel.QueryFullProcessImageNameW.argtypes=[w.HANDLE,w.DWORD,w.LPWSTR,ctypes.POINTER(w.DWORD)]
+                value=ctypes.create_unicode_buffer(32768);length=w.DWORD(len(value))
+                if not kernel.QueryFullProcessImageNameW(self.handle,0,value,ctypes.byref(length)) or Path(value.value).resolve()!=Path(image).resolve():
+                    raise ValueError("启动进程路径不匹配，未操作其他进程")
+        except Exception:self.close();raise
+    def alive(self):return self.kernel.WaitForSingleObject(self.handle,0)==258
+    def stop(self):
+        if not self.alive():return
+        if not self.kernel.TerminateProcess(self.handle,1):raise ctypes.WinError(ctypes.get_last_error())
+        if self.kernel.WaitForSingleObject(self.handle,10000)!=0:raise ValueError("新版进程未退出，保留备份，未覆盖运行中的文件")
+    def close(self):
+        if self.handle is not None:self.kernel.CloseHandle(self.handle);self.handle=None
+
+
+def launch_receiver():
+    """The --upgrade branch of start.bat calls this without opening a console."""
+    root=Path(__file__).resolve().parent
+    started=os.environ.get("LANCMD_UPGRADE_STARTED","")
+    nonce=os.environ.get("LANCMD_UPGRADE_NONCE","")
+    if not started or not re.fullmatch("[0-9a-f]{32}",nonce):raise ValueError("缺少升级启动上下文")
+    env=os.environ.copy();env["LANCMD_EXE"]=str(root/"LanCmdAgent.exe")
+    env["PYTHONUTF8"]="1";env["PYTHONIOENCODING"]="utf-8"
+    env.pop("LANCMD_UPGRADE_BATCH",None);env.pop("LANCMD_UPGRADE_STARTED",None)
+    log=Path(started).with_suffix(".log")
+    with log.open("ab") as output:
+        process=subprocess.Popen([str(root/"python/pythonw.exe"),str(root/"lan_command_agent.py")],
+            cwd=str(root),env=env,stdin=subprocess.DEVNULL,stdout=output,stderr=output,creationflags=0x08000000,close_fds=True)
+    try:
+        kernel=ctypes.WinDLL("kernel32",use_last_error=True)
+        write_json(started,dict(pid=process.pid,created=process_birth(kernel,int(process._handle)),nonce=nonce))
+    except Exception:
+        if process.poll() is None:process.terminate();process.wait(10)
+        raise
+
+
+class ReceiverStart:
+    def __init__(self,root,work,release):
+        self.root=Path(root);self.work=Path(work);self.release=release
+        self.nonce=uuid.uuid4().hex;self.receiver=None
+        self.ready=self.work/("healthy-"+self.nonce+".json")
+        self.started=self.work/("started-"+self.nonce+".json")
+        env=os.environ.copy();env["LANCMD_EXE"]=str(self.root/"LanCmdAgent.exe")
+        env["LANCMD_UPGRADE_READY"]=str(self.ready);env["LANCMD_UPGRADE_STARTED"]=str(self.started)
+        env["LANCMD_UPGRADE_NONCE"]=self.nonce
+        self.legacy=b"LANCMD_UPGRADE_BOOTSTRAP_V1" not in (self.root/"start.bat").read_bytes()
+        self.output=(self.work/("start-"+self.nonce+".log")).open("ab")
+        try:
+            if self.legacy:
+                # Old start.bat has pause and may invoke GUI error dialogs.
+                # This path is only needed when recovering a pre-3.4.2 release.
+                self.command=subprocess.Popen([str(self.root/"python/pythonw.exe"),str(self.root/"lan_command_agent.py")],
+                    cwd=str(self.root),env=env,stdin=subprocess.DEVNULL,stdout=self.output,stderr=self.output,creationflags=0x08000000,close_fds=True)
+                self.receiver=WindowsProcess(self.command.pid,image=self.root/"python/pythonw.exe")
+            else:
+                cmd=Path(os.environ.get("SystemRoot",r"C:\Windows"))/"System32/cmd.exe"
+                env["LANCMD_UPGRADE_BATCH"]=str(self.root/"start.bat")
+                # Expand the quoted path once via an environment variable. CALL
+                # would expand '%' a second time and break legitimate folder names.
+                command='"%s" /d /s /v:off /c ""%%LANCMD_UPGRADE_BATCH%%" --upgrade"'%cmd
+                self.command=subprocess.Popen(command,executable=str(cmd),cwd=str(self.root),env=env,
+                    stdin=subprocess.DEVNULL,stdout=self.output,stderr=self.output,creationflags=0x08000000,close_fds=True)
+        except Exception:
+            if hasattr(self,"command") and self.command.poll() is None:
+                self.command.terminate();self.command.wait(5)
+            self.output.close();raise
+
+    def wait_ready(self,timeout=25):
+        deadline=time.monotonic()+timeout
+        while time.monotonic()<deadline:
+            if self.receiver is None and self.started.exists():
+                info=json.loads(self.started.read_text(encoding="utf-8"))
+                if info.get("nonce")!=self.nonce:raise ValueError("启动回执不匹配")
+                self.receiver=WindowsProcess(info.get("pid"),info.get("created"),self.root/"python/pythonw.exe")
+            code=self.command.poll()
+            if code is not None and (self.legacy or code!=0):raise ValueError("接收端启动命令失败，日志："+str(self.work))
+            if self.receiver is not None:
+                if not self.receiver.alive():raise ValueError("新版接收端启动后已退出")
+                if self.ready.exists():
+                    health=json.loads(self.ready.read_text(encoding="utf-8"))
+                    expected=dict(version=self.release,pid=self.receiver.pid)
+                    if not self.legacy:expected["nonce"]=self.nonce
+                    if health==expected:
+                        if not self.legacy:
+                            try:code=self.command.wait(5)
+                            except subprocess.TimeoutExpired:raise ValueError("start.bat 未退出，未确认 CMD 已关闭") from None
+                            if code:raise ValueError("start.bat 执行失败")
+                        return self.receiver.pid
+            time.sleep(.1)
+        raise ValueError("接收端启动超时，日志："+str(self.work))
+
+    def stop(self):
+        if self.receiver is not None:self.receiver.stop()
+        if self.command.poll() is None and not self.legacy:
+            self.command.terminate();self.command.wait(5)
+    def close(self):
+        if self.receiver is not None:self.receiver.close()
+        self.output.close()
+
+
 def helper(plan):
-    """Runs from a private runtime outside the installation, with no visible console."""
+    """Wait for disconnection/old process exit, extract, replace, then run start.bat."""
     from ctypes import wintypes as w
     root=Path(plan["root"]);work=Path(plan["work"]);state=Path(plan["state"])
+    def report(status,**details):write_json(state,dict(status=status,version=plan["version"],request_id=plan.get("request_id",""),backup=str(work/"backup"),**details))
     kernel=ctypes.WinDLL("kernel32",use_last_error=True)
     kernel.OpenProcess.argtypes=[w.DWORD,w.BOOL,w.DWORD];kernel.OpenProcess.restype=w.HANDLE
     kernel.WaitForSingleObject.argtypes=[w.HANDLE,w.DWORD];kernel.CloseHandle.argtypes=[w.HANDLE]
@@ -248,13 +397,9 @@ def helper(plan):
     if not handle:raise ctypes.WinError(ctypes.get_last_error())
     (work/"ready").touch()
     try:
-        # Timeout cancels instead of stopping any unrelated/reused PID.
-        if kernel.WaitForSingleObject(handle,30000)!=0:raise ValueError("原接收端未退出，升级已取消")
+        if kernel.WaitForSingleObject(handle,60000)!=0:
+            report("cancelled",error="原接收端未退出，升级已取消，原文件未替换");return
     finally:kernel.CloseHandle(handle)
-    def report(status,**details):write_json(state,dict(status=status,version=plan["version"],backup=str(work/"backup"),**details))
-    def launch():
-        env=os.environ.copy();env["LANCMD_EXE"]=str(root/"LanCmdAgent.exe");env["LANCMD_UPGRADE_READY"]=str(work/"healthy.json")
-        return subprocess.Popen([str(root/"python/pythonw.exe"),str(root/"lan_command_agent.py")],cwd=str(root),env=env,creationflags=0x08000000,close_fds=True)
     def replace(source,target):
         deadline=time.monotonic()+45
         while True:
@@ -262,11 +407,14 @@ def helper(plan):
             except PermissionError:
                 if time.monotonic()>=deadline:raise
                 time.sleep(.25)
-    entries=None
+    entries=None;process=None
     try:
+        report("extracting")
+        manifest=unpack(work/"package.zip",work/"stage",plan["previous"])
+        if manifest["version"]!=plan["version"] or list(manifest["files"])!=plan["files"]:raise ValueError("升级计划与完整包不一致")
+        if b"LANCMD_UPGRADE_BOOTSTRAP_V1" not in (work/"stage/start.bat").read_bytes():raise ValueError("升级包缺少自动退出的 start.bat，请使用完整新版 ZIP")
         report("installing")
-        # Close only this installation's visible panel so its EXE can be replaced.
-        from ctypes import wintypes
+        # Only this installation's panel is closed; unrelated CMD windows remain.
         user=ctypes.WinDLL("user32",use_last_error=True)
         user.FindWindowW.argtypes=[w.LPCWSTR,w.LPCWSTR];user.FindWindowW.restype=w.HWND
         hwnd=user.FindWindowW("LanCmdPanel",None)
@@ -281,31 +429,29 @@ def helper(plan):
                         user.PostMessageW.argtypes=[w.HWND,w.UINT,w.WPARAM,w.LPARAM];user.PostMessageW(hwnd,0x10,0,0)
                 finally:kernel.CloseHandle(proc)
         entries=install(root,work/"stage",work/"backup",plan["files"],replace)
-        process=launch()
-        # The receiver writes an atomic readiness marker after opening its TCP port.
-        ready=work/"healthy.json"
-        deadline=time.monotonic()+25
-        while time.monotonic()<deadline:
-            if ready.exists():
-                health=json.loads(ready.read_text(encoding="utf-8"))
-                if health==dict(version=plan["version"],pid=process.pid):break
-            if process.poll() is not None:raise ValueError("新版接收端启动失败")
-            time.sleep(.2)
-        else:
-            process.terminate();process.wait(10);raise ValueError("新版接收端启动超时")
-        ready.unlink(missing_ok=True);report("completed",pid=process.pid)
+        report("starting")
+        process=ReceiverStart(root,work,plan["version"])
+        pid=process.wait_ready()
+        report("completed",pid=pid,start_via="start.bat",cmd_closed=True)
         shutil.rmtree(work/"stage",ignore_errors=True)
     except Exception as exc:
-        if isinstance(exc,RecoveryError):
-            report("failed",error=str(exc)[:2000]);return
         try:
+            if process is not None:process.stop();process.close();process=None
+            if isinstance(exc,RecoveryError):raise exc
             if entries is not None:rollback(root,work/"backup",entries)
-            restored=launch();report("rolled_back",error=str(exc)[:1600],pid=restored.pid)
+            process=ReceiverStart(root,work,plan["previous"])
+            pid=process.wait_ready()
+            report("rolled_back",error=str(exc)[:1600],pid=pid)
         except Exception as recovery:report("failed",error=str(exc)[:1200]+"；恢复失败："+str(recovery)[:1200])
-
+    finally:
+        if process is not None:process.close()
 
 if __name__=="__main__":
+    if sys.argv[1:]==["--launch-receiver"]:
+        try:launch_receiver()
+        except Exception:sys.exit(2)
+        sys.exit(0)
     if len(sys.argv)==3 and sys.argv[1]=="--apply":
         plan=json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
         try:helper(plan)
-        except Exception as exc:write_json(plan["state"],dict(status="cancelled",error=str(exc)[:1600],version=plan["version"]))
+        except Exception as exc:write_json(plan["state"],dict(status="cancelled",error=str(exc)[:1600],version=plan["version"],request_id=plan.get("request_id","")))

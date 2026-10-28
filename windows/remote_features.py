@@ -436,6 +436,6 @@ class RemoteFeatures:
         return {"sent": True}
 
     def close(self, state):
-        for session in getattr(state, "remote_sessions", {}).values():
+        for session in list(getattr(state, "remote_sessions", {}).values()):
             session.close()
         getattr(state, "remote_sessions", {}).clear()

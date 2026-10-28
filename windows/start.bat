@@ -1,4 +1,5 @@
 @echo off
+if /i "%~1"=="--upgrade" goto :upgrade_bootstrap
 chcp 936 >nul 2>&1
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -83,3 +84,13 @@ goto :end
 echo.
 pause
 endlocal
+exit /b 0
+
+:upgrade_bootstrap
+rem LANCMD_UPGRADE_BOOTSTRAP_V1 - no pause, no GUI launcher, cmd /c exits.
+setlocal DisableDelayedExpansion
+cd /d "%~dp0"
+if not defined LANCMD_UPGRADE_STARTED exit /b 2
+if not exist "python\python.exe" exit /b 3
+"python\python.exe" -B "local_upgrade.py" --launch-receiver
+exit /b %errorlevel%
