@@ -30,7 +30,7 @@ class AudioDialog(private val activity: AppCompatActivity) {
         var loaded = false
         var job: Job? = null
         lateinit var mute: MaterialButton
-        val dialog = AlertDialog.Builder(activity).setTitle("电脑音量").setView(body).setNegativeButton("关闭", null).create()
+        val dialog = WorkspaceDialog.Builder(activity).setTitle("电脑音量").setView(body).setNegativeButton("关闭", null).create()
         fun update(params: JSONObject = JSONObject().put("action", "get")) {
             if (job?.isActive == true) return
             controls.forEach { it.isEnabled = false }

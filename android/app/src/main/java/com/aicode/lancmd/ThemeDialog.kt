@@ -53,7 +53,7 @@ class ThemeDialog(private val activity: AppCompatActivity) {
             setPadding(dp(4), dp(10), dp(4), 0)
         })
         refresh()
-        AlertDialog.Builder(activity)
+        WorkspaceDialog.Builder(activity)
             .setTitle("外观主题")
             .setView(ScrollView(activity).apply { addView(body) })
             .setNegativeButton("取消", null)

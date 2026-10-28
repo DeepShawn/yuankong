@@ -53,83 +53,28 @@ class BrowserActivity : MiuixActivity() {
     }
 
     @Composable
-    private fun Page() {
-        Scaffold(
-            topBar = {
-                SmallTopAppBar(
-                    title = "电脑浏览器",
-                    navigationIcon = {
-                        IconButton(onClick = { finish() }) {
-                            Icon(painterResource(R.drawable.ic_back), "返回")
-                        }
-                    }
-                )
+    private fun Page() = Page("电脑浏览器") {
+        SectionCard("发送网址") {
+            Field("网址",address,{address=it})
+            ChoiceField(browsers.map{it.name},"使用浏览器",browsers.indexOfFirst{it.id==selectedBrowser}.coerceAtLeast(0)) { index ->
+                browsers.getOrNull(index)?.let{selectedBrowser=it.id}
             }
-        ) { insets ->
-            androidx.compose.foundation.layout.Column(
-                modifier = Modifier.fillMaxWidth().padding(insets).verticalScroll(rememberScrollState())
-            ) {
-                StatusNote(noteText.value, noteFailed.value)
-                SmallTitle("发送网址")
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-                    TextField(
-                        value = address,
-                        onValueChange = { address = it },
-                        label = "网址",
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
-                    )
-                    ChoiceField(
-                        items = browsers.map { it.name },
-                        title = "使用浏览器",
-                        selectedIndex = browsers.indexOfFirst { it.id == selectedBrowser }.coerceAtLeast(0),
-                        onSelectedIndexChange = { index -> browsers.getOrNull(index)?.let { selectedBrowser = it.id } }
-                    )
-                    TextButton(
-                        text = "在电脑打开网址",
-                        onClick = { open(address) },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
-                    )
-                }
-                SmallTitle("保存到手机")
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-                    TextField(
-                        value = linkName,
-                        onValueChange = { linkName = it },
-                        label = "名称（留空用网址主机名）",
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
-                    )
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        TextButton(text = "保存当前网址", onClick = { saveLink() }, modifier = Modifier.weight(1f))
-                        Spacer(modifier = Modifier.width(10.dp))
-                        TextButton(text = "刷新已安装浏览器", onClick = { discover() }, modifier = Modifier.weight(1f))
-                    }
-                }
-                SmallTitle("手机保存的网址")
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) {
-                    if (links.isEmpty()) {
-                        Text(
-                            text = "暂无保存的网址，填好网址后点「保存当前网址」。",
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp),
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-                        )
-                    }
-                    links.forEachIndexed { index, link ->
-                        SuperArrow(
-                            title = link.first,
-                            summary = link.second,
-                            onClick = { address = link.second; open(link.second) }
-                        )
-                        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
-                            TextButton(text = "删除", onClick = { removeLink(index) }, modifier = Modifier.weight(1f))
-                        }
-                    }
-                }
-                Text(
-                    text = "最多保存 50 个网址。仅支持 HTTP / HTTPS。",
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-                )
+            Action("在电脑打开网址",primary=true) {open(address)}
+        }
+        SectionCard("保存到手机") {
+            Field("名称（留空用网址主机名）",linkName,{linkName=it})
+            ActionRow {
+                Action("保存当前网址",modifier=Modifier.weight(1f)){saveLink()}
+                Action("刷新已安装浏览器",modifier=Modifier.weight(1f)){discover()}
             }
+        }
+        SectionCard("手机保存的网址") {
+            if(links.isEmpty())EmptyNote("暂无保存的网址")
+            links.forEachIndexed { index,link ->
+                RowItem(link.first,link.second){address=link.second;open(link.second)}
+                Action("删除"){removeLink(index)}
+            }
+            Note("最多保存 50 个网址。仅支持 HTTP / HTTPS。")
         }
     }
 

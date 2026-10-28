@@ -58,6 +58,10 @@ class FreezeCore:
                      errors=value.get("errors",[])) for key,value in self.jobs.items() if value["owner"]==owner]
 
     def request(self,q):
+        if q.get("action")=="release_all":
+            errors=self.close()
+            if errors:raise ValueError("解冻尚未完成："+"；".join(errors)[:1200])
+            return dict(restored=True)
         owner=q.get("owner","")
         if not isinstance(owner,str) or not owner or len(owner)>200:raise ValueError("连接身份无效")
         action=q.get("action","list")
@@ -190,9 +194,15 @@ class AppFreeze:
 
     def request(self,q,state,error):
         try:
+            if q.get("action","list") not in ("list","freeze","resume"):raise ValueError("无效的应用冻结操作")
             # Worker ownership always comes from the authenticated connection.
             return self._rpc(dict(q,owner=state.client_id))
         except (OSError,ValueError) as exc:raise error(str(exc))
+
+    def prepare_upgrade(self):
+        with self.lock:
+            if self.recovering is not None or self.failure:raise ValueError("冻结恢复未确认完成，请先恢复应用后再升级")
+            if self.process is not None:self._rpc(dict(action="release_all"))
 
     def _heartbeat(self):
         while not self.closed:

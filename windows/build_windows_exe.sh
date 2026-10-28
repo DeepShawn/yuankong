@@ -61,6 +61,14 @@ rm -f "$PKG/python"/_msi.pyd \
       "$PKG/python"/winsound.pyd "$PKG/python"/_decimal.pyd "$PKG/python"/_elementtree.pyd \
       "$PKG/python"/_asyncio.pyd "$PKG/python"/_zoneinfo.pyd "$PKG/python"/_multiprocessing.pyd
 cp "使用说明.txt" "$PKG/使用说明.txt"
+cp local_upgrade.py "$PKG/"
+mkdir -p "$PKG/upgrade"
+cp upgrade/README.txt "$PKG/upgrade/"
+python3 - "$PKG" "$VER" <<'PY'
+import sys
+from local_upgrade import build_manifest
+build_manifest(sys.argv[1],sys.argv[2])
+PY
 
 # 5) 打包
 echo "[5/5] 打 zip"

@@ -116,7 +116,7 @@ class TextEditorActivity : MiuixActivity() {
         if (saving) { status("正在保存，请稍候"); return }
         if (!dirty()) { persistDraft(); finish(); return }
         val retained = persistDraft()
-        AlertDialog.Builder(this).setTitle("有未保存的修改")
+        WorkspaceDialog.Builder(this).setTitle("有未保存的修改")
             .setMessage(
                 if (retained) "草稿已保存在手机；可保存到电脑后退出，或保留草稿稍后继续。"
                 else "手机草稿保存失败，请继续编辑或先保存到电脑。"
@@ -204,7 +204,7 @@ class TextEditorActivity : MiuixActivity() {
     internal fun confirmReload() {
         if (saving || loading) return
         val selected = selectedEncoding()
-        AlertDialog.Builder(this).setTitle("重新读取电脑文件？")
+        WorkspaceDialog.Builder(this).setTitle("重新读取电脑文件？")
             .setMessage("将按 $selected 编码重新读取，当前未保存修改会被替换。也可先另存为保留修改。")
             .setNegativeButton("取消", null)
             .setPositiveButton("重新读取") { _, _ -> persistDraft(); load(selected = selected) }.show()
@@ -242,7 +242,7 @@ class TextEditorActivity : MiuixActivity() {
     internal fun saveAs() {
         if (!loaded || saving || loading) return
         val target = dialogInput(text = "$path.copy.txt")
-        AlertDialog.Builder(this).setTitle("另存为电脑文件")
+        WorkspaceDialog.Builder(this).setTitle("另存为电脑文件")
             .setMessage("目标必须不存在，不覆盖已有文件。").setView(target)
             .setNegativeButton("取消", null)
             .setPositiveButton("保存副本") { _, _ ->

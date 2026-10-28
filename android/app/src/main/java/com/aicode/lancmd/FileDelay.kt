@@ -14,7 +14,7 @@ object FileDelay {
     fun seconds(context:Context)=context.getSharedPreferences("file-operations",Context.MODE_PRIVATE).getInt("delay",0).coerceIn(0,86400)
     fun choose(context:Context,changed:()->Unit={}) {
         val input=EditText(context).apply { inputType=InputType.TYPE_CLASS_NUMBER;setSingleLine();setText(seconds(context).toString());contentDescription="文件操作延迟秒数" }
-        val dialog=AlertDialog.Builder(context).setTitle("文件操作延迟（秒）")
+        val dialog=WorkspaceDialog.Builder(context).setTitle("文件操作延迟（秒）")
             .setMessage("0–86400 秒，0 立即执行。此设置用于后续文件操作；电脑端由 Windows 计时，上传、下载、手机 WPS 需要手机保持连接。")
             .setView(input).setNegativeButton("取消",null).setPositiveButton("保存",null).create()
         dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {

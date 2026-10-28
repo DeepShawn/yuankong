@@ -15,8 +15,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -24,6 +33,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.viewinterop.AndroidView
@@ -96,15 +110,32 @@ private fun lanCmdColors(context: Context): Colors {
 @Composable
 fun StatusNote(text: String, failed: Boolean) {
     if (text.isBlank()) return
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-            color = if (failed) MiuixTheme.colorScheme.onErrorContainer
-            else MiuixTheme.colorScheme.onSurfaceVariantSummary
-        )
+    val expanded = remember(text) { mutableStateOf(false) }
+    val tint=if(failed)MiuixTheme.colorScheme.error else MiuixTheme.colorScheme.primary
+    Card(modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp)
+        .border(1.dp,tint.copy(alpha=.25f),RoundedCornerShape(18.dp)),cornerRadius=18.dp,
+        insideMargin=PaddingValues(12.dp),onClick={expanded.value=!expanded.value}) {
+        Row(horizontalArrangement=Arrangement.spacedBy(10.dp),verticalAlignment=Alignment.CenterVertically) {
+            Text(if(failed)"!" else "✓",color=tint,fontWeight=FontWeight.Bold)
+            Text(text,modifier=Modifier.weight(1f),fontSize=13.sp,lineHeight=19.sp,
+                maxLines=if(expanded.value)Int.MAX_VALUE else 4,overflow=TextOverflow.Ellipsis,
+                color=MiuixTheme.colorScheme.onSurface)
+        }
     }
 }
+
+@Composable
+fun WorkspaceHeader(title:String,back:(()->Unit)?=null,subtitle:String="电脑控制工作区") {
+    Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
+        if(back!=null)IconButton(onClick=back) { Icon(painterResource(R.drawable.ic_back),"返回") }
+        Column(Modifier.weight(1f).padding(start=if(back==null)0.dp else 8.dp)) {
+            Text(subtitle,fontSize=11.sp,letterSpacing=1.sp,color=MiuixTheme.colorScheme.primary)
+            Text(title,fontSize=25.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=4.dp))
+        }
+    }
+}
+
+fun Modifier.workspaceBackground(top:Color,bottom:Color)=background(Brush.verticalGradient(listOf(top,bottom)))
 
 /**
  * 所有页面的基类：提供连接绑定、后台任务和状态提示，界面由 Compose 描述。
@@ -138,19 +169,10 @@ abstract class MiuixActivity : AppCompatActivity() {
     @Composable
     protected fun Page(title: String, content: @Composable ColumnScope.() -> Unit) {
         Scaffold(
-            topBar = {
-                SmallTopAppBar(
-                    title = title,
-                    navigationIcon = {
-                        IconButton(onClick = { onBack() }) {
-                            Icon(painterResource(R.drawable.ic_back), "返回")
-                        }
-                    }
-                )
-            }
+            topBar = { WorkspaceHeader(title, {onBack()}) }
         ) { insets ->
             Column(
-                modifier = Modifier.fillMaxSize().padding(insets).verticalScroll(rememberScrollState())
+                modifier = Modifier.fillMaxSize().workspaceBackground(MiuixTheme.colorScheme.surfaceVariant.copy(alpha=.2f),MiuixTheme.colorScheme.background).padding(insets).verticalScroll(rememberScrollState())
             ) {
                 StatusNote(noteText.value, noteFailed.value)
                 content()
@@ -166,20 +188,25 @@ abstract class MiuixActivity : AppCompatActivity() {
     @Composable
     protected fun FixedPage(title: String, content: @Composable ColumnScope.() -> Unit) {
         Scaffold(
-            topBar = {
-                SmallTopAppBar(
-                    title = title,
-                    navigationIcon = {
-                        IconButton(onClick = { onBack() }) {
-                            Icon(painterResource(R.drawable.ic_back), "返回")
-                        }
-                    }
-                )
-            }
+            topBar = { WorkspaceHeader(title,{onBack()}) }
         ) { insets ->
             Column(modifier = Modifier.fillMaxSize().padding(insets)) {
                 StatusNote(noteText.value, noteFailed.value)
                 content()
+            }
+        }
+    }
+
+    /** Large management lists render only visible rows. */
+    @Composable
+    protected fun ListPage(title: String, content: LazyListScope.() -> Unit) {
+        Scaffold(topBar = {
+            WorkspaceHeader(title,{onBack()})
+        }) { insets ->
+            LazyColumn(Modifier.fillMaxSize().padding(insets)) {
+                item { StatusNote(noteText.value,noteFailed.value) }
+                content()
+                item { Spacer(Modifier.height(20.dp)) }
             }
         }
     }
@@ -274,20 +301,34 @@ fun MiuixColumn(content: @Composable () -> Unit) {
 /** 卡片分区：可选分区标题 + 圆角卡片。 */
 @Composable
 fun SectionCard(title: String? = null, content: @Composable ColumnScope.() -> Unit) {
-    if (title != null) SmallTitle(title)
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) { content() }
+    if (title != null) Row(Modifier.fillMaxWidth().padding(start=22.dp,top=18.dp,bottom=8.dp),verticalAlignment=Alignment.CenterVertically) {
+        Spacer(Modifier.size(4.dp,14.dp).background(MiuixTheme.colorScheme.primary,RoundedCornerShape(2.dp)))
+        Text(title,fontSize=13.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(start=8.dp),color=MiuixTheme.colorScheme.onSurfaceVariantSummary)
+    }
+    Card(modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=5.dp)
+        .border(1.dp,MiuixTheme.colorScheme.outline.copy(alpha=.25f),RoundedCornerShape(24.dp)),
+        cornerRadius=24.dp,insideMargin=PaddingValues(12.dp)) { content() }
 }
 
 /** 列表条目：标题 + 说明，可点击。 */
 @Composable
 fun RowItem(title: String, summary: String? = null, enabled: Boolean = true, onClick: () -> Unit) {
-    SuperArrow(title = title, summary = summary, enabled = enabled, onClick = onClick)
+    Row(Modifier.fillMaxWidth().clickable(enabled=enabled,onClick=onClick).padding(horizontal=8.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title,fontSize=16.sp,fontWeight=FontWeight.Medium,color=MiuixTheme.colorScheme.onSurface.copy(alpha=if(enabled)1f else .4f))
+            if(!summary.isNullOrBlank())Text(summary,fontSize=12.sp,lineHeight=18.sp,modifier=Modifier.padding(top=5.dp),color=MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        }
+        Text("›",fontSize=24.sp,color=MiuixTheme.colorScheme.primary,modifier=Modifier.padding(start=12.dp))
+    }
 }
 
 /** 只读的列表条目：展示状态，不可点击。 */
 @Composable
 fun InfoItem(title: String, summary: String? = null) {
-    BasicComponent(title = title, summary = summary)
+    Column(Modifier.fillMaxWidth().padding(horizontal=8.dp,vertical=12.dp)) {
+        Text(title,fontSize=16.sp,fontWeight=FontWeight.Medium)
+        if(!summary.isNullOrBlank())Text(summary,fontSize=12.sp,lineHeight=18.sp,modifier=Modifier.padding(top=5.dp),color=MiuixTheme.colorScheme.onSurfaceVariantSummary)
+    }
 }
 
 /** 说明文字。 */
@@ -323,7 +364,7 @@ fun Action(
         text = text,
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.padding(vertical = 4.dp),
+        modifier = modifier.padding(vertical = 4.dp).heightIn(min=48.dp),
         colors = if (primary) ButtonDefaults.textButtonColorsPrimary() else ButtonDefaults.textButtonColors()
     )
 }

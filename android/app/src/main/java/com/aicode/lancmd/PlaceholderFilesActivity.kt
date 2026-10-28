@@ -129,7 +129,7 @@ class PlaceholderFilesActivity : MiuixActivity() {
         if (bytes == null) { status("请输入 0–500 GB，最多精确到 1 字节", true); return }
         val selectedMode = if (modeIndex == 1) "fast" else "stable"
         val modeName = if (selectedMode == "stable") "稳定" else "快速"
-        AlertDialog.Builder(this).setTitle("创建并实际占用空间？")
+        WorkspaceDialog.Builder(this).setTitle("创建并实际占用空间？")
             .setMessage(
                 "$path\n\n大小：$sizeText GB（$bytes 字节）\n模式：$modeName\n" +
                     "将实际分配磁盘空间，至少保留 1 GB 可用空间。可在任务中取消；已完成文件可在文件管理删除。"

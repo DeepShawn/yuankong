@@ -94,7 +94,7 @@ class ProcessDialog(
             applyFilter()
         }
 
-        dialog = AlertDialog.Builder(ctx)
+        dialog = WorkspaceDialog.Builder(ctx)
             .setTitle(R.string.process_title)
             .setView(view)
             .setPositiveButton(R.string.end_process, null)
@@ -220,7 +220,7 @@ class ProcessDialog(
     private fun selectable(p: Proc) = p.pid > 1 && p.pid != selfPid
 
     private fun showPrivilegeHelp() {
-        AlertDialog.Builder(ctx)
+        WorkspaceDialog.Builder(ctx)
             .setTitle("电脑接收端权限")
             .setMessage("在电脑打开新版 Start.exe，点击「管理员启动 / 重启」，并在 Windows UAC 中允许。\n\n如果已运行普通权限接收端，需要重启后权限才会改变，手机会短暂断开并自动重连。完成后刷新进程列表查看实际权限。\n\n管理员权限不等于系统最高权限；受保护的系统进程仍可能拒绝操作。")
             .setPositiveButton("知道了", null).show()
@@ -244,7 +244,7 @@ class ProcessDialog(
         val names = targets.take(4).joinToString("、") { "${it.name}(${it.pid})" }
         val more = if (targets.size > 4) " 等 ${targets.size} 个进程" else ""
 
-        AlertDialog.Builder(ctx)
+        WorkspaceDialog.Builder(ctx)
             .setTitle("结束 ${targets.size} 个进程")
             .setMessage("$names$more\n\n强制结束可能丢失未保存数据。")
             .setPositiveButton("结束") { _, _ ->
@@ -296,7 +296,7 @@ class ProcessDialog(
 
     private fun killOne(p: Proc) {
         if (loading || killing || !selectable(p)) return
-        AlertDialog.Builder(ctx)
+        WorkspaceDialog.Builder(ctx)
             .setTitle("结束进程")
             .setMessage("${p.name}\nPID ${p.pid}  ·  ${p.memText}\n\n强制结束可能丢失未保存数据。")
             .setPositiveButton("结束") { _, _ -> doKill(listOf(p)) }

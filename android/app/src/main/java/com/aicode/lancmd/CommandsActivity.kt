@@ -147,7 +147,7 @@ class CommandsActivity : MiuixActivity() {
         val input = dialogInput(text = if (rename) recipe().optString("name") else "").apply {
             filters = arrayOf(InputFilter.LengthFilter(60))
         }
-        val dialog = AlertDialog.Builder(this)
+        val dialog = WorkspaceDialog.Builder(this)
             .setTitle(if (rename) "列表名称" else "新命令列表").setView(input)
             .setNegativeButton("取消", null).setPositiveButton("保存", null).create()
         dialog.setOnShowListener {
@@ -164,7 +164,7 @@ class CommandsActivity : MiuixActivity() {
     }
 
     internal fun deleteRecipe() {
-        AlertDialog.Builder(this).setTitle("删除本地命令列表？")
+        WorkspaceDialog.Builder(this).setTitle("删除本地命令列表？")
             .setMessage("已经提交到电脑的任务不受影响。")
             .setNegativeButton("取消", null)
             .setPositiveButton("删除") { _, _ ->
@@ -198,7 +198,7 @@ class CommandsActivity : MiuixActivity() {
             contentDescription = "等待秒数"
         }
         box.addView(shell); box.addView(line); box.addView(seconds)
-        val dialog = AlertDialog.Builder(this)
+        val dialog = WorkspaceDialog.Builder(this)
             .setTitle(if (index == null) "添加命令" else "编辑命令")
             .setMessage("第一条从启动计时，后续从上一条结束计时。")
             .setView(box)
@@ -228,7 +228,7 @@ class CommandsActivity : MiuixActivity() {
         val value = JSONObject(recipe().toString())
         val items = value.getJSONArray("items")
         if (items.length() == 0) { status("请先添加命令", true); return }
-        AlertDialog.Builder(this).setTitle("启动 ${value.optString("name")}？")
+        WorkspaceDialog.Builder(this).setTitle("启动 ${value.optString("name")}？")
             .setMessage(
                 "共 ${items.length()} 条，按列表顺序执行。每条先等待设定秒数，上一条结束后才开始下一条的等待。\n\n" +
                     "手机断线仍继续；接收端退出则取消。已开始的命令不能通过取消计划撤销。"
@@ -258,7 +258,7 @@ class CommandsActivity : MiuixActivity() {
             setTextIsSelectable(true)
             setPadding(px(16), px(12), px(16), px(12))
         }
-        AlertDialog.Builder(this).setTitle("执行结果（刷新后更新）")
+        WorkspaceDialog.Builder(this).setTitle("执行结果（刷新后更新）")
             .setView(android.widget.ScrollView(this).apply { addView(text) })
             .setPositiveButton("关闭", null).show()
     }
@@ -266,7 +266,7 @@ class CommandsActivity : MiuixActivity() {
     private fun px(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     internal fun confirmCancel(batch: Batch) {
-        AlertDialog.Builder(this).setTitle("取消此计划的后续命令？")
+        WorkspaceDialog.Builder(this).setTitle("取消此计划的后续命令？")
             .setMessage("已经开始的命令继续运行，其余命令取消。")
             .setNegativeButton("返回", null)
             .setPositiveButton("取消计划") { _, _ ->

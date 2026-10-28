@@ -214,10 +214,10 @@ class TaskManagerActivity : MiuixActivity() {
         val message = "PID ${item.getInt("pid")} · 父进程 ${item.optInt("parent")}\n" +
             "内存 ${FileTransfer.humanSize(item.optLong("memory"))}\n$path\n\n" +
             if (item.optBoolean("can_terminate")) "结束会丢失未保存内容。" else "此进程受到保护或当前权限不足。"
-        val dialog = AlertDialog.Builder(this).setTitle(item.optString("name")).setMessage(message)
+        val dialog = WorkspaceDialog.Builder(this).setTitle(item.optString("name")).setMessage(message)
             .setNegativeButton("关闭", null)
             .setNeutralButton("文件 / 应用锁") { _, _ ->
-                if (path.isNotEmpty()) AlertDialog.Builder(this)
+                if (path.isNotEmpty()) WorkspaceDialog.Builder(this)
                     .setItems(arrayOf("在文件管理中定位", "应用锁")) { _, index ->
                         task {
                             pinnedCall(origin, "capabilities")
@@ -242,7 +242,7 @@ class TaskManagerActivity : MiuixActivity() {
 
     internal fun confirmTerminateMany(targets: List<JSONObject>) {
         if (batchBusy || targets.isEmpty()) return
-        AlertDialog.Builder(this)
+        WorkspaceDialog.Builder(this)
             .setTitle(if (targets.size == 1) "结束 ${targets[0].optString("name")}？" else "结束所选 ${targets.size} 项？")
             .setMessage(
                 targets.take(8).joinToString("\n") { "${it.optString("name")} · PID ${it.optInt("pid")}" } +

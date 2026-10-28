@@ -1124,7 +1124,7 @@ from gestures import Gestures
 from app_locks import AppLocks
 from app_catalog import AppCatalog
 from app_freeze import AppFreeze
-from displays import display_request,Wallpaper
+from displays import Wallpaper
 from registry_editor import RegistryEditor
 from task_manager import TaskManager
 from browser_control import browser_request
@@ -1134,6 +1134,29 @@ from placeholder_files import PlaceholderFiles
 from file_jobs import FileJobs, file_token
 from file_schedule import FileSchedule
 from file_search import FileSearch
+from local_upgrade import LocalUpgrade
+import weakref
+_connections=weakref.WeakSet()
+
+def upgrade_busy():
+    if any(st.uploads or st.downloads for st in list(_connections)):return "请先完成或取消手机文件传输"
+    for manager in (_placeholders,_file_jobs,_file_schedule):
+        with manager.lock:
+            if any(not job["done"].is_set() for job in manager.jobs.values()):return "请先完成或取消文件任务、占位文件和延迟文件操作"
+    with _recordings.lock:
+        if any(job["data"]["status"] in ("starting","recording","stopping") for job in _recordings.jobs.values()):return "请先停止录制并等待文件封装完成"
+    with _scripts.lock:
+        if any("finished" not in job["data"] for job in _scripts.jobs.values()):return "请先停止运行中的脚本"
+    with _commands.lock:
+        if any("finished" not in job for job in _commands.batches.values()):return "请先取消或完成延迟命令"
+    with _remote.pointer_lock:
+        if _remote.playback_owner or _remote.pointer_owners:return "请先停止手势回放和拖动"
+    # Worker exit/EOF restores held suspension counts before package replacement.
+    _app_freeze.prepare_upgrade()
+    return None
+
+def upgrade_stop():
+    cleanup_pid();os._exit(0)
 
 _capture_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 
@@ -1177,13 +1200,14 @@ _file_jobs = FileJobs(os.path.join(APP_DIR,"file-jobs.json"),protected=(_capture
 
 
 _file_search = FileSearch(os.path.join(APP_DIR,"file-search"))
+_updates=LocalUpgrade(_capture_dir,os.path.join(APP_DIR,"upgrade"),VERSION,upgrade_busy,upgrade_stop)
 
 
 def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures"])
-        features.extend(["app_locks","app_catalog","app_freeze","displays","monitor_select","wallpaper","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
+        features.extend(["app_locks","app_catalog","app_freeze","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1217,8 +1241,8 @@ HANDLERS = {
     "app_locks": lambda q, st: _app_locks.request(q,RpcError),
     "app_catalog": lambda q, st: _app_catalog.request(q,RpcError),
     "app_freeze": lambda q, st: _app_freeze.request(q,st,RpcError),
-    "displays": lambda q, st: display_request(q,RpcError),
     "wallpaper": lambda q, st: _wallpaper.request(q,RpcError),
+    "upgrade": lambda q, st: _updates.request(q,RpcError),
     "registry": lambda q, st: _registry.request(q,RpcError),
     "tasks": lambda q, st: _tasks.request(q,RpcError),
     "browser": lambda q, st: browser_request(q,RpcError),
@@ -1278,6 +1302,7 @@ class ClientState(object):
         self.uploads = {}
         self.downloads = {}
         self.last_active = time.time()
+        _connections.add(self)
 
     def touch(self):
         self.last_active = time.time()
@@ -1437,7 +1462,8 @@ def serve_client(sock, addr, cfg):
                     raise RpcError("未知命令: %s" % cmd)
                 log.info("%s <- %s", state.client_name or state.peer, cmd)
                 state.touch()
-                result = handler(req, state)
+                with _updates.operation(cmd):
+                    result = handler(req, state)
                 resp = {"id": rid, "ok": True}
                 resp.update(result if isinstance(result, dict) else {"result": result})
                 write_frame(wf, resp)
@@ -1541,6 +1567,10 @@ def bind_listener(cfg, attempts=30):
 def tcp_server(cfg):
     global CLIENT_COUNT
     srv = bind_listener(cfg)
+    ready=os.environ.pop("LANCMD_UPGRADE_READY",None)
+    if ready:
+        from local_upgrade import write_json
+        write_json(ready,dict(version=VERSION,pid=os.getpid()))
     enable_keepalive(srv)
     log.info("TCP 监听 %s:%s", cfg["bind"], cfg["port"])
     while not STOP.is_set():

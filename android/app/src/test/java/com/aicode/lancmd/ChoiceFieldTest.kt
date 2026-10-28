@@ -40,8 +40,7 @@ class ChoiceFieldTest {
         compose.setContent { LanCmdMiuixTheme { ChoiceField(items.value,"浏览器",selected.intValue) { selected.intValue=it } } }
         compose.runOnIdle { items.value=listOf("默认") }
         compose.onNodeWithText("浏览器").performClick()
-        compose.onNodeWithText("取消").performClick()
-        compose.waitUntil(5000) { compose.onAllNodesWithText("取消").fetchSemanticsNodes().isEmpty() }
-        compose.onNodeWithText("浏览器").assertExists()
+        compose.onNodeWithText("默认").performClick()
+        compose.runOnIdle { assertEquals(0,selected.intValue) }
     }
 }

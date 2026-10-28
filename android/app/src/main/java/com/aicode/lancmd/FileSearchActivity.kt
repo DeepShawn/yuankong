@@ -204,7 +204,7 @@ class FileSearchActivity : MiuixActivity() {
     }
 
     internal fun chooseRoots() {
-        AlertDialog.Builder(this).setTitle("选择索引范围")
+        WorkspaceDialog.Builder(this).setTitle("选择索引范围")
             .setItems(arrayOf("全部本地固定磁盘", "选择一个文件夹（含子文件夹）", "沿用上次范围")) { _, index ->
                 when (index) {
                     0 -> if (drives.isEmpty()) status("未找到本地固定磁盘，请选择文件夹", true)
@@ -218,7 +218,7 @@ class FileSearchActivity : MiuixActivity() {
     }
 
     internal fun confirmBuild(selected: List<String>) {
-        AlertDialog.Builder(this).setTitle("建立 / 更新文件索引？")
+        WorkspaceDialog.Builder(this).setTitle("建立 / 更新文件索引？")
             .setMessage(
                 selected.joinToString("\n") +
                     "\n\n首次扫描可能需要较长时间；无权限目录和链接会跳过。最多收录 200 万项，至少保留 1 GB 空闲。" +
@@ -290,7 +290,7 @@ class FileSearchActivity : MiuixActivity() {
             add("在电脑打开")
             if (!item.dir) { add("预览"); add(if (office) "手机 WPS 编辑" else "编辑文本") }
         }
-        AlertDialog.Builder(this).setTitle(item.name)
+        WorkspaceDialog.Builder(this).setTitle(item.name)
             .setItems(labels.toTypedArray()) { _, index -> act(labels[index], item, office) }
             .setNegativeButton("取消", null).show()
     }
@@ -301,7 +301,7 @@ class FileSearchActivity : MiuixActivity() {
                 Intent(this, StorageActivity::class.java)
                     .putExtra("path", item.parent).putExtra("highlight", item.name)
             )
-            "在电脑打开" -> AlertDialog.Builder(this).setTitle("在电脑打开？").setMessage(item.path)
+            "在电脑打开" -> WorkspaceDialog.Builder(this).setTitle("在电脑打开？").setMessage(item.path)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("打开") { _, _ ->
                     task {

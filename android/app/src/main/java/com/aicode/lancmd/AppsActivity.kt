@@ -60,7 +60,7 @@ class AppsActivity : MiuixActivity() {
     internal fun apply(window: Window, action: String) = load(change(window, action))
 
     internal fun confirmClose(window: Window) {
-        AlertDialog.Builder(this).setTitle("关闭 ${window.title}？")
+        WorkspaceDialog.Builder(this).setTitle("关闭 ${window.title}？")
             .setMessage("向此窗口发送正常关闭请求，未保存内容由该程序处理。")
             .setNegativeButton("取消", null)
             .setPositiveButton("关闭") { _, _ -> load(change(window, "close")) }

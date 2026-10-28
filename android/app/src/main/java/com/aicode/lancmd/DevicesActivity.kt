@@ -177,7 +177,7 @@ class DevicesActivity : MiuixActivity() {
     }
 
     internal fun confirm(title: String, message: String, params: JSONObject) {
-        AlertDialog.Builder(this).setTitle(title).setMessage(message)
+        WorkspaceDialog.Builder(this).setTitle(title).setMessage(message)
             .setNegativeButton("取消", null)
             .setPositiveButton("确认") { _, _ -> load(params) }.show()
     }

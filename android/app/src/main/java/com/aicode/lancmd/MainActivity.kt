@@ -13,6 +13,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -35,6 +48,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -109,7 +126,10 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 Tool("任务管理器") { openFeature(TaskManagerActivity::class.java) },
                 Tool("注册表编辑器") { openFeature(RegistryActivity::class.java) },
                 Tool("浏览器") { openFeature(BrowserActivity::class.java) },
-                Tool("应用锁") { openFeature(AppLocksActivity::class.java) }
+                Tool("应用中心") { openFeature(ApplicationsActivity::class.java) },
+                Tool("应用锁") { openFeature(AppLocksActivity::class.java) },
+                Tool("桌面背景") { openFeature(WallpaperActivity::class.java) },
+                Tool("本地升级") { openFeature(UpgradeActivity::class.java) }
             ),
             "录制与自动化" to listOf(
                 Tool("录音 / 录屏") { openFeature(RecordingsActivity::class.java) },
@@ -139,7 +159,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     }
 
     @Composable
-    private fun Screen() = Scaffold { insets ->
+    private fun Screen() = Scaffold(topBar={ WorkspaceHeader("LanCmd",subtitle=if(connected)"已连接 · 远程工作区" else "等待连接 · 远程工作区") }) { insets ->
         Column(modifier = Modifier.fillMaxSize().padding(insets)) {
             SectionCard {
                 InfoItem(deviceName.ifBlank { getString(R.string.status_idle) }, deviceSub)
@@ -162,18 +182,10 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                     }
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp)
-            ) {
-                CATEGORIES.forEach { category ->
-                    Action(category, primary = category == homeCategory) { homeCategory = category }
-                }
-            }
             Column(modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())) {
                 if (homeCategory == "命令控制台") Console() else Tools()
             }
-            SectionCard {
+            if(homeCategory=="命令控制台")SectionCard {
                 Field(
                     label = "输入命令，回车发送",
                     value = commandLine,
@@ -206,6 +218,22 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                     }
                 }
             }
+            HomeDock()
+        }
+    }
+
+    @Composable private fun HomeDock() {
+        val labels=listOf("控制台","共享","文件","系统","自动化")
+        val icons=listOf(R.drawable.ic_terminal,R.drawable.ic_desktop,R.drawable.ic_folder,R.drawable.ic_process,R.drawable.ic_history)
+        Row(Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=8.dp),horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+            CATEGORIES.forEachIndexed { index,category ->
+                val selected=category==homeCategory
+                Column(Modifier.weight(1f).background(if(selected)MiuixTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,RoundedCornerShape(18.dp))
+                    .selectable(selected=selected,role=Role.Tab,onClick={homeCategory=category}).padding(vertical=10.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+                    Icon(painterResource(icons[index]),category,modifier=Modifier.size(21.dp),tint=if(selected)MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    Text(labels[index],fontSize=11.sp,fontWeight=if(selected)FontWeight.Bold else FontWeight.Normal,modifier=Modifier.padding(top=5.dp))
+                }
+            }
         }
     }
 
@@ -220,9 +248,29 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
 
     @Composable
     private fun Tools() {
-        SectionCard(homeCategory) {
-            toolGroups[homeCategory].orEmpty().forEach { tool ->
-                RowItem(tool.label) { openTool(tool.label) }
+        WorkspaceHeader(homeCategory,subtitle="工具与管理")
+        toolGroups[homeCategory].orEmpty().chunked(2).forEach { group ->
+            Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                group.forEach { tool ->
+                    val icon=when(tool.label) {
+                        "文件管理","文件搜索"->R.drawable.ic_folder
+                        "远程桌面","桌面背景"->R.drawable.ic_desktop
+                        "摄像头","隐私设备","录音 / 录屏"->R.drawable.ic_camera
+                        "应用锁"->R.drawable.ic_lock
+                        "浏览器"->R.drawable.ic_browser
+                        "U盘与设备"->R.drawable.ic_usb
+                        "按键","手势回放"->R.drawable.ic_keyboard
+                        "消息"->R.drawable.ic_message
+                        else->R.drawable.ic_process
+                    }
+                    Card(modifier=Modifier.weight(1f),cornerRadius=24.dp,insideMargin=PaddingValues(18.dp),onClick={openTool(tool.label)}) {
+                        Icon(painterResource(icon),null,modifier=Modifier.size(28.dp),tint=MiuixTheme.colorScheme.primary)
+                        Spacer(Modifier.height(20.dp))
+                        Text(tool.label,fontSize=16.sp,fontWeight=FontWeight.SemiBold)
+                        Text("打开工具  ›",fontSize=11.sp,color=MiuixTheme.colorScheme.onSurfaceVariantSummary,modifier=Modifier.padding(top=5.dp))
+                    }
+                }
+                if(group.size==1)Spacer(Modifier.weight(1f))
             }
         }
     }
@@ -314,7 +362,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
 
     internal fun showHistory() {
         if (history.isEmpty()) { toast("还没有历史命令"); return }
-        AlertDialog.Builder(this).setTitle("历史命令")
+        WorkspaceDialog.Builder(this).setTitle("历史命令")
             .setItems(history.toTypedArray()) { _, which -> commandLine = history[which] }
             .setNeutralButton("清空记录") { _, _ -> history.clear() }
             .setNegativeButton("关闭", null).show()
@@ -336,7 +384,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         val more = if (uris.size > 3) " 等 ${uris.size} 个文件" else ""
         val source = runCatching { ConnectionManager.sessionClient() }.getOrElse { return }
         RemoteDirectoryPicker(this).show(uploadDir.ifEmpty { lastPath }) { dir ->
-            AlertDialog.Builder(this).setTitle("发送 ${uris.size} 个文件到电脑")
+            WorkspaceDialog.Builder(this).setTitle("发送 ${uris.size} 个文件到电脑")
                 .setMessage("$preview$more\n\n目标：$dir\n同名文件会被替换。")
                 .setPositiveButton("发送") { _, _ ->
                     if (runCatching { ConnectionManager.sessionClient() === source }.getOrDefault(false)) {
@@ -425,7 +473,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 detail,
                 android.widget.LinearLayout.LayoutParams(-1, -2).apply { topMargin = px(10) }
             )
-            dialog = AlertDialog.Builder(ctx).setView(box)
+            dialog = WorkspaceDialog.Builder(ctx).setView(box)
                 .setNegativeButton("取消") { _, _ -> }
                 .setCancelable(false).create()
             dialog.setOnShowListener {
@@ -546,7 +594,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 maxLines = 10
                 contentDescription = "电脑剪贴板内容"
             }
-            AlertDialog.Builder(this).setTitle("电脑剪贴板").setView(box)
+            WorkspaceDialog.Builder(this).setTitle("电脑剪贴板").setView(box)
                 .setPositiveButton("写回电脑") { _, _ ->
                     run("clip", JSONObject().put("action", "set").put("text", box.text.toString())) {
                         log("✓ 已写入电脑剪贴板", LogKind.OK)
@@ -631,7 +679,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
             "关于" to { about() }
         )
         val labels = entries.keys.toList()
-        AlertDialog.Builder(this).setTitle("更多")
+        WorkspaceDialog.Builder(this).setTitle("更多")
             .setItems(labels.toTypedArray()) { _, index -> entries.getValue(labels[index])() }
             .setNegativeButton("关闭", null).show()
     }
@@ -650,7 +698,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
             hint = "192.168.1.10 或 192.168.1.10:$TCP_PORT",
             text = Prefs.target(this)?.host ?: ""
         )
-        AlertDialog.Builder(this).setTitle("手动输入电脑地址").setView(input)
+        WorkspaceDialog.Builder(this).setTitle("手动输入电脑地址").setView(input)
             .setPositiveButton("连接") { _, _ ->
                 val raw = input.text.toString().trim()
                 if (raw.isEmpty()) return@setPositiveButton
@@ -725,7 +773,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     }
 
     private fun about() {
-        AlertDialog.Builder(this).setTitle("LanCmd ${BuildConfig.VERSION_NAME}")
+        WorkspaceDialog.Builder(this).setTitle("LanCmd ${BuildConfig.VERSION_NAME}")
             .setMessage(
                 "手机控制同一局域网内的电脑。\n\n" +
                     "· 电脑端常驻后台，手机断线不影响它\n" +
@@ -827,14 +875,14 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
      * 安全弹窗：生命周期已结束时静默丢弃，绝不抛异常。
      * 连接成功/失败的回调是异步的，用户完全可能在这期间退出界面。
      */
-    private fun safeDialog(build: AlertDialog.Builder.() -> AlertDialog.Builder) {
+    private fun safeDialog(build: WorkspaceDialog.Builder.() -> WorkspaceDialog.Builder) {
         if (!alive()) return
-        try { build(AlertDialog.Builder(this)).show() }
+        try { build(WorkspaceDialog.Builder(this)).show() }
         catch (t: Throwable) { android.util.Log.e("LanCmd", "弹窗失败: " + t.message, t) }
     }
 
     private fun dialog(title: String, message: String) {
-        AlertDialog.Builder(this).setTitle(title).setMessage(message)
+        WorkspaceDialog.Builder(this).setTitle(title).setMessage(message)
             .setPositiveButton("好", null).show()
     }
 

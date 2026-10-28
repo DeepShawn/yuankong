@@ -5,6 +5,22 @@ import os
 from pathlib import Path
 import shutil
 import uuid
+from contextlib import contextmanager
+
+
+@contextmanager
+def physical_coordinates():
+    if os.name!="nt":yield;return
+    user=ctypes.WinDLL("user32",use_last_error=True)
+    function=getattr(user,"SetThreadDpiAwarenessContext",None)
+    if function is None:
+        user.SetProcessDPIAware()
+        yield;return
+    function.argtypes=[ctypes.c_void_p];function.restype=ctypes.c_void_p
+    previous=function(ctypes.c_void_p(-4))
+    if not previous:raise ctypes.WinError(ctypes.get_last_error())
+    try:yield
+    finally:function(previous)
 
 
 class NativeDisplays:
@@ -22,6 +38,9 @@ class NativeDisplays:
         self.user.GetMonitorInfoW.argtypes=[w.HANDLE,ctypes.POINTER(Monitor)]
 
     def list(self):
+        with physical_coordinates():return self._list()
+
+    def _list(self):
         bounds={}
         def monitor(handle,dc,rect,data):
             info=self.Monitor();info.cbSize=ctypes.sizeof(info)
@@ -40,6 +59,9 @@ class NativeDisplays:
         return result
 
     def enable(self,device):
+        with physical_coordinates():return self._enable(device)
+
+    def _enable(self,device):
         # The device/driver must already exist. This never installs an unsigned IDD.
         class Point(ctypes.Structure):_fields_=[("x",w.LONG),("y",w.LONG)]
         class Mode(ctypes.Structure):

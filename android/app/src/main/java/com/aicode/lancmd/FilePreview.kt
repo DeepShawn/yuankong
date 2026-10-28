@@ -22,7 +22,7 @@ object FilePreview {
             textSize = 13f; setTextIsSelectable(true); text = "正在读取预览…"
         }
         val scroll = ScrollView(activity).apply { addView(text) }
-        val dialog = AlertDialog.Builder(activity).setTitle(path.substringAfterLast('\\').substringAfterLast('/'))
+        val dialog = WorkspaceDialog.Builder(activity).setTitle(path.substringAfterLast('\\').substringAfterLast('/'))
             .setView(scroll).setPositiveButton("关闭", null).create()
         val job = activity.lifecycleScope.launch {
             try {

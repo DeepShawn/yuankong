@@ -31,7 +31,7 @@ class CatalogTest(unittest.TestCase):
             result=catalog.request({},Error)
             self.assertEqual(1,len(result["items"]))
             app=result["items"][0]
-            self.assertEqual(str(path),app["path"]);self.assertTrue(app["can_lock"])
+            self.assertEqual(str(path.resolve()),app["path"]);self.assertTrue(app["can_lock"])
             self.assertEqual(1,app["running"]);self.assertEqual("1.0",app["version"])
             self.assertEqual(10,app["processes"][0]["pid"])
             self.assertIs(result,catalog.request({},Error));self.assertEqual(1,len(calls))
