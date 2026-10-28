@@ -111,6 +111,24 @@ class NativeWorkspaceTest(unittest.TestCase):
                 process.terminate();process.wait(5)
 
 
+    def test_close_rejects_stale_identity_and_ends_only_this_tests_own_child(self):
+        from unittest import mock
+        child=subprocess.Popen([sys.executable,"-c","import time;time.sleep(60)"],creationflags=0x08000000)
+        native=NativeSuspension((Path(__file__).resolve().parents[1]/"windows",))
+        try:
+            item=native.processes.info(child.pid)
+            self.assertTrue(item["can_terminate"],item)
+            core=FreezeCore(native,lambda path:(path,[]))
+            stale=dict(item,created=str(int(item["created"])+1))
+            with mock.patch.object(native,"list_matching",return_value=[stale]),self.assertRaises(ValueError):
+                core.request(dict(action="close",owner="phone",path=item["path"]))
+            self.assertIsNone(child.poll())
+            with mock.patch.object(native,"list_matching",return_value=[item]):
+                result=core.request(dict(action="close",owner="phone",path=item["path"]))
+            self.assertEqual(1,result["closed"]);child.wait(5)
+        finally:
+            if child.poll() is None:child.terminate();child.wait(5)
+
 
 class ResponsiveOperationsTest(unittest.TestCase):
     def test_slow_catalog_build_is_single_flight_and_returns_loading_without_holding_cache_lock(self):
@@ -150,6 +168,20 @@ class ResponsiveOperationsTest(unittest.TestCase):
         self.assertEqual('completed',control.request(dict(action='job',job_id=job_id),owner,Error)['job']['status'])
         self.assertEqual('held',control.request(dict(action='state'),owner,Error)['items'][0]['id'])
         self.assertEqual('phone',control._rpc.call_args.args[0]['owner'])
+
+    def test_failed_background_operation_is_reported_without_a_success_result(self):
+        from app_freeze import AppFreeze
+        from unittest import mock
+        control=AppFreeze.__new__(AppFreeze)
+        control.jobs_lock=threading.RLock();control.jobs={};control.snapshots={};control.closed=False
+        control._rpc=mock.Mock(side_effect=OSError("access denied"))
+        owner=SimpleNamespace(client_id="phone")
+        job=control.request(dict(action="submit",operation="freeze",path="app.exe"),owner,Error)["job"]
+        end=time.monotonic()+1
+        while control.jobs[job["id"]]["status"] in ("queued","running") and time.monotonic()<end:time.sleep(.01)
+        result=control.request(dict(action="job",job_id=job["id"]),owner,Error)["job"]
+        self.assertEqual("failed",result["status"]);self.assertIn("access denied",result["error"])
+        self.assertNotIn("result",result)
 
     def test_application_close_uses_verified_versions_skips_protected_and_releases_own_frozen_handles(self):
         core,resumed=FreezeTest().core();ended=[]

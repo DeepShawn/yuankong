@@ -267,6 +267,9 @@ class AppFreeze:
 
     def prepare_upgrade(self):
         with self.lock:
+            with self.jobs_lock:
+                if any(job["status"] in ("queued","running") for job in self.jobs.values()):
+                    raise ValueError("应用操作仍在处理，请等待冻结、解冻或关闭完成后升级")
             if self.recovering is not None or self.failure:raise ValueError("冻结恢复未确认完成，请先恢复应用后再升级")
             if self.process is not None:self._rpc(dict(action="release_all"))
             with self.jobs_lock:self.snapshots.clear()

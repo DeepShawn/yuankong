@@ -45,7 +45,7 @@ class WorkspaceManagementUiTest {
     private fun waitFor(condition:()->Boolean) {
         val deadline=System.currentTimeMillis()+8000
         while(System.currentTimeMillis()<deadline) {
-            shadowOf(Looper.getMainLooper()).idle()
+            shadowOf(Looper.getMainLooper()).idleFor(50,java.util.concurrent.TimeUnit.MILLISECONDS)
             if(condition())return
             Thread.sleep(10)
         }

@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -26,6 +27,7 @@ class ApplicationsActivity:MiuixActivity() {
     private var closeSupported by mutableStateOf(false)
     private var catalogPoll:Job?=null
     private var activeJob=""
+    private var resultSequence by mutableIntStateOf(0)
     override fun onCreate(state:Bundle?) {
         super.onCreate(state);query=state?.getString("query").orEmpty();activeJob=state?.getString("job").orEmpty()
         content { Screen() }
@@ -69,6 +71,8 @@ class ApplicationsActivity:MiuixActivity() {
         }
     }
     @Composable private fun Screen() = FixedPage(if(intent.getBooleanExtra("selectForLock",false))"选择要锁定的应用" else "应用中心") {
+        val listState=rememberLazyListState()
+        LaunchedEffect(resultSequence){if(resultSequence>0)listState.scrollToItem(0)}
         val shown=remember(apps,query) {apps.filter{(it.optString("name")+it.optString("path")+it.optString("publisher")).contains(query,true)}}
         SectionCard {
             Field("名称、路径或发布者",query,{query=it})
@@ -79,7 +83,7 @@ class ApplicationsActivity:MiuixActivity() {
         }
         if(operationText.isNotBlank())Note(operationText)
         if(catalogLoading)Note("应用列表正在后台加载，不会阻止解冻或返回。")
-        LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+        LazyColumn(Modifier.fillMaxWidth().weight(1f),state=listState) {
             items(freezes,key={"freeze:"+it.optString("id")}) {item ->SectionCard("本手机的冻结记录") {
                 InfoItem(item.optString("path"),"已暂停 ${item.optJSONArray("processes")?.length() ?: 0} 个进程")
                 Action("解冻",enabled=!busy){operate("resume",item)}
@@ -115,6 +119,7 @@ class ApplicationsActivity:MiuixActivity() {
         val partial=result.optBoolean("partial") || !result.optBoolean("resumed",true)
         val notice=if(partial)"部分进程未处理：${errors?.toString() ?: "请查看冻结记录"}"
         else when(action){"freeze"->"应用进程已暂停";"resume"->"应用进程已恢复";"close"->"已关闭 ${result.optInt("closed")} 个进程";else->"已向电脑发送启动请求"}
+        resultSequence++
         operationText=notice;status(notice+" · 本手机冻结 ${freezes.size} 个",partial)
     }
     private suspend fun awaitJob(id:String,label:String):JSONObject {
