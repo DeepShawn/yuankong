@@ -89,9 +89,9 @@ class MediaActivity : MiuixActivity() {
         status("应用内进入子页面保留共享，返回后继续预览")
         content { Screen() }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() { if (fullscreen) setFullscreen(false) else finish() }
+            override fun handleOnBackPressed() { if (fullscreen) showFullscreen(false) else finish() }
         })
-        if (savedInstanceState?.getBoolean(STATE_FULLSCREEN) == true) setFullscreen(true)
+        if (savedInstanceState?.getBoolean(STATE_FULLSCREEN) == true) showFullscreen(true)
     }
 
     @Composable
@@ -100,7 +100,7 @@ class MediaActivity : MiuixActivity() {
         if (fullscreen) Box(modifier = Modifier.fillMaxSize()) {
             AndroidView(factory = { image }, modifier = Modifier.fillMaxSize())
             Action("退出全屏", modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
-                setFullscreen(false)
+                showFullscreen(false)
             }
         } else Page(if (camera) "摄像头" else "电脑屏幕") {
             if (camera) SectionCard {
@@ -130,7 +130,7 @@ class MediaActivity : MiuixActivity() {
                 }
                 ActionRow {
                     Action("保存当前帧", enabled = canSave, modifier = Modifier.weight(1f)) { save() }
-                    Action("全屏", modifier = Modifier.weight(1f)) { setFullscreen(true) }
+                    Action("全屏", modifier = Modifier.weight(1f)) { showFullscreen(true) }
                 }
                 ActionRow {
                     Action(
@@ -159,7 +159,7 @@ class MediaActivity : MiuixActivity() {
         if (saveFrame != null) saveDocument.launch("LanCmd-${System.currentTimeMillis()}.jpg")
     }
 
-    internal fun setFullscreen(value: Boolean) {
+    internal fun showFullscreen(value: Boolean) {
         fullscreen = value
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE

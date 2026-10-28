@@ -107,7 +107,7 @@ class FeatureUiTest {
             // 预览页已迁移到 Compose（miuix）：全屏是页面状态，全屏时只剩画面和退出按钮。
             assertFalse(activity.fullscreen)
 
-            activity.setFullscreen(true)
+            activity.showFullscreen(true)
             shadowOf(Looper.getMainLooper()).idle()
             assertTrue("Exit control must appear in fullscreen", activity.fullscreen)
             root.measure(View.MeasureSpec.makeMeasureSpec(411, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(891, View.MeasureSpec.EXACTLY))
@@ -115,12 +115,12 @@ class FeatureUiTest {
             assertTrue("Fullscreen preview must use the full height, was ${image.height}", image.height > 800)
             render(activity, preview)
 
-            activity.setFullscreen(false)
+            activity.showFullscreen(false)
             shadowOf(Looper.getMainLooper()).idle()
             assertFalse(activity.fullscreen)
             assertTrue("Controls return after leaving fullscreen", onScreen(image))
 
-            activity.setFullscreen(true)
+            activity.showFullscreen(true)
             shadowOf(Looper.getMainLooper()).idle()
             activity.onBackPressedDispatcher.onBackPressed()
             shadowOf(Looper.getMainLooper()).idle()
