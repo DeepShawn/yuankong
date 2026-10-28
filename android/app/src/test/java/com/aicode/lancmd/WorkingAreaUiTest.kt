@@ -45,4 +45,15 @@ class WorkingAreaUiTest {
         compose.setContent {LanCmdMiuixTheme {SelectionAction("触控",selected=true){}}}
         compose.onNodeWithText("触控").assertIsSelected().assertHeightIsAtLeast(48.dp)
     }
+    @Test fun dividerStillDragsAfterKeyboardChangesTheDefaultPaneSize() {
+        val fraction=androidx.compose.runtime.mutableFloatStateOf(.36f)
+        compose.setContent {LanCmdMiuixTheme {
+            val context=LocalContext.current;val view=androidx.compose.runtime.remember(context){View(context)}
+            WorkingArea(view,Modifier.size(360.dp,600.dp),controlFraction=fraction.floatValue){Action("键盘操作") {}}
+        }}
+        compose.runOnIdle{fraction.floatValue=.66f}
+        val controls=compose.onNodeWithTag("working-controls");val before=height(controls)
+        compose.onNodeWithContentDescription("调整画面与操作栏比例").performTouchInput{swipeUp(durationMillis=200)}
+        assertTrue(height(controls)>before)
+    }
 }

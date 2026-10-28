@@ -44,7 +44,7 @@ fun WorkingArea(view:View,modifier:Modifier=Modifier,controlFraction:Float=.36f,
                 customActions=listOf(
                     CustomAccessibilityAction("增大画面"){resize(fraction-.1f);true},
                     CustomAccessibilityAction("增大操作栏"){resize(fraction+.1f);true})
-            }.pointerInput(heightPixels){detectVerticalDragGestures(onDragStart={onResize()}) { change,amount ->
+            }.pointerInput(heightPixels,controlFraction){detectVerticalDragGestures(onDragStart={onResize()}) { change,amount ->
                 change.consume();fraction=(fraction-amount/heightPixels).coerceIn(.25f,.70f)
             }},contentAlignment=Alignment.Center) {
                 Spacer(Modifier.width(44.dp).height(4.dp).background(MiuixTheme.colorScheme.outline,RoundedCornerShape(2.dp)))
