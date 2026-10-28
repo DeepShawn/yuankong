@@ -76,6 +76,11 @@ def _guard_background(apps,anchor,anchor_pid,pid,before,expected,input_stamp,sto
         if foreground==previous and now<next_scan:continue
         previous=foreground;next_scan=now+1
         windows=apps.windows();targets=[]
+        # Splash/first-run windows can activate before they have a title and are
+        # intentionally absent from the user-facing desktop list.
+        if foreground and foreground!=anchor and not any(int(item["handle"])==foreground for item in windows):
+            foreground_pid=_window_pid(user,foreground)
+            if foreground_pid:windows.append({"handle":str(foreground),"pid":foreground_pid})
         live_pids={item["pid"] for item in windows}
         images={key:value for key,value in images.items() if key in live_pids}
         for item in windows:

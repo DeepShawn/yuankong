@@ -128,7 +128,7 @@ class NativeDefaultsTest(unittest.TestCase):
 
 
 class BackgroundOrderTest(unittest.TestCase):
-    def run_guard(self,existing=False,user_switch=False,unrelated=False,wrong_image=False):
+    def run_guard(self,existing=False,user_switch=False,unrelated=False,wrong_image=False,untitled=False):
         from document_open import _guard_background
         clock=[0.0];front=[10];launched=[False];next_window=[0]
         class Stop:
@@ -146,7 +146,7 @@ class BackgroundOrderTest(unittest.TestCase):
             return True
         apps.user.SetWindowPos.side_effect=place
         apps.user.SetForegroundWindow.side_effect=lambda handle:front.__setitem__(0,handle) or True
-        apps.windows.side_effect=lambda:[] if clock[0]<5 else [dict(handle="20",pid=100),dict(handle="30",pid=200)]
+        apps.windows.side_effect=lambda:[] if clock[0]<5 else ([dict(handle="20",pid=100)] if not untitled else [])+[dict(handle="30",pid=200)]
         expected=r"C:\WPS\wps.exe"
         def image(app,pid):return r"D:\Other\wps.exe" if wrong_image or pid==200 else expected
         before={(20,100),(30,200)} if existing else set()
@@ -168,6 +168,11 @@ class BackgroundOrderTest(unittest.TestCase):
 
     def test_reused_singleton_without_shell_pid_is_matched_by_full_executable_path(self):
         apps,front,_=self.run_guard(existing=True)
+        self.assertEqual(10,front[0]);self.assertTrue(apps.user.SetWindowPos.called)
+        self.assertTrue(all(call.args[0]==20 for call in apps.user.SetWindowPos.call_args_list))
+
+    def test_untitled_startup_splash_is_tracked_even_when_absent_from_desktop_list(self):
+        apps,front,_=self.run_guard(untitled=True)
         self.assertEqual(10,front[0]);self.assertTrue(apps.user.SetWindowPos.called)
         self.assertTrue(all(call.args[0]==20 for call in apps.user.SetWindowPos.call_args_list))
 
