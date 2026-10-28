@@ -138,15 +138,18 @@ class ManagementUiTest {
             val lock=Robolectric.buildActivity(AppLocksActivity::class.java,Intent(RuntimeEnvironment.getApplication(),AppLocksActivity::class.java).putExtra("path","C:\\Apps\\test.exe")).setup()
             val locks=lock.get()
             assertEquals("C:\\Apps\\test.exe",locks.pathInput)
+            waitFor { !locks.busy }
             locks.confirmLock();shadowOf(Looper.getMainLooper()).idle()
             assertFalse(stub.requests.any { it.optString("action")=="lock" })
             (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             waitFor { stub.requests.any { it.optString("action")=="lock" } && locks.locks.any { it.state=="locked" } }
             assertEquals("C:\\Apps\\test.exe",stub.requests.single { it.optString("action")=="lock" }.getString("path"))
             render(locks.window.decorView,"app-locks")
+            waitFor { !locks.busy }
             locks.mutate(JSONObject().put("action","unlock").put("lock_id",locks.locks.first().id))
             waitFor { stub.requests.any { it.optString("action")=="unlock" } }
             assertEquals("lock-entry",stub.requests.single { it.optString("action")=="unlock" }.getString("lock_id"))
+            waitFor { !locks.busy }
             locks.mutate(JSONObject().put("action","forget").put("lock_id","lock-entry"))
             waitFor { stub.requests.any { it.optString("action")=="forget" } }
             assertEquals("lock-entry",stub.requests.single { it.optString("action")=="forget" }.getString("lock_id"))
