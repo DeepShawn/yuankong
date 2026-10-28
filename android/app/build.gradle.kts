@@ -21,8 +21,8 @@ android {
         applicationId = "com.aicode.lancmd"
         minSdk = 24
         targetSdk = 36
-        versionCode = 39
-        versionName = "3.3.0"
+        versionCode = 40
+        versionName = "3.4.0"
 
         ndk {
             // 目标机型为 arm64-v8a；当前无 JNI 代码，APK 在任意 ABI 上都能装
@@ -95,6 +95,8 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-android:0.8.8")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("androidx.compose.ui:ui-test-junit4:1.10.3")
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.10.3")
     // Robolectric 自带 conscrypt，而它只打包 linux-x86_64 的 .so，
     // 在 aarch64 上会 UnsatisfiedLinkError。排除后用 JDK 自带 SSL 实现。
     testImplementation("org.robolectric:robolectric:4.13") {

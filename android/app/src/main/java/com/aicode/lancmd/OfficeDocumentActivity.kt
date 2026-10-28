@@ -168,7 +168,7 @@ class OfficeDocumentActivity : MiuixActivity() {
         if (busy) return
         val source = local
         if (source?.isFile != true) { status("请先下载或选择手机编辑副本", true); return }
-        AlertDialog.Builder(this).setTitle("回传覆盖电脑原件？")
+        WorkspaceDialog.Builder(this).setTitle("回传覆盖电脑原件？")
             .setMessage("$remote\n\n电脑原件若已变化将拒绝覆盖，手机副本保留。请先在 WPS 中保存。")
             .setNegativeButton("取消", null)
             .setPositiveButton("回传") { _, _ ->

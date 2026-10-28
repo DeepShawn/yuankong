@@ -1,6 +1,8 @@
 package com.aicode.lancmd
 
 import android.os.Bundle
+import android.content.Intent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -11,6 +13,12 @@ import org.json.JSONObject
 
 /** 锁定指定 EXE，限制当前 Windows 用户启动。界面使用 miuix。 */
 class AppLocksActivity : MiuixActivity() {
+    private val pickApplication = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) task {
+            pinnedCall(origin, "capabilities")
+            result.data?.getStringExtra("path")?.let { pathInput = it }
+        }
+    }
     internal class Lock(
         val id: String,
         val path: String,
@@ -25,7 +33,7 @@ class AppLocksActivity : MiuixActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        pathInput = intent.getStringExtra("path").orEmpty()
+        pathInput = savedInstanceState?.getString("path") ?: intent.getStringExtra("path").orEmpty()
         status("锁定所选 EXE，限制当前 Windows 用户启动；已运行的程序继续运行。")
         content { Screen() }
         refresh()
@@ -34,6 +42,9 @@ class AppLocksActivity : MiuixActivity() {
     @Composable
     private fun Screen() = Page("应用锁") {
         SectionCard("锁定新程序") {
+            Action("从电脑应用列表选择") {
+                pickApplication.launch(Intent(this@AppLocksActivity, ApplicationsActivity::class.java).putExtra("selectForLock", true))
+            }
             Field(label = "EXE 完整路径", value = pathInput, onValueChange = { pathInput = it })
             Action("锁定这个 EXE", enabled = !busy, primary = true) { confirmLock() }
             Note("需要修改文件权限的权限，通常需管理员接收端。限制针对所选文件；复制、重装或替换后的程序需重新选择。尝试启动被锁文件时，Windows 可能显示拒绝访问提示。")
@@ -75,12 +86,14 @@ class AppLocksActivity : MiuixActivity() {
     internal fun confirmLock() {
         if (busy) return
         val selected = pathInput.trim()
-        AlertDialog.Builder(this).setTitle("限制此程序启动？")
+        WorkspaceDialog.Builder(this).setTitle("限制此程序启动？")
             .setMessage("$selected\n\n通过文件执行权限限制当前 Windows 用户。原权限保存在电脑，解锁时恢复。不会结束正在运行的程序；不能锁定 Windows 系统目录和 LanCmd 自身。")
             .setNegativeButton("取消", null)
             .setPositiveButton("锁定") { _, _ -> mutate(JSONObject().put("action", "lock").put("path", selected)) }
             .show()
     }
+
+    override fun onSaveInstanceState(state:Bundle) { state.putString("path",pathInput);super.onSaveInstanceState(state) }
 
     internal fun mutate(params: JSONObject) {
         if (busy) return

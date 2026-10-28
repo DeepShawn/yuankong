@@ -276,7 +276,7 @@ class ManagementUiTest {
             // 首页已迁移到 Compose（miuix）：分类入口按状态断言，两种高度都要能画出内容。
             val home=Robolectric.buildActivity(MainActivity::class.java).setup();val activity=home.get()
             activity.homeCategory="系统与应用"
-            assertEquals(4,activity.toolGroups.getValue("系统与应用").size)
+            assertTrue(activity.toolGroups.getValue("系统与应用").map{it.label}.containsAll(listOf("应用中心","应用锁","桌面背景","本地升级")))
             for(height in listOf(640,891)) {
                 render(activity.window.decorView,"management-home-$height",height=height)
             }

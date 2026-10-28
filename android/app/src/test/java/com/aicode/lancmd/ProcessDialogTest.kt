@@ -146,6 +146,7 @@ class ProcessDialogTest {
         waitUntil { label.text.contains("电脑权限：管理员") }
         label.performClick()
         val help = ShadowDialog.getLatestDialog() as AlertDialog
+        shadowOf(Looper.getMainLooper()).idle()
         assertTrue(help.findViewById<TextView>(android.R.id.message)!!.text.contains("UAC"))
         help.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
         assertTrue(dialog.isShowing)

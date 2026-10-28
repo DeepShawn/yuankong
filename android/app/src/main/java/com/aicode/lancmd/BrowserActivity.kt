@@ -11,7 +11,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -29,7 +28,6 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.extra.SuperArrow
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** 向电脑发送网址，并保存常用网址。界面使用 miuix。 */
@@ -38,13 +36,16 @@ class BrowserActivity : MiuixActivity() {
 
     private var address by mutableStateOf("")
     private var linkName by mutableStateOf("")
-    private var browserIndex by mutableIntStateOf(0)
-    private var browserNames by mutableStateOf(listOf("Windows 默认浏览器"))
-    private var ids = listOf("default")
+    private data class Browser(val id: String, val name: String)
+    private var browsers by mutableStateOf(listOf(Browser("default", "Windows 默认浏览器")))
+    private var selectedBrowser by mutableStateOf("default")
     private var links by mutableStateOf<List<Pair<String, String>>>(emptyList())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        address = savedInstanceState?.getString("address").orEmpty()
+        linkName = savedInstanceState?.getString("linkName").orEmpty()
+        selectedBrowser = savedInstanceState?.getString("browser") ?: "default"
         status("发送 HTTP / HTTPS 网址，由电脑浏览器打开。浏览器窗口会按打开网页的正常行为显示。")
         links = readLinks()
         content { Page() }
@@ -52,92 +53,43 @@ class BrowserActivity : MiuixActivity() {
     }
 
     @Composable
-    private fun Page() {
-        Scaffold(
-            topBar = {
-                SmallTopAppBar(
-                    title = "电脑浏览器",
-                    navigationIcon = {
-                        IconButton(onClick = { finish() }) {
-                            Icon(painterResource(R.drawable.ic_back), "返回")
-                        }
-                    }
-                )
+    private fun Page() = Page("电脑浏览器") {
+        SectionCard("发送网址") {
+            Field("网址",address,{address=it})
+            ChoiceField(browsers.map{it.name},"使用浏览器",browsers.indexOfFirst{it.id==selectedBrowser}.coerceAtLeast(0)) { index ->
+                browsers.getOrNull(index)?.let{selectedBrowser=it.id}
             }
-        ) { insets ->
-            androidx.compose.foundation.layout.Column(
-                modifier = Modifier.fillMaxWidth().padding(insets).verticalScroll(rememberScrollState())
-            ) {
-                StatusNote(noteText.value, noteFailed.value)
-                SmallTitle("发送网址")
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-                    TextField(
-                        value = address,
-                        onValueChange = { address = it },
-                        label = "网址",
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
-                    )
-                    SuperDropdown(
-                        items = browserNames,
-                        title = "使用浏览器",
-                        selectedIndex = browserIndex,
-                        onSelectedIndexChange = { browserIndex = it }
-                    )
-                    TextButton(
-                        text = "在电脑打开网址",
-                        onClick = { open(address) },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
-                    )
-                }
-                SmallTitle("保存到手机")
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-                    TextField(
-                        value = linkName,
-                        onValueChange = { linkName = it },
-                        label = "名称（留空用网址主机名）",
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
-                    )
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        TextButton(text = "保存当前网址", onClick = { saveLink() }, modifier = Modifier.weight(1f))
-                        Spacer(modifier = Modifier.width(10.dp))
-                        TextButton(text = "刷新已安装浏览器", onClick = { discover() }, modifier = Modifier.weight(1f))
-                    }
-                }
-                SmallTitle("手机保存的网址")
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)) {
-                    if (links.isEmpty()) {
-                        Text(
-                            text = "暂无保存的网址，填好网址后点「保存当前网址」。",
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp),
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-                        )
-                    }
-                    links.forEachIndexed { index, link ->
-                        SuperArrow(
-                            title = link.first,
-                            summary = link.second,
-                            onClick = { address = link.second; open(link.second) }
-                        )
-                        Row(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
-                            TextButton(text = "删除", onClick = { removeLink(index) }, modifier = Modifier.weight(1f))
-                        }
-                    }
-                }
-                Text(
-                    text = "最多保存 50 个网址。仅支持 HTTP / HTTPS。",
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-                )
+            Action("在电脑打开网址",primary=true) {open(address)}
+        }
+        SectionCard("保存到手机") {
+            Field("名称（留空用网址主机名）",linkName,{linkName=it})
+            ActionRow {
+                Action("保存当前网址",modifier=Modifier.weight(1f)){saveLink()}
+                Action("刷新已安装浏览器",modifier=Modifier.weight(1f)){discover()}
             }
+        }
+        SectionCard("手机保存的网址") {
+            if(links.isEmpty())EmptyNote("暂无保存的网址")
+            links.forEachIndexed { index,link ->
+                RowItem(link.first,link.second){address=link.second;open(link.second)}
+                Action("删除"){removeLink(index)}
+            }
+            Note("最多保存 50 个网址。仅支持 HTTP / HTTPS。")
         }
     }
 
     private fun discover() = task {
         val result = pinnedCall(origin, "browser")
         val items = result.getJSONArray("items")
-        ids = listOf("default") + (0 until items.length()).map { items.getJSONObject(it).getString("id") }
-        browserNames = listOf("Windows 默认浏览器") + (0 until items.length()).map { items.getJSONObject(it).getString("name") }
-        if (browserIndex >= browserNames.size) browserIndex = 0
+        val found = (0 until items.length()).mapNotNull { index ->
+            items.optJSONObject(index)?.let { item ->
+                val id = item.optString("id")
+                val name = item.optString("name")
+                if (id.isBlank() || name.isBlank()) null else Browser(id, name)
+            }
+        }
+        browsers = (listOf(Browser("default", "Windows 默认浏览器")) + found).distinctBy { it.id }
+        if (browsers.none { it.id == selectedBrowser }) selectedBrowser = "default"
         status("已读取 ${items.length()} 个注册浏览器")
     }
 
@@ -150,7 +102,7 @@ class BrowserActivity : MiuixActivity() {
         val url = normalized(value)
         task {
             pinnedCall(origin, "browser", JSONObject().put("action", "open").put("url", url)
-                .put("browser", ids.getOrElse(browserIndex) { "default" }))
+                .put("browser", selectedBrowser))
             status("已发送到电脑：$url")
         }
     }
@@ -191,5 +143,11 @@ class BrowserActivity : MiuixActivity() {
         if (index !in links.indices) return
         writeLinks(links.filterIndexed { position, _ -> position != index })
         status("已删除保存的网址")
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("address", address); outState.putString("linkName", linkName)
+        outState.putString("browser", selectedBrowser)
+        super.onSaveInstanceState(outState)
     }
 }

@@ -100,7 +100,7 @@ class StorageActivity : MiuixActivity() {
             if (names.any { !validName(it) }) {
                 status("所选文件包含 Windows 无法使用的文件名")
             } else {
-                AlertDialog.Builder(this).setTitle("上传 ${uris.size} 个文件？")
+                WorkspaceDialog.Builder(this).setTitle("上传 ${uris.size} 个文件？")
                     .setMessage(
                         "目标：$target\n\n${names.take(8).joinToString("\n")}" +
                             "${if (names.size > 8) "\n…" else ""}\n\n目标目录中同名文件会被替换。"
@@ -439,12 +439,12 @@ class StorageActivity : MiuixActivity() {
         if (!sourceReady()) return
         if (operationsBusy) { status("文件操作进行中，请等待完成或取消", true); return }
         val groups = menuGroups(item)
-        AlertDialog.Builder(this).setTitle(item.optString("name"))
+        WorkspaceDialog.Builder(this).setTitle(item.optString("name"))
             .setItems(groups.keys.toTypedArray()) { _, index ->
                 val group = groups.keys.toList()[index]
                 val entries = groups.getValue(group)
                 if (entries.size == 1 && entries[0] == group) { act(group, item); return@setItems }
-                AlertDialog.Builder(this).setTitle(group)
+                WorkspaceDialog.Builder(this).setTitle(group)
                     .setItems(entries.toTypedArray()) { _, choice -> act(entries[choice], item) }
                     .setNegativeButton("返回", null).show()
             }.setNegativeButton("取消", null).show()
@@ -464,6 +464,7 @@ class StorageActivity : MiuixActivity() {
         }
         groups["编辑与属性"] = buildList {
             if (!dir) add(if (office) "手机 WPS 预览 / 编辑" else "编辑文本")
+            if (!dir && name.substringAfterLast('.', "").lowercase() in listOf("jpg","jpeg","png","bmp")) add("设为桌面背景")
             add("最后修改日期"); add("文件属性")
         }
         groups["传输与整理"] = buildList {
@@ -488,7 +489,8 @@ class StorageActivity : MiuixActivity() {
         val selected = joinPath(path, item.getString("name"))
         val office = OfficeDocumentActivity.supports(item.optString("name"))
         when (label) {
-            "在电脑打开" -> AlertDialog.Builder(this).setTitle("在电脑打开？")
+            "设为桌面背景" -> if(sourceReady())startActivity(Intent(this,WallpaperActivity::class.java).putExtra("path",selected))
+            "在电脑打开" -> WorkspaceDialog.Builder(this).setTitle("在电脑打开？")
                 .setMessage("$selected\n\n应用程序会在电脑启动，文件将使用电脑默认应用打开。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("打开") { _, _ ->
@@ -513,7 +515,7 @@ class StorageActivity : MiuixActivity() {
                 status(response.optString("notice", "已向电脑发送打开请求"))
             }
             "最后修改日期" -> modifyDate(item, selected)
-            "文件属性" -> AlertDialog.Builder(this).setTitle(item.optString("name")).setMessage(
+            "文件属性" -> WorkspaceDialog.Builder(this).setTitle(item.optString("name")).setMessage(
                 "$selected\n\n${if (item.optBoolean("dir")) "文件夹" else FileTransfer.humanSize(item.optLong("size"))}\n" +
                     "最后修改：${DateFormat.getDateTimeInstance().format(Date(item.optLong("mtime") * 1000))}\n" +
                     "隐藏：${item.optBoolean("hidden")} · 系统：${item.optBoolean("system")}"
@@ -542,7 +544,7 @@ class StorageActivity : MiuixActivity() {
         val destination = dialogInput(
             text = joinPath(path, item.getString("name").dropLast(4) + "_extracted")
         )
-        val dialog = AlertDialog.Builder(this).setTitle("解压到新文件夹")
+        val dialog = WorkspaceDialog.Builder(this).setTitle("解压到新文件夹")
             .setMessage("支持 ZIP；最多 2000 项、512 MB。目标必须不存在，不覆盖已有文件。")
             .setView(destination).setNegativeButton("取消", null)
             .setPositiveButton("解压", null).create()
@@ -568,7 +570,7 @@ class StorageActivity : MiuixActivity() {
 
     internal fun deleteItem(item: JSONObject, selected: String) {
         val base = path
-        AlertDialog.Builder(this).setTitle("删除${if (item.optBoolean("dir")) "目录" else "文件"}？")
+        WorkspaceDialog.Builder(this).setTitle("删除${if (item.optBoolean("dir")) "目录" else "文件"}？")
             .setMessage(
                 "$selected\n\n${if (item.optBoolean("dir")) "目录中的全部内容也会删除。" else ""}" +
                     "此操作无法撤销。结果显示在页面顶部。"
@@ -628,7 +630,7 @@ class StorageActivity : MiuixActivity() {
         }
         fun confirm(destination: String = "") {
             val title = when (operation) { "copy" -> "复制"; "move" -> "移动"; else -> "删除" }
-            AlertDialog.Builder(this).setTitle("$title 所选 ${targets.size} 项？")
+            WorkspaceDialog.Builder(this).setTitle("$title 所选 ${targets.size} 项？")
                 .setMessage(
                     targets.take(8).joinToString("\n") { it.optString("name") } +
                         (if (targets.size > 8) "\n…" else "") +
@@ -843,7 +845,7 @@ class StorageActivity : MiuixActivity() {
         val original = item?.optString("name")
         val base = path
         val text = dialogInput(text = original ?: "")
-        val dialog = AlertDialog.Builder(this).setTitle(if (item == null) "新建文件夹" else "重命名")
+        val dialog = WorkspaceDialog.Builder(this).setTitle(if (item == null) "新建文件夹" else "重命名")
             .setView(text).setNegativeButton("取消", null)
             .setPositiveButton("保存", null).create()
         dialog.setOnShowListener {
@@ -870,7 +872,7 @@ class StorageActivity : MiuixActivity() {
     internal fun newItem() {
         if (!sourceReady()) return
         if (operationsBusy) { status("请先等待或取消文件操作", true); return }
-        AlertDialog.Builder(this).setTitle("新建")
+        WorkspaceDialog.Builder(this).setTitle("新建")
             .setItems(arrayOf("文件夹", "文本与配置文件", "脚本文件")) { _, kind ->
                 if (kind == 0) { renameOrCreate(null); return@setItems }
                 val choices = if (kind == 1)
@@ -878,7 +880,7 @@ class StorageActivity : MiuixActivity() {
                 else listOf("批处理 (.bat)", "VBScript (.vbs)", "命令脚本 (.cmd)", "PowerShell (.ps1)")
                 val suffixes = if (kind == 1) listOf("txt", "md", "json", "ini", "")
                 else listOf("bat", "vbs", "cmd", "ps1")
-                AlertDialog.Builder(this)
+                WorkspaceDialog.Builder(this)
                     .setTitle(if (kind == 1) "新建文本文件" else "新建脚本文件")
                     .setItems(choices.toTypedArray()) { _, index -> newTextFile(suffixes[index]) }
                     .setNegativeButton("取消", null).show()
@@ -897,7 +899,7 @@ class StorageActivity : MiuixActivity() {
             when (suffix) { "bat", "cmd" -> 2; "vbs" -> 4; else -> 0 }
         )
         box.addView(name); box.addView(format)
-        val dialog = AlertDialog.Builder(this).setTitle("新建文本文件")
+        val dialog = WorkspaceDialog.Builder(this).setTitle("新建文本文件")
             .setMessage(
                 "创建后直接进入编辑。BAT/CMD 中文通常使用 GBK，VBS 建议 UTF-16 LE；不会自动运行脚本。" +
                     "\n编码可在编辑页调整。"
@@ -986,7 +988,7 @@ class StorageActivity : MiuixActivity() {
                 ).show()
             }
         )
-        val dialog = AlertDialog.Builder(this).setTitle("最后修改日期")
+        val dialog = WorkspaceDialog.Builder(this).setTitle("最后修改日期")
             .setMessage(
                 "电脑文件的最后修改时间，按手机本地时区输入。格式 yyyy-MM-dd HH:mm:ss。" +
                     "操作延迟 ${FileDelay.seconds(this)} 秒。"
@@ -1040,7 +1042,7 @@ class StorageActivity : MiuixActivity() {
                 items.any { it.optString("status") == "failed" }
             )
             val pending = items.filter { it.optString("status") == "waiting" }
-            if (pending.isNotEmpty()) AlertDialog.Builder(this@StorageActivity)
+            if (pending.isNotEmpty()) WorkspaceDialog.Builder(this@StorageActivity)
                 .setTitle("选择要取消的文件计划")
                 .setItems(
                     pending.map { it.optString("command") + " · " + it.optString("path") }.toTypedArray()
@@ -1058,7 +1060,7 @@ class StorageActivity : MiuixActivity() {
 
     internal fun usbActions() {
         if (!sourceReady()) return
-        AlertDialog.Builder(this).setTitle("U盘连接管理")
+        WorkspaceDialog.Builder(this).setTitle("U盘连接管理")
             .setItems(arrayOf("安全弹出 U盘", "强制断开 U盘（禁用设备）", "恢复已断开的设备")) { _, index ->
                 if (index == 2) startActivity(Intent(this, DevicesActivity::class.java))
                 else ejectUsb(index == 1)
@@ -1100,7 +1102,7 @@ class StorageActivity : MiuixActivity() {
                         (0 until paths.length()).joinToString(" / ") { paths.optString(it) }
             }
             status("请选择要弹出的 U盘；同一设备的所有分区会一起弹出")
-            AlertDialog.Builder(this@StorageActivity)
+            WorkspaceDialog.Builder(this@StorageActivity)
                 .setTitle(if (force) "选择要强制断开的 U盘" else "安全弹出 U盘")
                 .setItems(labels.toTypedArray()) { _, index ->
                     confirmEject(force, items[index], labels[index], client, receiverVersion)
@@ -1115,7 +1117,7 @@ class StorageActivity : MiuixActivity() {
         client: com.aicode.lancmd.net.AgentClient?,
         receiverVersion: String
     ) {
-        AlertDialog.Builder(this)
+        WorkspaceDialog.Builder(this)
             .setTitle(if (force) "强制断开 $label？" else "安全弹出 $label？")
             .setMessage(
                 if (force)

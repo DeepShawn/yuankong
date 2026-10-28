@@ -32,9 +32,9 @@ class VirtualKeyboard(context: Context, private val send: (List<String>) -> Unit
     init {
         orientation = VERTICAL
         layoutDirection = View.LAYOUT_DIRECTION_LTR
-        setPadding(dp(6), dp(6), dp(6), dp(6))
+        setPadding(dp(10), dp(10), dp(10), dp(10))
         background = GradientDrawable().apply {
-            setColor(color(R.color.surface)); cornerRadius = dp(18).toFloat()
+            setColor(color(R.color.bg)); cornerRadius = dp(24).toFloat()
             setStroke(dp(1), color(R.color.outline_soft))
         }
         val sections = LinearLayout(context)
@@ -96,10 +96,10 @@ class VirtualKeyboard(context: Context, private val send: (List<String>) -> Unit
         setSingleLine()
         includeFontPadding = false
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        cornerRadius = dp(10)
-        strokeWidth = dp(1)
-        backgroundTintList = states(R.color.surface_variant, R.color.accent_dim, R.color.surface_high)
-        setTextColor(states(R.color.dim, R.color.accent, R.color.text))
+        cornerRadius = dp(14)
+        strokeWidth = 0
+        backgroundTintList = states(R.color.surface, R.color.accent, R.color.surface_variant)
+        setTextColor(states(R.color.dim, R.color.on_accent, R.color.text))
         strokeColor = states(R.color.outline_soft, R.color.accent, R.color.outline_soft)
         rippleColor = ColorStateList.valueOf(color(R.color.accent_glow))
         stateListAnimator = null

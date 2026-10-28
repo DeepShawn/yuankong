@@ -35,7 +35,7 @@ class RemoteDirectoryPicker(private val activity: AppCompatActivity,private val 
         body.addView(list, LinearLayout.LayoutParams(-1, dp(240)))
         val note = TextView(activity).apply { textSize = 12f; text = "点选文件夹进入，再选择当前文件夹" }
         body.addView(note)
-        val dialog = AlertDialog.Builder(activity).setTitle("选择电脑目标文件夹").setView(body)
+        val dialog = WorkspaceDialog.Builder(activity).setTitle("选择电脑目标文件夹").setView(body)
             .setPositiveButton("选择此文件夹", null).setNegativeButton("取消", null).create()
         var job: Job? = null
         var current = ""

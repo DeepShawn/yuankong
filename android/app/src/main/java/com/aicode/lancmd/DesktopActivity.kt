@@ -44,7 +44,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 import top.yukonga.miuix.kmp.extra.SuperSwitch
 import kotlin.coroutines.coroutineContext
 
@@ -238,7 +237,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
     private fun TerminalPanel() {
         SectionCard {
             Note(terminalText.takeLast(4000))
-            SuperDropdown(
+            ChoiceField(
                 items = shells, title = "终端类型",
                 selectedIndex = shellIndex,
                 onSelectedIndexChange = { shellIndex = it },
@@ -432,7 +431,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
             }
         }
         if (localPaused) { apply("release"); return }
-        AlertDialog.Builder(this).setTitle("暂停电脑本机输入")
+        WorkspaceDialog.Builder(this).setTitle("暂停电脑本机输入")
             .setMessage(
                 "暂停键盘、鼠标及已识别的标准 HID 触屏，手机仍可控制。触屏暂停需要管理员权限，" +
                     "结果显示实际识别与禁用数量；未识别的厂商触控设备不能保证锁定。\n\n" +

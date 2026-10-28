@@ -11,7 +11,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import org.json.JSONArray
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 
 /** 浏览与编辑电脑注册表，并可恢复修改备份。界面使用 miuix。 */
 class RegistryActivity : MiuixActivity() {
@@ -44,13 +43,13 @@ class RegistryActivity : MiuixActivity() {
     @Composable
     private fun Screen() = Page("注册表编辑器") {
         SectionCard("位置") {
-            SuperDropdown(
+            ChoiceField(
                 items = roots,
                 title = "根键",
                 selectedIndex = rootIndex,
                 onSelectedIndexChange = { rootIndex = it }
             )
-            SuperDropdown(
+            ChoiceField(
                 items = listOf("64 位视图", "32 位视图"),
                 title = "注册表视图",
                 selectedIndex = viewIndex,
@@ -150,7 +149,7 @@ class RegistryActivity : MiuixActivity() {
     private fun createKey() {
         val target = JSONObject(current.toString())
         val name = dialogInput(hint = "子项名称")
-        AlertDialog.Builder(this).setTitle("新建注册表子项")
+        WorkspaceDialog.Builder(this).setTitle("新建注册表子项")
             .setMessage("${target.getString("root")}\\${target.getString("path")}")
             .setView(name)
             .setNegativeButton("取消", null)
@@ -164,7 +163,7 @@ class RegistryActivity : MiuixActivity() {
 
     private fun deleteKey() {
         val target = JSONObject(current.toString())
-        AlertDialog.Builder(this).setTitle("删除当前空项？")
+        WorkspaceDialog.Builder(this).setTitle("删除当前空项？")
             .setMessage("${target.getString("root")}\\${target.getString("path")}\n\n只允许删除不含子项和值的空项，不递归删除。")
             .setNegativeButton("取消", null)
             .setPositiveButton("删除") { _, _ ->
@@ -209,7 +208,7 @@ class RegistryActivity : MiuixActivity() {
                 )
             }
             box.addView(name); box.addView(type); box.addView(value)
-            val dialog = AlertDialog.Builder(this@RegistryActivity)
+            val dialog = WorkspaceDialog.Builder(this@RegistryActivity)
                 .setTitle(if (existing == null) "新建注册表值" else "编辑注册表值")
                 .setMessage("${target.getString("root")}\\${target.getString("path")}\n请核对路径、类型和数据；修改会先保存恢复备份。")
                 .setView(box)
@@ -217,7 +216,7 @@ class RegistryActivity : MiuixActivity() {
                 .setPositiveButton("保存", null)
                 .apply {
                     if (existing != null) setNeutralButton("删除这个值") { _, _ ->
-                        AlertDialog.Builder(this@RegistryActivity).setTitle("删除注册表值？")
+                        WorkspaceDialog.Builder(this@RegistryActivity).setTitle("删除注册表值？")
                             .setMessage(existing.ifEmpty { "(默认)" })
                             .setNegativeButton("取消", null)
                             .setPositiveButton("删除") { _, _ ->
@@ -272,10 +271,10 @@ class RegistryActivity : MiuixActivity() {
                 "${record.getString("name").ifEmpty { "(默认)" }} · ${record.getInt("view")} 位\n" +
                 "$date · ${record.getString("id").takeLast(6)}"
         }
-        AlertDialog.Builder(this@RegistryActivity).setTitle("最近 100 次值修改备份")
+        WorkspaceDialog.Builder(this@RegistryActivity).setTitle("最近 100 次值修改备份")
             .setItems(labels.toTypedArray()) { _, index ->
                 val item = items.getJSONObject(index)
-                AlertDialog.Builder(this@RegistryActivity).setTitle("恢复到该次修改前？")
+                WorkspaceDialog.Builder(this@RegistryActivity).setTitle("恢复到该次修改前？")
                     .setMessage("${labels[index]}\n当前值必须仍与该次修改结果相同，外部变化时停止恢复。")
                     .setNegativeButton("取消", null)
                     .setPositiveButton("恢复") { _, _ ->

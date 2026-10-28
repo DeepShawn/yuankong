@@ -121,7 +121,7 @@ class GesturesActivity : MiuixActivity() {
         val data = saved()
         if (data.length() >= 20) { status("手势列表已满，请先删除旧手势", true); return }
         val input = dialogInput(text = "手势 ${DateFormat.getTimeInstance().format(Date())}")
-        AlertDialog.Builder(this).setTitle("保存本地手势").setView(input)
+        WorkspaceDialog.Builder(this).setTitle("保存本地手势").setView(input)
             .setNegativeButton("取消", null)
             .setPositiveButton("保存") { _, _ ->
                 data.put(
@@ -139,10 +139,10 @@ class GesturesActivity : MiuixActivity() {
         if (board.recording || playing) { status("请先结束记录或播放", true); return }
         val data = saved()
         if (data.length() == 0) { status("暂无已保存手势"); return }
-        AlertDialog.Builder(this).setTitle("手势列表")
+        WorkspaceDialog.Builder(this).setTitle("手势列表")
             .setItems((0 until data.length()).map { data.getJSONObject(it).getString("name") }.toTypedArray()) { _, index ->
                 val item = data.getJSONObject(index)
-                AlertDialog.Builder(this).setTitle(item.getString("name"))
+                WorkspaceDialog.Builder(this).setTitle(item.getString("name"))
                     .setMessage("${item.getJSONArray("events").length()} 个事件。加载会替换画板上的当前记录。")
                     .setNegativeButton("取消", null)
                     .setNeutralButton("删除") { _, _ ->
@@ -164,7 +164,7 @@ class GesturesActivity : MiuixActivity() {
         if (seconds == null || seconds !in 0..86400) { status("请输入 0–86400 秒", true); return }
         val events = board.snapshot()
         if (events.length() == 0) return
-        AlertDialog.Builder(this).setTitle("在电脑回放手势？")
+        WorkspaceDialog.Builder(this).setTitle("在电脑回放手势？")
             .setMessage("$seconds 秒后按原时间间隔移动、点击或拖动鼠标。\n请先确认电脑当前画面，回放可能操作当前窗口；可随时取消。")
             .setNegativeButton("取消", null)
             .setPositiveButton("播放") { _, _ -> beginPlayback(events, seconds) }.show()

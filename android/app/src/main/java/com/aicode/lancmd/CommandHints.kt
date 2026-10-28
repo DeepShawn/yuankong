@@ -19,7 +19,7 @@ object CommandHints {
     )
 
     fun show(context: Context, powershell: Boolean, selected: (String) -> Unit) {
-        AlertDialog.Builder(context).setTitle("常用命令 · 点选填入，确认后执行")
+        WorkspaceDialog.Builder(context).setTitle("常用命令 · 点选填入，确认后执行")
             .setItems(hints.map { "${it.title}\n${if (powershell) it.powershell else it.cmd}" }.toTypedArray()) { _, index ->
                 selected(if (powershell) hints[index].powershell else hints[index].cmd)
             }.setNegativeButton("关闭", null).show()

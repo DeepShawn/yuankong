@@ -17,7 +17,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 import java.math.BigDecimal
 
 /** 创建隐藏＋系统属性的占位文件，实际占用磁盘空间。界面使用 miuix。 */
@@ -66,7 +65,7 @@ class PlaceholderFilesActivity : MiuixActivity() {
                 onValueChange = { sizeText = it.filter { c -> c.isDigit() || c == '.' }.take(14) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
             )
-            SuperDropdown(
+            ChoiceField(
                 items = modes,
                 title = "生成模式",
                 selectedIndex = modeIndex,
@@ -130,7 +129,7 @@ class PlaceholderFilesActivity : MiuixActivity() {
         if (bytes == null) { status("请输入 0–500 GB，最多精确到 1 字节", true); return }
         val selectedMode = if (modeIndex == 1) "fast" else "stable"
         val modeName = if (selectedMode == "stable") "稳定" else "快速"
-        AlertDialog.Builder(this).setTitle("创建并实际占用空间？")
+        WorkspaceDialog.Builder(this).setTitle("创建并实际占用空间？")
             .setMessage(
                 "$path\n\n大小：$sizeText GB（$bytes 字节）\n模式：$modeName\n" +
                     "将实际分配磁盘空间，至少保留 1 GB 可用空间。可在任务中取消；已完成文件可在文件管理删除。"

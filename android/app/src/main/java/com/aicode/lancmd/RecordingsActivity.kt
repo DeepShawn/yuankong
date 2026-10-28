@@ -23,7 +23,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperDropdown
 import top.yukonga.miuix.kmp.extra.SuperSwitch
 import java.io.File
 import java.text.DateFormat
@@ -91,7 +90,7 @@ class RecordingsActivity : MiuixActivity() {
                         } ?: error("无法写入手机文件")
                     }
                     status("录制已保存到手机")
-                    if (!isFinishing && !isDestroyed) AlertDialog.Builder(this@RecordingsActivity)
+                    if (!isFinishing && !isDestroyed) WorkspaceDialog.Builder(this@RecordingsActivity)
                         .setTitle("文件已保存").setMessage("可使用手机上的音视频播放器查看。")
                         .setNegativeButton("完成", null).setPositiveButton("播放") { _, _ ->
                             runCatching {
@@ -132,7 +131,7 @@ class RecordingsActivity : MiuixActivity() {
     @Composable
     private fun Screen() = Page("录音 / 录屏 / 摄像头") {
         SectionCard("录制设置") {
-            SuperDropdown(
+            ChoiceField(
                 items = modes,
                 title = "录制内容",
                 selectedIndex = modeIndex,
@@ -143,13 +142,13 @@ class RecordingsActivity : MiuixActivity() {
                 onCheckedChange = { withAudio = it },
                 title = "视频同时录制麦克风声音"
             )
-            SuperDropdown(
+            ChoiceField(
                 items = microphoneNames,
                 title = "麦克风",
                 selectedIndex = microphoneIndex.coerceAtMost(microphoneNames.size - 1),
                 onSelectedIndexChange = { microphoneIndex = it }
             )
-            SuperDropdown(
+            ChoiceField(
                 items = cameraNames,
                 title = "摄像头",
                 summary = "仅摄像头模式使用",
@@ -236,7 +235,7 @@ class RecordingsActivity : MiuixActivity() {
             .put("audio", kind == "audio" || withAudio)
             .put("microphone", microphoneIds.getOrElse(microphoneIndex) { -1 })
             .put("camera", cameraIds.getOrElse(cameraIndex) { 0 })
-        AlertDialog.Builder(this).setTitle("开始录制电脑？")
+        WorkspaceDialog.Builder(this).setTitle("开始录制电脑？")
             .setMessage("${modes[modeIndex]}，最长 $duration 秒。\n请确认设备和录制范围，文件保存在电脑，可随时手动停止。")
             .setNegativeButton("取消", null)
             .setPositiveButton("开始") { _, _ ->
@@ -266,7 +265,7 @@ class RecordingsActivity : MiuixActivity() {
     }
 
     internal fun confirmDelete(record: Record) {
-        AlertDialog.Builder(this).setTitle("删除电脑上的录制文件？").setMessage("删除后无法恢复。")
+        WorkspaceDialog.Builder(this).setTitle("删除电脑上的录制文件？").setMessage("删除后无法恢复。")
             .setNegativeButton("取消", null)
             .setPositiveButton("删除") { _, _ ->
                 task {

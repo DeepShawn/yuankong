@@ -162,6 +162,7 @@ class ConvenienceUiTest {
             stub.install()
             val controller = page()
             AudioDialog(controller.get()).show()
+            shadowOf(Looper.getMainLooper()).idle()
             val dialog = ShadowDialog.getLatestDialog() as AlertDialog
             val slider = dialog.findViewById<SeekBar>(R.id.audioSlider)!!
             waitUntil { slider.isEnabled }
@@ -387,6 +388,7 @@ class ConvenienceUiTest {
                 else -> emptyList()
             }
             val confirmation = ShadowDialog.getLatestDialog() as AlertDialog
+            shadowOf(Looper.getMainLooper()).idle()
             assertTrue("Start confirmation must describe the saved command", texts(confirmation.window!!.decorView).any { it.contains("共 1 条") })
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             try {

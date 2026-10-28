@@ -18,7 +18,7 @@ import org.json.JSONObject
 object ScriptJobsDialog {
     fun show(activity: AppCompatActivity,client: AgentClient?,startPath: String?=null) {
         if(startPath!=null) {
-            AlertDialog.Builder(activity).setTitle("运行电脑脚本？").setMessage("$startPath\n\n以接收端当前权限运行，最长 300 秒。运行器隐藏窗口，输出和错误在手机查看。脚本自身打开应用的行为仍会执行。")
+            WorkspaceDialog.Builder(activity).setTitle("运行电脑脚本？").setMessage("$startPath\n\n以接收端当前权限运行，最长 300 秒。运行器隐藏窗口，输出和错误在手机查看。脚本自身打开应用的行为仍会执行。")
                 .setNegativeButton("取消",null).setPositiveButton("运行") { _,_-> open(activity,client,startPath) }.show()
         } else open(activity,client,null)
     }
@@ -27,14 +27,14 @@ object ScriptJobsDialog {
         val status=TextView(activity).apply { text="正在读取…";setTextColor(Themes.color(activity,R.color.dim));textSize=12f }
         val list=ListView(activity)
         content.addView(status);content.addView(list,LinearLayout.LayoutParams(-1,(320*activity.resources.displayMetrics.density).toInt()))
-        val dialog=AlertDialog.Builder(activity).setTitle("脚本运行记录").setMessage("关闭此窗口不会停止脚本；可选择任务查看结果或停止运行。接收端退出会停止仍在运行的任务。")
+        val dialog=WorkspaceDialog.Builder(activity).setTitle("脚本运行记录").setMessage("关闭此窗口不会停止脚本；可选择任务查看结果或停止运行。接收端退出会停止仍在运行的任务。")
             .setView(content).setNegativeButton("关闭",null).create()
         var items=listOf<JSONObject>();var poll:Job?=null
         fun state(item:JSONObject)=when(item.optString("status")) { "starting"->"准备运行";"running"->"运行中";"completed"->"已完成";"cancelled"->"已取消";"timed_out"->"已超时";else->"失败" }
         list.setOnItemClickListener { _,_,index,_->
             val id=items[index].getString("id")
             val output=TextView(activity).apply { setTextIsSelectable(true);textSize=13f;setTextColor(Themes.color(activity,R.color.text));setPadding(24,12,24,12) }
-            val detail=AlertDialog.Builder(activity).setTitle("脚本结果").setView(ScrollView(activity).apply { addView(output) }).setNegativeButton("关闭",null)
+            val detail=WorkspaceDialog.Builder(activity).setTitle("脚本结果").setView(ScrollView(activity).apply { addView(output) }).setNegativeButton("关闭",null)
                 .setPositiveButton("停止脚本",null).create()
             var updater:Job?=null
             var actionError=""

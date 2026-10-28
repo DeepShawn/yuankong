@@ -83,6 +83,7 @@ class PowerConfirmTest {
 
     /** 取对话框正文（遍历所有 TextView） */
     private fun bodyText(d: android.app.Dialog?): String {
+        if(d is WorkspaceDialog)return d.description
         if (d == null) return ""
         val root = d.window?.decorView ?: return ""
         val sb = StringBuilder()

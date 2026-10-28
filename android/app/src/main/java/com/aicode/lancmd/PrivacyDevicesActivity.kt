@@ -108,7 +108,7 @@ class PrivacyDevicesActivity : MiuixActivity() {
     }
 
     internal fun confirmToggle(device: Device) {
-        AlertDialog.Builder(this)
+        WorkspaceDialog.Builder(this)
             .setTitle(if (device.enabled) "停用此设备？" else "启用此设备？")
             .setMessage(
                 "${device.name}\n\n" + if (device.enabled)

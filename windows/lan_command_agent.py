@@ -40,7 +40,7 @@ import threading
 import time
 
 APP_ID = "LANCMD"
-VERSION = "3.3.0"
+VERSION = "3.4.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1122,6 +1122,9 @@ from command_queue import CommandQueue
 from recordings import Recordings
 from gestures import Gestures
 from app_locks import AppLocks
+from app_catalog import AppCatalog
+from app_freeze import AppFreeze
+from wallpaper import Wallpaper
 from registry_editor import RegistryEditor
 from task_manager import TaskManager
 from browser_control import browser_request
@@ -1131,6 +1134,30 @@ from placeholder_files import PlaceholderFiles
 from file_jobs import FileJobs, file_token
 from file_schedule import FileSchedule
 from file_search import FileSearch
+from local_upgrade import LocalUpgrade
+import weakref
+_connections=weakref.WeakSet()
+_connections_lock=threading.RLock()
+
+def upgrade_busy():
+    with _connections_lock:connections=list(_connections)
+    if any(st.uploads or st.downloads for st in connections):return "请先完成或取消手机文件传输"
+    for manager in (_placeholders,_file_jobs,_file_schedule):
+        with manager.lock:
+            if any(not job["done"].is_set() for job in manager.jobs.values()):return "请先完成或取消文件任务、占位文件和延迟文件操作"
+    with _recordings.lock:
+        if any(job["data"]["status"] in ("starting","recording","stopping") for job in _recordings.jobs.values()):return "请先停止录制并等待文件封装完成"
+    with _scripts.lock:
+        if any("finished" not in job["data"] for job in _scripts.jobs.values()):return "请先停止运行中的脚本"
+    with _commands.lock:
+        if any("finished" not in job for job in _commands.batches.values()):return "请先取消或完成延迟命令"
+    with _remote.pointer_lock:
+        if _remote.playback_owner or _remote.pointer_owners:return "请先停止手势回放和拖动"
+    # Worker exit/EOF restores held suspension counts before package replacement.
+    return None
+
+def upgrade_stop():
+    cleanup_pid();os._exit(0)
 
 _capture_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 
@@ -1155,6 +1182,9 @@ _gestures = Gestures(_remote)
 _app_locks = AppLocks(os.path.join(APP_DIR,"app-locks.json"),protected=(_capture_dir,sys.executable))
 _registry = RegistryEditor(os.path.join(APP_DIR,"registry-backups"))
 _tasks = TaskManager(protected=(_capture_dir,))
+_app_catalog = AppCatalog(_app_locks._target,protected=(_capture_dir,sys.executable,APP_DIR,os.environ.get("SystemRoot",r"C:\Windows")))
+_app_freeze = AppFreeze()
+_wallpaper = Wallpaper(os.path.join(APP_DIR,"wallpapers"))
 _scripts = ScriptRunner()
 from contextlib import contextmanager, nullcontext
 
@@ -1171,13 +1201,14 @@ _file_jobs = FileJobs(os.path.join(APP_DIR,"file-jobs.json"),protected=(_capture
 
 
 _file_search = FileSearch(os.path.join(APP_DIR,"file-search"))
+_updates=LocalUpgrade(_capture_dir,os.path.join(APP_DIR,"upgrade"),VERSION,upgrade_busy,upgrade_stop,_app_freeze.prepare_upgrade)
 
 
 def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures"])
-        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
+        features.extend(["app_locks","app_catalog","app_freeze","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1209,6 +1240,10 @@ HANDLERS = {
     "recordings": lambda q, st: _recordings.request(q, st, RpcError),
     "gestures": lambda q, st: _gestures.request(q, st, RpcError),
     "app_locks": lambda q, st: _app_locks.request(q,RpcError),
+    "app_catalog": lambda q, st: _app_catalog.request(q,RpcError),
+    "app_freeze": lambda q, st: _app_freeze.request(q,st,RpcError),
+    "wallpaper": lambda q, st: _wallpaper.request(q,RpcError),
+    "upgrade": lambda q, st: _updates.request(q,RpcError),
     "registry": lambda q, st: _registry.request(q,RpcError),
     "tasks": lambda q, st: _tasks.request(q,RpcError),
     "browser": lambda q, st: browser_request(q,RpcError),
@@ -1268,6 +1303,7 @@ class ClientState(object):
         self.uploads = {}
         self.downloads = {}
         self.last_active = time.time()
+        with _connections_lock:_connections.add(self)
 
     def touch(self):
         self.last_active = time.time()
@@ -1427,7 +1463,8 @@ def serve_client(sock, addr, cfg):
                     raise RpcError("未知命令: %s" % cmd)
                 log.info("%s <- %s", state.client_name or state.peer, cmd)
                 state.touch()
-                result = handler(req, state)
+                with _updates.operation(cmd):
+                    result = handler(req, state)
                 resp = {"id": rid, "ok": True}
                 resp.update(result if isinstance(result, dict) else {"result": result})
                 write_frame(wf, resp)
@@ -1531,6 +1568,10 @@ def bind_listener(cfg, attempts=30):
 def tcp_server(cfg):
     global CLIENT_COUNT
     srv = bind_listener(cfg)
+    ready=os.environ.pop("LANCMD_UPGRADE_READY",None)
+    if ready:
+        from local_upgrade import write_json
+        write_json(ready,dict(version=VERSION,pid=os.getpid()))
     enable_keepalive(srv)
     log.info("TCP 监听 %s:%s", cfg["bind"], cfg["port"])
     while not STOP.is_set():
@@ -1841,6 +1882,9 @@ def main(argv):
     global _cfg_cache
     if "--touch-worker" in argv:
         from touch_guard import worker_main
+        return worker_main()
+    if "--freeze-worker" in argv:
+        from app_freeze import worker_main
         return worker_main()
     console = "--console" in argv or "-c" in argv
     ensure_dirs()
