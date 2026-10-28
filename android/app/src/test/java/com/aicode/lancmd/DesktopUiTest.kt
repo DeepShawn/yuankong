@@ -266,6 +266,23 @@ class DesktopUiTest {
         }
     }
 
+    @Test fun touchCursorHidesOnlyOnVisibleDesktopAndRestoresWhenOpeningAChild() {
+        Stub(cursorSupported=true).use {stub ->
+            stub.install();val controller=Robolectric.buildActivity(DesktopActivity::class.java).setup();val page=controller.get()
+            try {
+                page.begin()
+                waitUntil{stub.requests.any{it.second.optString("cmd")=="cursor" && it.second.optBoolean("hidden")}}
+                controller.pause().stop()
+                waitUntil{stub.requests.any{it.second.optString("cmd")=="cursor" && !it.second.optBoolean("hidden")}}
+                controller.start().resume().visible()
+                waitUntil{stub.requests.count{it.second.optString("cmd")=="cursor" && it.second.optBoolean("hidden")}>=2}
+                page.stopSession()
+                waitUntil{!page.sharing}
+                assertTrue(stub.requests.any{it.second.optString("cmd")=="session" && it.second.optString("action")=="end"})
+            }finally{controller.pause().stop().destroy()}
+        }
+    }
+
     @Test fun oldReceiverShowsUpgradeMessageWithoutOpeningControlSessions() {
         Stub(pointerSupported = false).use { stub ->
             stub.install()
@@ -373,7 +390,7 @@ class DesktopUiTest {
         }
     }
 
-    private class Stub(private val pointerSupported: Boolean = true, private val localSupported: Boolean = false) : Closeable {
+    private class Stub(private val pointerSupported: Boolean = true, private val localSupported: Boolean = false, private val cursorSupported:Boolean=false) : Closeable {
         private val server = ServerSocket(0)
         private val clients = CopyOnWriteArrayList<Socket>()
         private val workers = CopyOnWriteArrayList<Thread>()
@@ -401,7 +418,7 @@ class DesktopUiTest {
                                     val result = JSONObject().put("ok", true).put("id", request.getInt("id"))
                                     when (request.optString("cmd")) {
                                         "hello" -> result.put("agent_id", "desktop-test").put("token", "test-token")
-                                        "capabilities" -> result.put("features", JSONArray(listOf("screen", "input") + (if (pointerSupported) listOf("pointer") else emptyList()) + (if (localSupported) listOf("local_input", "touch_pause") else emptyList())))
+                                        "capabilities" -> result.put("features", JSONArray(listOf("screen", "input") + (if(cursorSupported)listOf("cursor_visibility")else emptyList()) + (if (pointerSupported) listOf("pointer") else emptyList()) + (if (localSupported) listOf("local_input", "touch_pause") else emptyList())))
                                         "local_input" -> {
                                             if (request.optString("action") == "pause") paused = true
                                             if (request.optString("action") == "release") paused = false

@@ -24,6 +24,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
@@ -147,6 +148,10 @@ internal fun lanCmdColors(context: Context): Colors {
     )
 }
 
+/** The selectable KernelSU-inspired presentation keeps the existing miuix components and palettes. */
+@Composable
+internal fun kernelStyle() = Prefs.uiStyle(LocalContext.current)=="kernel"
+
 /** 页面顶部的状态与结果提示，等同于旧 View 页面的状态条。 */
 @Composable
 fun StatusNote(text: String, failed: Boolean) {
@@ -168,11 +173,12 @@ fun StatusNote(text: String, failed: Boolean) {
 
 @Composable
 fun WorkspaceHeader(title:String,back:(()->Unit)?=null,subtitle:String="") {
-    Row(Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically) {
+    val kernel=kernelStyle()
+    Row(Modifier.fillMaxWidth().background(MiuixTheme.colorScheme.background).padding(horizontal=if(kernel)16.dp else 12.dp,vertical=4.dp),verticalAlignment=Alignment.CenterVertically) {
         if(back!=null)IconButton(onClick=back) { Icon(painterResource(R.drawable.ic_back),"返回") }
         Column(Modifier.weight(1f).padding(start=if(back==null)0.dp else 8.dp)) {
             if(subtitle.isNotBlank())Text(subtitle,fontSize=11.sp,letterSpacing=1.sp,color=MiuixTheme.colorScheme.primary)
-            Text(title,fontSize=22.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(vertical=4.dp))
+            Text(title,fontSize=if(kernel && back==null)28.sp else 22.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(vertical=4.dp))
         }
     }
 }
@@ -219,7 +225,7 @@ abstract class MiuixActivity : AppCompatActivity() {
             topBar = { WorkspaceHeader(title, {onBack()}) }
         ) { insets ->
             Column(
-                modifier = Modifier.fillMaxSize().workspaceBackground(MiuixTheme.colorScheme.surfaceVariant.copy(alpha=.2f),MiuixTheme.colorScheme.background).padding(insets).verticalScroll(rememberScrollState())
+                modifier = Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background).padding(insets).verticalScroll(rememberScrollState())
             ) {
                 StatusNote(noteText.value, noteFailed.value)
                 content()
@@ -348,13 +354,13 @@ fun MiuixColumn(content: @Composable () -> Unit) {
 /** 卡片分区：可选分区标题 + 圆角卡片。 */
 @Composable
 fun SectionCard(title: String? = null, modifier:Modifier=Modifier, content: @Composable ColumnScope.() -> Unit) {
-    if (title != null) Row(Modifier.fillMaxWidth().padding(start=18.dp,top=10.dp,bottom=4.dp),verticalAlignment=Alignment.CenterVertically) {
-        Spacer(Modifier.size(4.dp,14.dp).background(MiuixTheme.colorScheme.primary,RoundedCornerShape(2.dp)))
-        Text(title,fontSize=13.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(start=8.dp),color=MiuixTheme.colorScheme.onSurfaceVariantSummary)
-    }
+    val kernel=kernelStyle()
+    if (title != null) Text(title,fontSize=12.sp,fontWeight=FontWeight.Medium,
+        modifier=Modifier.padding(start=20.dp,top=8.dp,bottom=4.dp),color=MiuixTheme.colorScheme.primary)
+    val radius=if(kernel)20.dp else 24.dp
     Card(modifier=modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=4.dp)
-        .border(1.dp,MiuixTheme.colorScheme.outline.copy(alpha=.25f),RoundedCornerShape(24.dp)),
-        cornerRadius=24.dp,insideMargin=PaddingValues(8.dp)) { content() }
+        .border(if(kernel)0.dp else 1.dp,if(kernel)Color.Transparent else MiuixTheme.colorScheme.outline.copy(alpha=.25f),RoundedCornerShape(radius)),
+        cornerRadius=radius,insideMargin=PaddingValues(8.dp)) { content() }
 }
 
 /** 列表条目：标题 + 说明，可点击。 */
@@ -367,6 +373,25 @@ fun RowItem(title: String, summary: String? = null, enabled: Boolean = true, onL
             if(!summary.isNullOrBlank())Text(summary,fontSize=12.sp,lineHeight=18.sp,modifier=Modifier.padding(top=5.dp),color=MiuixTheme.colorScheme.onSurfaceVariantSummary)
         }
         Text("›",fontSize=24.sp,color=MiuixTheme.colorScheme.primary,modifier=Modifier.padding(start=12.dp))
+    }
+}
+
+/** Observable checked rows: a check mark and a tinted surface make selection unambiguous. */
+@Composable
+fun SelectionRow(title:String,summary:String?=null,checked:Boolean,onCheckedChange:(Boolean)->Unit,enabled:Boolean=true) {
+    val colors=MiuixTheme.colorScheme
+    Row(Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=3.dp)
+        .background(if(checked)colors.primaryContainer else colors.surface,RoundedCornerShape(16.dp))
+        .toggleable(value=checked,enabled=enabled,role=Role.Checkbox,onValueChange=onCheckedChange)
+        .padding(horizontal=12.dp,vertical=10.dp).heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
+        Box(Modifier.size(24.dp).background(if(checked)colors.primary else Color.Transparent,RoundedCornerShape(7.dp))
+            .border(1.5.dp,if(checked)colors.primary else colors.outline,RoundedCornerShape(7.dp)),contentAlignment=Alignment.Center) {
+            if(checked)Text("✓",fontSize=17.sp,fontWeight=FontWeight.Bold,color=colors.onPrimary)
+        }
+        Column(Modifier.weight(1f).padding(start=12.dp)) {
+            Text(title,fontSize=15.sp,fontWeight=if(checked)FontWeight.SemiBold else FontWeight.Normal,color=colors.onSurface)
+            if(!summary.isNullOrBlank())Text(summary,fontSize=12.sp,lineHeight=17.sp,color=colors.onSurfaceVariantSummary)
+        }
     }
 }
 
@@ -423,6 +448,7 @@ fun Action(
         text = text,
         onClick = onClick,
         enabled = enabled,
+        cornerRadius = if(kernelStyle())24.dp else 16.dp,
         insideMargin = PaddingValues(horizontal=8.dp,vertical=10.dp),
         modifier = modifier.padding(vertical = 4.dp).heightIn(min=48.dp),
         colors = if (primary) ButtonDefaults.textButtonColorsPrimary() else ButtonDefaults.textButtonColors()

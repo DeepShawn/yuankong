@@ -230,7 +230,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         Row(Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=8.dp),horizontalArrangement=Arrangement.spacedBy(4.dp)) {
             CATEGORIES.forEachIndexed { index,category ->
                 val selected=category==homeCategory
-                Column(Modifier.weight(1f).background(if(selected)MiuixTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,RoundedCornerShape(18.dp))
+                Column(Modifier.weight(1f).background(if(selected)MiuixTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,RoundedCornerShape(if(kernelStyle())28.dp else 18.dp))
                     .selectable(selected=selected,role=Role.Tab,onClick={homeCategory=category}).padding(vertical=6.dp),horizontalAlignment=Alignment.CenterHorizontally) {
                     Icon(painterResource(icons[index]),category,modifier=Modifier.size(21.dp),tint=if(selected)MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     Text(labels[index],fontSize=11.sp,fontWeight=if(selected)FontWeight.Bold else FontWeight.Normal,modifier=Modifier.padding(top=5.dp))
@@ -253,7 +253,17 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     @Composable
     private fun Tools() {
         WorkspaceHeader(homeCategory,subtitle="工具与管理")
-        toolGroups[homeCategory].orEmpty().chunked(2).forEach { group ->
+        if(kernelStyle()) {
+            SectionCard {
+                toolGroups[homeCategory].orEmpty().forEach {tool ->
+                    val entry=ToolNavigator.tools.firstOrNull{it.title==tool.label || it.target.simpleName==when(tool.label){"按键"->"ControlActivity";"摄像头"->"MediaActivity";else->""}}
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                        Icon(painterResource(entry?.icon?:R.drawable.ic_process),null,modifier=Modifier.padding(start=12.dp).size(24.dp),tint=MiuixTheme.colorScheme.primary)
+                        Column(Modifier.weight(1f)){RowItem(tool.label,entry?.detail){openTool(tool.label)}}
+                    }
+                }
+            }
+        } else toolGroups[homeCategory].orEmpty().chunked(2).forEach { group ->
             Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                 group.forEach { tool ->
                     val icon=when(tool.label) {

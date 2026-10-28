@@ -52,6 +52,7 @@ class WindowsBackend:
         self.capture_exe = capture_exe
         self.guard = None
         self.guard_lock = threading.Lock()
+        self.cursor_visibility = None
 
     def _input(self, callback):
         # Tagged SendInput is accepted from every RPC thread. Long text must not
@@ -74,6 +75,17 @@ class WindowsBackend:
     def release_local_input(self, owner):
         if self.guard is not None and self.guard.thread.is_alive():
             self.guard.release(owner)
+
+    def cursor(self, owner, hidden, allowed):
+        from cursor_visibility import CursorVisibility
+        with self.guard_lock:
+            if self.cursor_visibility is None:
+                self.cursor_visibility = CursorVisibility()
+        return self.cursor_visibility.set_hidden(owner, hidden, allowed)
+
+    def release_cursor(self, owner):
+        if self.cursor_visibility is not None:
+            self.cursor_visibility.set_hidden(owner, False, lambda: False)
 
     def request_consent(self, session):
         """不再征求本机同意，直接放行，也不启动任何可见窗口。"""
@@ -338,10 +350,25 @@ class RemoteFeatures:
         return self.backend.local_input(action, session.sid,
             lambda: session.alive() and time.monotonic() - session.last_active < 12)
 
+    def cursor(self, q, state):
+        session = self.active(q, state, "input")
+        hidden = q.get("hidden")
+        if not isinstance(hidden, bool):
+            raise self.error("鼠标指针状态必须为布尔值")
+        return self.backend.cursor(session.sid, hidden,
+            lambda: session.alive() and time.monotonic() - session.last_active < 12)
+
     def _close_session(self, session):
         if session.scope=="camera":
             with self.camera_lock:self.camera_sessions.pop(session.sid,None)
         self._release_pointer(session)
+        release_cursor = getattr(self.backend, "release_cursor", None)
+        if release_cursor:
+            try:
+                release_cursor(session.sid)
+            except Exception:
+                # Cursor recovery must never prevent releasing local input.
+                self.log.exception("鼠标指针由独立进程继续恢复")
         release = getattr(self.backend, "release_local_input", None)
         if release:
             release(session.sid)

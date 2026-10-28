@@ -73,7 +73,9 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
     internal var localPauseLabel by mutableStateOf("暂停本机输入")
     internal var localStatusText by mutableStateOf("本机输入暂停包含标准 HID 触屏，需 Windows 1.9.0")
 
+    private var touchOptionsExpanded by mutableStateOf(false)
     private var landscape by mutableStateOf(false)
+    private var cursorSupported=false
     private var touchPauseSupported = false
     private var sessionJob: Job? = null
     private var terminalJob: Job? = null
@@ -125,7 +127,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                     ) { begin() }
                     Action("停止共享", enabled = sharing, modifier = Modifier.weight(1f)) { stopSession() }
                 }
-            WorkingArea(screen,Modifier.fillMaxWidth().weight(1f),controlFraction=if(mode==1 && virtualKeyboardExpanded).66f else .36f,onResize={screen.cancelGesture()},horizontal=landscape) { Dock() }
+            WorkingArea(screen,Modifier.fillMaxWidth().weight(1f),controlFraction=if(mode==1 && virtualKeyboardExpanded).72f else .52f,onResize={screen.cancelGesture()},horizontal=landscape) { Dock() }
 
         }
     }
@@ -139,7 +141,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                         title,
                         selected = index == mode,
                         modifier = Modifier.weight(1f)
-                    ) { screen.cancelGesture();mode = index }
+                    ) { screen.cancelGesture();mode = index;updateCursorVisibility() }
                 }
                 Action("全屏", modifier = Modifier.weight(1f)) { showFullscreen(true) }
             }
@@ -154,13 +156,13 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
     @Composable
     private fun TouchPanel() {
         SectionCard {
-            SuperSwitch(
-                checked = touchShared,
-                onCheckedChange = { touchShared = it; screen.touchEnabled = it && commands != null },
-                title = "共享触控",
-                summary = "轻点单击 · 双击 · 长按右键 · 单指拖动 · 双指滚动",
-                enabled = sharing
-            )
+            ActionRow {
+                SelectionAction(if(touchShared)"触控已开启" else "触控已关闭",selected=touchShared,enabled=sharing,modifier=Modifier.weight(1f)) {
+                    touchShared=!touchShared;screen.touchEnabled=touchShared && commands!=null
+                    updateCursorVisibility()
+                }
+                SelectionAction(if(touchOptionsExpanded)"收起更多" else "更多操作",selected=touchOptionsExpanded,modifier=Modifier.weight(1f)) {touchOptionsExpanded=!touchOptionsExpanded}
+            }
             ActionRow {
                 pointerKeys.forEachIndexed { index, text ->
                     Action(text, enabled = sharing, modifier = Modifier.weight(1f)) { pointerKey(index) }
@@ -174,6 +176,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                     modifier = Modifier.weight(1f)
                 ) { changeLocalInput() }
             }
+            if(touchOptionsExpanded) {
             Action("运行中的桌面程序") {
                 startActivity(Intent(this@DesktopActivity, AppsActivity::class.java))
             }
@@ -189,6 +192,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                 }
             }
             Note(localStatusText)
+            }
         }
     }
 
@@ -246,6 +250,10 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                 )
             }
         }
+    }
+
+    private fun updateCursorVisibility() {
+        if(cursorSupported)enqueue("cursor",JSONObject().put("hidden",touchShared && mode==0 && pageVisible))
     }
 
     internal fun pointerKey(index: Int) {
@@ -332,6 +340,8 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                 coroutineContext.ensureActive(); checkOrigin(origin)
                 terminalClient = terminal
                 commands = queue
+                cursorSupported=(0 until capabilities.length()).any {capabilities.optString(it)=="cursor_visibility"}
+                updateCursorVisibility()
                 val hasLocalInput = (0 until capabilities.length())
                     .any { capabilities.optString(it) == "local_input" }
                 touchPauseSupported = (0 until capabilities.length())
@@ -387,6 +397,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                 terminalJob?.cancel(); terminalClient = null; source = null
                 localRequest?.cancel(); localLease = null; localPaused = false
                 localPauseEnabled = false
+                cursorSupported=false
                 localPauseLabel = "暂停本机输入"
                 localStatusText = "共享已结束，本机输入将恢复"
                 if (!isDestroyed) screen.clearFrame()
@@ -480,6 +491,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
     override fun onStart() {
         super.onStart()
         pageVisible = true
+        updateCursorVisibility()
         ConnectionManager.addListener(this)
     }
 
@@ -495,6 +507,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
     override fun onStop() {
         ConnectionManager.removeListener(this)
         pageVisible = false
+        updateCursorVisibility()
         screen.cancelGesture()
         if (isFinishing) { sessionJob?.cancel(); terminalJob?.cancel(); localRequest?.cancel() }
         super.onStop()

@@ -1207,7 +1207,7 @@ _updates=LocalUpgrade(_capture_dir,os.path.join(APP_DIR,"upgrade"),VERSION,upgra
 def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
-        features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures"])
+        features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures", "cursor_visibility"])
         features.extend(["app_locks","app_catalog","app_freeze","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
@@ -1231,6 +1231,7 @@ HANDLERS = {
     "camera": lambda q, st: _remote.frame(q, st, "camera"),
     "input": _remote.keyboard,
     "pointer": _remote.pointer,
+    "cursor": _remote.cursor,
     "local_input": _remote.local_input,
     "audio": lambda q, st: cmd_audio(q),
     "devices": lambda q, st: _devices.request(q, RpcError),
@@ -1880,6 +1881,9 @@ USAGE = r"""LanCmd Agent v%s
 
 def main(argv):
     global _cfg_cache
+    if "--cursor-worker" in argv:
+        from cursor_visibility import worker_main
+        return worker_main()
     if "--touch-worker" in argv:
         from touch_guard import worker_main
         return worker_main()

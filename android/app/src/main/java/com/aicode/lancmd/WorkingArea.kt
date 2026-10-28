@@ -4,6 +4,7 @@ import android.content.res.Configuration
 import android.view.View
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,7 +26,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** The picture and controls share all remaining space; neither is below a page scroll. */
 @Composable
-fun WorkingArea(view:View,modifier:Modifier=Modifier,controlFraction:Float=.36f,onResize:()->Unit={},horizontal:Boolean?=null,controls:@Composable ColumnScope.()->Unit) {
+fun WorkingArea(view:View,modifier:Modifier=Modifier,controlFraction:Float=.50f,onResize:()->Unit={},horizontal:Boolean?=null,controls:@Composable ColumnScope.()->Unit) {
     var fraction by rememberSaveable(controlFraction) { mutableFloatStateOf(controlFraction) }
     val landscape=horizontal ?: (LocalConfiguration.current.orientation==Configuration.ORIENTATION_LANDSCAPE)
     val density=LocalDensity.current
@@ -34,18 +35,29 @@ fun WorkingArea(view:View,modifier:Modifier=Modifier,controlFraction:Float=.36f,
         val availableHeight=maxHeight
         if(landscape)Row(Modifier.fillMaxSize()) {
             HostedView(view,Modifier.weight(1f).fillMaxHeight().testTag("working-picture"))
-            Column(Modifier.width((availableWidth*.36f).coerceAtMost(340.dp)).fillMaxHeight().verticalScroll(rememberScrollState()).testTag("working-controls"),content=controls)
+            val widthPixels=with(density){availableWidth.toPx()}.coerceAtLeast(1f)
+            Box(Modifier.width(24.dp).fillMaxHeight().semantics {
+                contentDescription="调整画面与操作栏比例"
+                customActions=listOf(
+                    CustomAccessibilityAction("增大画面"){onResize();fraction=(fraction-.1f).coerceIn(.25f,.70f);true},
+                    CustomAccessibilityAction("增大操作栏"){onResize();fraction=(fraction+.1f).coerceIn(.25f,.70f);true})
+            }.pointerInput(widthPixels,controlFraction){detectHorizontalDragGestures(onDragStart={onResize()}){change,amount ->
+                change.consume();fraction=(fraction-amount/widthPixels).coerceIn(.25f,.70f)
+            }},contentAlignment=Alignment.Center) {
+                Spacer(Modifier.width(4.dp).height(44.dp).background(MiuixTheme.colorScheme.outline,RoundedCornerShape(2.dp)))
+            }
+            Column(Modifier.width(availableWidth*fraction.coerceIn(.25f,.70f)).fillMaxHeight().verticalScroll(rememberScrollState()).testTag("working-controls"),content=controls)
         } else Column(Modifier.fillMaxSize()) {
             HostedView(view,Modifier.fillMaxWidth().weight(1f).testTag("working-picture"))
             val heightPixels=with(density){availableHeight.toPx()}.coerceAtLeast(1f)
-            fun resize(value:Float) {onResize();fraction=value.coerceIn(.25f,.70f)}
+            fun resize(value:Float) {onResize();fraction=value.coerceIn(.25f,.78f)}
             Box(Modifier.fillMaxWidth().height(24.dp).semantics {
                 contentDescription="调整画面与操作栏比例"
                 customActions=listOf(
                     CustomAccessibilityAction("增大画面"){resize(fraction-.1f);true},
                     CustomAccessibilityAction("增大操作栏"){resize(fraction+.1f);true})
             }.pointerInput(heightPixels,controlFraction){detectVerticalDragGestures(onDragStart={onResize()}) { change,amount ->
-                change.consume();fraction=(fraction-amount/heightPixels).coerceIn(.25f,.70f)
+                change.consume();fraction=(fraction-amount/heightPixels).coerceIn(.25f,.78f)
             }},contentAlignment=Alignment.Center) {
                 Spacer(Modifier.width(44.dp).height(4.dp).background(MiuixTheme.colorScheme.outline,RoundedCornerShape(2.dp)))
             }

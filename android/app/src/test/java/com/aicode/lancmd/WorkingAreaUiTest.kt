@@ -31,7 +31,7 @@ class WorkingAreaUiTest {
         }}
         val picture=compose.onNodeWithTag("working-picture");val controls=compose.onNodeWithTag("working-controls")
         val initial=height(picture)
-        assertTrue(initial>200.dp);assertTrue(height(controls)>180.dp)
+        assertTrue(initial>200.dp);assertTrue("操作区默认至少占一半可用高度",height(controls)>=290.dp)
         val divider=compose.onNodeWithContentDescription("调整画面与操作栏比例")
         val enlargePicture=divider.fetchSemanticsNode().config[SemanticsActions.CustomActions].single{it.label=="增大画面"}.action
         compose.runOnIdle{assertTrue(enlargePicture())}
@@ -40,6 +40,19 @@ class WorkingAreaUiTest {
         compose.runOnIdle{repeat(2){assertTrue(enlargeControls())}}
         assertTrue(height(picture)<initial)
         assertTrue(height(controls)>180.dp)
+    }
+    @Test fun landscapeDividerCanExpandTheControlSidebar() {
+        compose.setContent {LanCmdMiuixTheme {
+            val context=LocalContext.current;val view=androidx.compose.runtime.remember(context){View(context)}
+            WorkingArea(view,Modifier.size(700.dp,300.dp),horizontal=true){Action("控制操作") {}}
+        }}
+        val controls=compose.onNodeWithTag("working-controls")
+        fun width()=controls.getUnclippedBoundsInRoot().let{it.right-it.left}
+        val before=width()
+        val enlarge=compose.onNodeWithContentDescription("调整画面与操作栏比例").fetchSemanticsNode()
+            .config[SemanticsActions.CustomActions].single{it.label=="增大操作栏"}.action
+        compose.runOnIdle{enlarge()}
+        assertTrue(width()>before)
     }
     @Test fun visuallyCompactSelectionKeepsItsTouchTarget() {
         compose.setContent {LanCmdMiuixTheme {SelectionAction("触控",selected=true){}}}

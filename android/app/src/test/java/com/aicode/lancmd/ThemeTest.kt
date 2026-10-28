@@ -32,6 +32,7 @@ class ThemeTest {
     @After fun tearDown() {
         ConnectionManager.stop()
         Prefs.saveTheme(RuntimeEnvironment.getApplication(), "", "")
+        Prefs.saveUiStyle(RuntimeEnvironment.getApplication(),"kernel")
     }
 
     @Test fun everyPaletteResolvesOnHomeAndFeaturePages() {
@@ -87,6 +88,7 @@ class ThemeTest {
         shadowOf(Looper.getMainLooper()).idle()
         val dialog = org.robolectric.shadows.ShadowDialog.getLatestDialog() as AlertDialog
         assertTrue(dialog.isShowing)
+        find(dialog.window!!.decorView) { it.contentDescription == "界面风格 miuix 经典风格" }!!.performClick()
         find(dialog.window!!.decorView) { it.contentDescription == "主题色 紫罗兰" }!!.performClick()
         find(dialog.window!!.decorView) { it.contentDescription == "背景色调 纯黑" }!!.performClick()
         render(dialog.window!!.decorView, "theme-picker")
@@ -94,6 +96,7 @@ class ThemeTest {
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals("violet", Prefs.accent(activity))
         assertEquals("black", Prefs.tone(activity))
+        assertEquals("miuix",Prefs.uiStyle(activity))
 
         controller.recreate()
         shadowOf(Looper.getMainLooper()).idle()

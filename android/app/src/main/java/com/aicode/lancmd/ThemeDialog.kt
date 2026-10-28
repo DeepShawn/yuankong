@@ -15,6 +15,8 @@ import androidx.appcompat.app.AppCompatActivity
 class ThemeDialog(private val activity: AppCompatActivity) {
     private var accent = Themes.accent(activity)
     private var tone = Themes.tone(activity)
+    private var style = Prefs.uiStyle(activity)
+    private val styleViews = ArrayList<Pair<String, TextView>>()
     private val accentViews = ArrayList<Pair<Themes.Option, View>>()
     private val toneViews = ArrayList<Pair<Themes.Option, View>>()
 
@@ -25,6 +27,17 @@ class ThemeDialog(private val activity: AppCompatActivity) {
         val body = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(22), dp(4), dp(22), dp(8))
+        }
+        body.addView(section("界面风格"))
+        for ((key,label) in listOf("kernel" to "KernelSU 参考风格", "miuix" to "miuix 经典风格")) {
+            val option=TextView(activity).apply {
+                text=label;tag=label;textSize=14f;gravity=Gravity.CENTER_VERTICAL
+                setTextColor(color(R.color.text));setPadding(dp(12),dp(10),dp(12),dp(10));minHeight=dp(48)
+                contentDescription="界面风格 $label";isClickable=true;isFocusable=true
+                setOnClickListener {style=key;refresh()}
+            }
+            styleViews.add(key to option)
+            body.addView(option,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(4)})
         }
         body.addView(section("深色 / 亮色背景"))
         Themes.tones.chunked(2).forEach { group ->
@@ -57,8 +70,9 @@ class ThemeDialog(private val activity: AppCompatActivity) {
             .setView(ScrollView(activity).apply { addView(body) })
             .setNegativeButton("取消", null)
             .setPositiveButton("应用") { _, _ ->
-                if (accent.key != Themes.accent(activity).key || tone.key != Themes.tone(activity).key) {
+                if (accent.key != Themes.accent(activity).key || tone.key != Themes.tone(activity).key || style != Prefs.uiStyle(activity)) {
                     Prefs.saveTheme(activity, accent.key, tone.key)
+                    Prefs.saveUiStyle(activity,style)
                     activity.recreate()
                 }
             }
@@ -115,6 +129,13 @@ class ThemeDialog(private val activity: AppCompatActivity) {
     }
 
     private fun refresh() {
+        styleViews.forEach { (key,view) ->
+            view.isSelected=key==style;view.text=if(view.isSelected)"✓ ${view.tag}" else view.tag.toString()
+            view.background=GradientDrawable().apply {
+                setColor(color(if(view.isSelected)R.color.accent_dim else R.color.surface_variant));cornerRadius=dp(16).toFloat()
+                setStroke(dp(1),color(if(view.isSelected)R.color.accent else R.color.outline_soft))
+            }
+        }
         accentViews.forEach { (option, view) ->
             val selected = option.key == accent.key
             val swatch = (view as LinearLayout).getChildAt(0) as FrameLayout

@@ -3,6 +3,7 @@ package com.aicode.lancmd
 import android.app.Application
 import android.os.Looper
 import android.view.View
+import android.view.WindowManager
 import android.view.ViewGroup
 import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
@@ -50,6 +51,11 @@ class FolderActionsUiTest {
                 compose.onNodeWithContentDescription("操作：Photos").performSemanticsAction(SemanticsActions.OnClick){it()}
                 shadowOf(Looper.getMainLooper()).idle();choose("传输与整理");choose("重命名")
                 val dialog=latest();val field=all(dialog.window!!.decorView).filterIsInstance<EditText>().single()
+                assertTrue("重命名应请求输入焦点",field.hasFocus())
+                assertEquals(0,dialog.window!!.attributes.flags and WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
+                assertEquals(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE,
+                    dialog.window!!.attributes.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_STATE)
+                assertEquals("原名称应已全选",field.text.length,field.selectionEnd-field.selectionStart)
                 field.setText("bad/name");dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
                 assertTrue(dialog.isShowing);assertFalse(stub.requests.any{it.optString("cmd")=="rename"})
                 field.setText("Photos 2026");dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
@@ -65,6 +71,28 @@ class FolderActionsUiTest {
         }
     }
 
+    @Test fun fileChecksChangeImmediatelyEvenWhenTheSelectionCountStaysTheSame() {
+        Stub().use {stub ->
+            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val page=controller.get()
+            try {
+                waitFor{page.visible.size==2}
+                compose.runOnIdle{page.toggleMulti()}
+                val folder=compose.onNodeWithText("Photos");val file=compose.onNodeWithText("readme.txt")
+                folder.assertIsOff().performSemanticsAction(SemanticsActions.OnClick){it()}
+                folder.assertIsOn();file.assertIsOff()
+                compose.runOnIdle {
+                    page.toggleSelection(page.visible.single{it.optString("name")=="Photos"})
+                    page.toggleSelection(page.visible.single{it.optString("name")=="readme.txt"})
+                }
+                folder.assertIsOff();file.assertIsOn()
+                compose.runOnIdle{page.chooseAll(true)}
+                folder.assertIsOn();file.assertIsOff()
+                compose.runOnIdle{page.clearSelection()}
+                folder.assertIsOff();file.assertIsOff()
+            }finally{controller.pause().stop().destroy()}
+        }
+    }
+
     private class Stub:Closeable {
         val requests=CopyOnWriteArrayList<JSONObject>();val server=ServerSocket(0);val client=AgentClient("127.0.0.1",server.localPort)
         var folder="Photos"
@@ -75,7 +103,7 @@ class FolderActionsUiTest {
                     when(q.optString("cmd")) {
                         "storage"->result.put("home","C:\\notes").put("drives",JSONArray())
                         "file_jobs"->result.put("jobs",JSONArray())
-                        "ls"->result.put("path",q.optString("path").ifBlank{"C:\\notes"}).put("items",JSONArray().apply{if(q.optString("path")=="C:\\notes")put(JSONObject().put("name",folder).put("dir",true).put("mtime",1))})
+                        "ls"->result.put("path",q.optString("path").ifBlank{"C:\\notes"}).put("items",JSONArray().apply{if(q.optString("path")=="C:\\notes")put(JSONObject().put("name",folder).put("dir",true).put("mtime",1)).put(JSONObject().put("name","readme.txt").put("dir",false).put("mtime",1))})
                         "rename"->folder=q.getString("to").substringAfterLast('\\')
                     }
                     requests.add(q);output.write(result.toString()+"\n");output.flush()

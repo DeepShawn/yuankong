@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -86,7 +87,7 @@ class StorageActivity : MiuixActivity() {
     private var remoteJob: String? = null
     private var lastResult: String? = null
     private var lastError = false
-    private val selection = linkedMapOf<String, JSONObject>()
+    private val selection = mutableStateMapOf<String, JSONObject>()
     private var restoreKeys = setOf<String>()
     private var pendingTreeItems = listOf<JSONObject>()
     private var pendingTreeBase = ""
@@ -278,7 +279,7 @@ class StorageActivity : MiuixActivity() {
                     if (item.optBoolean("hidden")) append(" · 隐藏")
                     if (item.optBoolean("system")) append(" · 系统")
                 }
-                if (multi) SuperCheckbox(
+                if (multi) SelectionRow(
                     title = name,
                     summary = summary,
                     checked = selection.containsKey(itemKey(item)),
@@ -863,7 +864,7 @@ class StorageActivity : MiuixActivity() {
         val base = path
         val text = dialogInput(text = original ?: "")
         val dialog = WorkspaceDialog.Builder(this).setTitle(if (item == null) "新建文件夹" else "重命名")
-            .setView(text).setNegativeButton("取消", null)
+            .setView(text).focusInput(text,selectAll=item!=null).setNegativeButton("取消", null)
             .setPositiveButton("保存", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -921,7 +922,7 @@ class StorageActivity : MiuixActivity() {
                 "创建后直接进入编辑。BAT/CMD 中文通常使用 GBK，VBS 建议 UTF-16 LE；不会自动运行脚本。" +
                     "\n编码可在编辑页调整。"
             )
-            .setView(box).setNegativeButton("取消", null)
+            .setView(box).focusInput(name,selectAll=true).setNegativeButton("取消", null)
             .setPositiveButton("创建并编辑", null).create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {

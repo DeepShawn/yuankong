@@ -6,6 +6,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -47,7 +48,7 @@ class TaskManagerActivity : MiuixActivity() {
     internal var results by mutableStateOf<List<String>>(emptyList())
     private var resultsExpanded by mutableStateOf(false)
 
-    private val selection = linkedMapOf<String, JSONObject>()
+    private val selection = mutableStateMapOf<String, JSONObject>()
     private var restoreKeys = setOf<String>()
     private var busy = false
     internal var batchBusy by mutableStateOf(false)
@@ -129,7 +130,7 @@ class TaskManagerActivity : MiuixActivity() {
                 val title = "${item.optString("name")} · ${item.optInt("pid")}"
                 val summary = "CPU $cpu · ${FileTransfer.humanSize(item.optLong("memory"))}" +
                     if (!item.optBoolean("can_terminate")) " · 受保护 / 受限" else ""
-                if (multi) SuperCheckbox(
+                if (multi) SelectionRow(
                     title = title,
                     summary = summary,
                     checked = selection.containsKey(key(item)),
