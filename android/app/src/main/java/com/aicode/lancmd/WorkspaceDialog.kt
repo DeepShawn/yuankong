@@ -80,7 +80,7 @@ class WorkspaceDialog private constructor(private val spec:Builder):AlertDialog(
             setContent { LanCmdMiuixTheme {
                 Card(cornerRadius=28.dp,insideMargin=PaddingValues(20.dp)) {
                     Text(spec.title?.toString().orEmpty(),fontSize=21.sp,color=MiuixTheme.colorScheme.onSurface)
-                    Column(Modifier.fillMaxWidth().heightIn(max=420.dp).verticalScroll(rememberScrollState())) {
+                    Column(Modifier.fillMaxWidth().weight(1f,fill=false).heightIn(max=420.dp).verticalScroll(rememberScrollState())) {
                         if(!spec.message.isNullOrBlank())AndroidView(factory={ TextView(it).apply {
                             id=android.R.id.message;text=spec.message;textSize=14f
                             setTextColor(Themes.color(context,R.color.dim));setLineSpacing(px(3).toFloat(),1f)

@@ -167,7 +167,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 InfoItem(deviceName.ifBlank { getString(R.string.status_idle) }, deviceSub)
                 if (latencyText.isNotBlank()) RowItem("延迟", latencyText) { pingOnce() }
                 ActionRow {
-                    Action("全部工具 · 搜索", modifier = Modifier.weight(1f)) { ToolNavigator.show(this@MainActivity) }
+                    Action("工具库", modifier = Modifier.weight(1f)) { ToolNavigator.show(this@MainActivity) }
                     Action("外观主题", modifier = Modifier.weight(1f)) { ThemeDialog(this@MainActivity).show() }
                     Action("更多", modifier = Modifier.weight(1f)) { showMenu() }
                 }
@@ -204,14 +204,14 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                     }
                 }
                 ActionRow {
-                    Action("常用命令", modifier = Modifier.weight(1f)) {
+                    Action("常用", modifier = Modifier.weight(1f)) {
                         CommandHints.show(this@MainActivity, shell == "powershell") { line ->
                             commandLine = line
                         }
                     }
                     Action("历史", modifier = Modifier.weight(1f)) { showHistory() }
-                    Action("发送文件", modifier = Modifier.weight(1f)) { startPickFiles() }
-                    Action("延迟命令", modifier = Modifier.weight(1f)) {
+                    Action("传文件", modifier = Modifier.weight(1f)) { startPickFiles() }
+                    Action("延迟", modifier = Modifier.weight(1f)) {
                         startActivity(
                             Intent(this@MainActivity, CommandsActivity::class.java)
                                 .putExtra("line", commandLine).putExtra("shell", shell)

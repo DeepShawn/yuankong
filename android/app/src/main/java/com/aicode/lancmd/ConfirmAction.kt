@@ -19,7 +19,7 @@ fun ConfirmAction(title:String,message:String,confirm:String="确认",onDismiss:
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text(title)
-                Column(Modifier.fillMaxWidth().heightIn(max=260.dp).verticalScroll(rememberScrollState())) { Note(message) }
+                Column(Modifier.fillMaxWidth().weight(1f,fill=false).heightIn(max=260.dp).verticalScroll(rememberScrollState())) { Note(message) }
                 ActionRow {
                     Action("取消",modifier=Modifier.weight(1f),onClick=onDismiss)
                     Action(confirm,primary=true,modifier=Modifier.weight(1f),onClick=onConfirm)
