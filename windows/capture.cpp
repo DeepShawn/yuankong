@@ -77,11 +77,15 @@ static void jpeg(const Pixels &pixels) {
     if (written != size_t(info.cbSize.QuadPart)) throw E_FAIL;
 }
 
-static Pixels screen() {
+static Pixels screen(int sx=0,int sy=0,int width=0,int height=0) {
     SetProcessDPIAware();
     int x = GetSystemMetrics(SM_XVIRTUALSCREEN), y = GetSystemMetrics(SM_YVIRTUALSCREEN);
     int w = GetSystemMetrics(SM_CXVIRTUALSCREEN), h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
     if (w <= 0 || h <= 0 || w > 32768 || h > 32768) throw E_FAIL;
+    if (width || height) {
+        if (width<=0 || height<=0 || sx<x || sy<y || static_cast<long long>(sx)+width>x+w || static_cast<long long>(sy)+height>y+h) throw E_INVALIDARG;
+        x=sx; y=sy; w=width; h=height;
+    }
     double factor = std::min(1.0, std::min(1280.0 / w, 960.0 / h));
     int sw = std::max(1, int(w * factor)), sh = std::max(1, int(h * factor));
     HDC desktop = GetDC(nullptr), target = CreateCompatibleDC(desktop);
@@ -203,6 +207,16 @@ int main(int argc, char **argv) {
     int result = 0;
     try {
         if (argc == 2 && std::strcmp(argv[1], "screen") == 0) jpeg(screen());
+        else if (argc == 6 && std::strcmp(argv[1], "screen") == 0) {
+            int values[4];
+            for (int i=0;i<4;++i) {
+                char *end=nullptr;long number=std::strtol(argv[i+2],&end,10);
+                if (!end || end==argv[i+2] || *end || number< -32768 || number>32768) throw E_INVALIDARG;
+                values[i]=static_cast<int>(number);
+            }
+            if (values[2]<=0 || values[3]<=0) throw E_INVALIDARG;
+            jpeg(screen(values[0],values[1],values[2],values[3]));
+        }
         else {
             check(MFStartup(MF_VERSION, MFSTARTUP_FULL)); media = true;
             if (argc == 2 && std::strcmp(argv[1], "list") == 0) {

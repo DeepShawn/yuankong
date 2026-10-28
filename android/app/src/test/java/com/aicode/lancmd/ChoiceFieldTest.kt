@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -40,6 +41,7 @@ class ChoiceFieldTest {
         compose.runOnIdle { items.value=listOf("默认") }
         compose.onNodeWithText("浏览器").performClick()
         compose.onNodeWithText("取消").performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithText("取消").fetchSemanticsNodes().isEmpty() }
         compose.onNodeWithText("浏览器").assertExists()
     }
 }

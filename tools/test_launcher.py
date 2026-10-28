@@ -86,7 +86,7 @@ class WindowsLauncherTest(unittest.TestCase):
         self.assertIn(b"LanCmd", result.stderr)
 
     def test_status_uses_real_agent_without_starting_service(self):
-        for name in ("lan_command_agent.py", "remote_features.py", "system_controls.py", "input_guard.py", "device_management.py", "touch_guard.py", "file_actions.py", "desktop_apps.py", "command_queue.py", "recordings.py", "gestures.py", 'text_editor.py', 'app_locks.py', 'registry_editor.py', 'task_manager.py', 'browser_control.py', 'script_runner.py', 'privacy_devices.py', 'placeholder_files.py', 'file_jobs.py', 'file_schedule.py', 'document_open.py', 'file_search.py', 'device_property_change.py'):
+        for name in ("lan_command_agent.py", "remote_features.py", "system_controls.py", "input_guard.py", "device_management.py", "touch_guard.py", "file_actions.py", "desktop_apps.py", "command_queue.py", "recordings.py", "gestures.py", 'text_editor.py', 'app_locks.py', 'app_catalog.py', 'app_freeze.py', 'displays.py', 'registry_editor.py', 'task_manager.py', 'browser_control.py', 'script_runner.py', 'privacy_devices.py', 'placeholder_files.py', 'file_jobs.py', 'file_schedule.py', 'document_open.py', 'file_search.py', 'device_property_change.py'):
             shutil.copy2(ROOT / "windows" / name, self.package / name)
         result = self.run_launcher(["--status"])
         # An isolated APPDATA has no running receiver; --status returns 1.

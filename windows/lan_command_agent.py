@@ -1122,6 +1122,9 @@ from command_queue import CommandQueue
 from recordings import Recordings
 from gestures import Gestures
 from app_locks import AppLocks
+from app_catalog import AppCatalog
+from app_freeze import AppFreeze
+from displays import display_request,Wallpaper
 from registry_editor import RegistryEditor
 from task_manager import TaskManager
 from browser_control import browser_request
@@ -1155,6 +1158,9 @@ _gestures = Gestures(_remote)
 _app_locks = AppLocks(os.path.join(APP_DIR,"app-locks.json"),protected=(_capture_dir,sys.executable))
 _registry = RegistryEditor(os.path.join(APP_DIR,"registry-backups"))
 _tasks = TaskManager(protected=(_capture_dir,))
+_app_catalog = AppCatalog(_app_locks._target,protected=(_capture_dir,sys.executable,APP_DIR,os.environ.get("SystemRoot",r"C:\Windows")))
+_app_freeze = AppFreeze()
+_wallpaper = Wallpaper(os.path.join(APP_DIR,"wallpapers"))
 _scripts = ScriptRunner()
 from contextlib import contextmanager, nullcontext
 
@@ -1177,7 +1183,7 @@ def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures"])
-        features.extend(["app_locks","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
+        features.extend(["app_locks","app_catalog","app_freeze","displays","monitor_select","wallpaper","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1209,6 +1215,10 @@ HANDLERS = {
     "recordings": lambda q, st: _recordings.request(q, st, RpcError),
     "gestures": lambda q, st: _gestures.request(q, st, RpcError),
     "app_locks": lambda q, st: _app_locks.request(q,RpcError),
+    "app_catalog": lambda q, st: _app_catalog.request(q,RpcError),
+    "app_freeze": lambda q, st: _app_freeze.request(q,st,RpcError),
+    "displays": lambda q, st: display_request(q,RpcError),
+    "wallpaper": lambda q, st: _wallpaper.request(q,RpcError),
     "registry": lambda q, st: _registry.request(q,RpcError),
     "tasks": lambda q, st: _tasks.request(q,RpcError),
     "browser": lambda q, st: browser_request(q,RpcError),
@@ -1841,6 +1851,9 @@ def main(argv):
     global _cfg_cache
     if "--touch-worker" in argv:
         from touch_guard import worker_main
+        return worker_main()
+    if "--freeze-worker" in argv:
+        from app_freeze import worker_main
         return worker_main()
     console = "--console" in argv or "-c" in argv
     ensure_dirs()

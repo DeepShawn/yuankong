@@ -79,10 +79,14 @@ class WindowsBackend:
         """不再征求本机同意，直接放行，也不启动任何可见窗口。"""
         return True
 
-    def capture(self, scope, device=0):
+    def capture(self, scope, device=0, monitor=None):
         if not os.path.isfile(self.capture_exe):
             raise RuntimeError("缺少 LanCmdCapture.exe，请完整更新 Windows 1.5.0 压缩包")
         args = [self.capture_exe, "screen"] if scope == "screen" else [self.capture_exe, "camera", str(device)]
+        if scope=="screen" and monitor is not None:
+            from displays import monitor_bounds
+            bounds=monitor_bounds(monitor)
+            args += [str(bounds[key]) for key in ("left","top","width","height")]
         r = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            stdin=subprocess.DEVNULL, timeout=12, creationflags=0x08000000)
         if r.returncode or not r.stdout.startswith(b"\xff\xd8"):
@@ -308,7 +312,12 @@ class RemoteFeatures:
             raise self.error("摄像头编号无效")
         if device < 0 or device > 31:
             raise self.error("摄像头编号无效")
-        raw = self.backend.capture(scope, device)
+        monitor=q.get("monitor")
+        if scope=="screen" and monitor is not None:
+            if not isinstance(monitor,str) or not 1<=len(monitor)<=64:raise self.error("显示器编号无效")
+            try:raw=self.backend.capture(scope,device,monitor=monitor)
+            except (OSError,ValueError) as exc:raise self.error(str(exc))
+        else:raw = self.backend.capture(scope, device)
         # A local stop or expiry while capture was in flight discards the frame.
         self.active(q, state, scope)
         return {"format": "jpeg", "data": base64.b64encode(raw).decode("ascii")}
@@ -366,6 +375,13 @@ class RemoteFeatures:
         if any(isinstance(v, bool) or not isinstance(v, (int, float)) or
                not 0 <= v <= 1 or not math.isfinite(v) for v in (x, y)):
             raise self.error("鼠标坐标必须为 0 到 1 的有限数值")
+        if q.get("monitor") is not None:
+            from displays import monitor_bounds,pointer_position
+            try:
+                bounds=monitor_bounds(q["monitor"])
+                user=ctypes.WinDLL("user32")
+                x,y=pointer_position(x,y,bounds,tuple(user.GetSystemMetrics(index) for index in (76,77,78,79)))
+            except (OSError,ValueError) as exc:raise self.error(str(exc))
         button = q.get("button", "left")
         if button not in ("left", "right", "middle"):
             raise self.error("无效的鼠标按键")
