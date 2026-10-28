@@ -125,6 +125,15 @@ class NativeUpgradeTest(unittest.TestCase):
                     self.assertEqual(0,helper.wait(15));parent.wait(3)
                     report=json.loads((base/"status.json").read_text(encoding="utf-8"))
                     self.assertEqual("rolled_back" if fails else "completed",report["status"],report)
+                    import ctypes
+                    from ctypes import wintypes as w
+                    kernel=ctypes.WinDLL("kernel32",use_last_error=True)
+                    kernel.OpenProcess.argtypes=[w.DWORD,w.BOOL,w.DWORD];kernel.OpenProcess.restype=w.HANDLE
+                    kernel.WaitForSingleObject.argtypes=[w.HANDLE,w.DWORD];kernel.CloseHandle.argtypes=[w.HANDLE]
+                    child=kernel.OpenProcess(0x100000,False,report["pid"])
+                    if child:
+                        try:self.assertEqual(0,kernel.WaitForSingleObject(child,5000))
+                        finally:kernel.CloseHandle(child)
                     self.assertEqual(b"old" if fails else b"new",(root/"Start.exe").read_bytes())
                     if fails:self.assertEqual(old,(root/"lan_command_agent.py").read_bytes())
                     else:self.assertEqual(b"old",(work/"backup/Start.exe").read_bytes())

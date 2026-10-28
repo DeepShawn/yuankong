@@ -289,12 +289,12 @@ def helper(plan):
             time.sleep(.2)
         else:
             process.terminate();process.wait(10);raise ValueError("新版接收端启动超时")
-        ready.unlink(missing_ok=True);report("completed")
+        ready.unlink(missing_ok=True);report("completed",pid=process.pid)
         shutil.rmtree(work/"stage",ignore_errors=True)
     except Exception as exc:
         try:
             if entries is not None:rollback(root,work/"backup",entries)
-            launch();report("rolled_back",error=str(exc)[:1600])
+            restored=launch();report("rolled_back",error=str(exc)[:1600],pid=restored.pid)
         except Exception as recovery:report("failed",error=str(exc)[:1200]+"；恢复失败："+str(recovery)[:1200])
 
 
