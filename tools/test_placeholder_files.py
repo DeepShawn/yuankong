@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -101,22 +102,23 @@ class PlaceholderTest(unittest.TestCase):
                 self.call(action="create", path=str(self.path), size=size)
     def test_existing_file_and_links_are_not_overwritten(self):
         self.path.write_bytes(b"original")
-        with self.assertRaises(Error):
-            self.call(action="create", path=str(self.path), size=10)
+        result=self.wait(self.call(action="create", path=str(self.path), size=10)["job"])
+        self.assertEqual("failed",result["status"])
         self.assertEqual(b"original", self.path.read_bytes())
         if os.name != "nt":
             alias = Path(self.temp.name) / "alias"
             alias.symlink_to(self.temp.name, target_is_directory=True)
-            with self.assertRaises(Error):
-                self.call(action="create", path=str(alias / "other.dat"), size=10)
+            result=self.wait(self.call(action="create", path=str(alias / "other.dat"), size=10)["job"])
+            self.assertEqual("failed",result["status"])
     def test_relative_paths_and_windows_device_aliases_are_rejected(self):
         for path in ("relative.dat", *[str(Path(self.temp.name) / name) for name in ("NUL.txt", "CON .txt", "COM¹.dat", "CONOUT$", "file.")]):
             with self.subTest(path=path), self.assertRaises(Error):
                 self.call(action="create", path=path, size=0)
     def test_free_space_preflight_and_runtime_reserve_cleanup(self):
         self.backend.available = RESERVE_BYTES + 9
-        with self.assertRaisesRegex(Error, "空间不足"):
-            self.call(action="create", path=str(self.path), size=10)
+        result=self.wait(self.call(action="create", path=str(self.path), size=10)["job"])
+        self.assertEqual("failed",result["status"])
+        self.assertIn("空间不足",result["error"])
         self.assertFalse(self.path.exists())
         self.backend.available = RESERVE_BYTES + 100
         original = self.backend.create
@@ -173,6 +175,76 @@ class PlaceholderTest(unittest.TestCase):
         self.manager.stop_for_device(dict(paths=["e:\\"]))
         worker.join(3)
         self.assertTrue(pending["cancel"].is_set())
+
+    def test_slow_usb_preflight_does_not_block_submission_status_or_cancellation(self):
+        entered,release=threading.Event(),threading.Event()
+        def validate(path,size):entered.set();release.wait(5)
+        with ThreadPoolExecutor(max_workers=1) as pool, mock.patch.object(self.backend,"validate",side_effect=validate):
+            try:
+                job=pool.submit(self.call,action="create",path=str(self.path),size=1024).result(1)["job"]
+                self.assertTrue(entered.wait(1))
+                result=pool.submit(self.call).result(1)
+                self.assertEqual("checking",result["items"][0]["status"])
+                self.assertTrue(result["items"][0]["can_cancel"])
+                result=pool.submit(self.call,action="cancel",job_id=job["id"]).result(1)
+                self.assertTrue(result["cancel_requested"])
+                self.assertEqual("cancelling",self.call()["items"][0]["status"])
+            finally:release.set()
+        self.assertEqual("cancelled",self.wait(job)["status"])
+        self.assertFalse(self.path.exists())
+
+    def test_slow_usb_commit_does_not_hold_registry_lock_and_has_explicit_boundary(self):
+        entered,release=threading.Event(),threading.Event()
+        original=self.backend.create
+        def create(path):
+            allocation=original(path);commit=allocation.commit
+            def blocked():entered.set();release.wait(5);commit()
+            allocation.commit=blocked
+            return allocation
+        with ThreadPoolExecutor(max_workers=1) as pool, mock.patch.object(self.backend,"create",side_effect=create):
+            job=self.call(action="create",path=str(self.path),size=128)["job"]
+            try:
+                self.assertTrue(entered.wait(1))
+                item=pool.submit(self.call).result(1)["items"][0]
+                self.assertEqual("committing",item["status"])
+                self.assertFalse(item["can_cancel"])
+                self.assertFalse(pool.submit(self.call,action="cancel",job_id=job["id"]).result(1)["cancel_requested"])
+            finally:release.set()
+        self.assertEqual("completed",self.wait(job)["status"])
+
+    def test_cancellation_is_not_reported_finished_until_slow_cleanup_returns(self):
+        self.backend.entered,self.backend.release=threading.Event(),threading.Event()
+        entered,release=threading.Event(),threading.Event()
+        original=self.backend.create
+        def create(path):
+            allocation=original(path);close=allocation.close
+            def blocked():entered.set();release.wait(5);close()
+            allocation.close=blocked
+            return allocation
+        with mock.patch.object(self.backend,"create",side_effect=create):
+            job=self.call(action="create",path=str(self.path),size=128)["job"]
+            try:
+                self.assertTrue(self.backend.entered.wait(1))
+                self.call(action="cancel",job_id=job["id"]);self.backend.release.set()
+                self.assertTrue(entered.wait(1))
+                self.assertEqual("cancelling",self.call()["items"][0]["status"])
+                self.assertFalse(self.manager.jobs[job["id"]]["done"].is_set())
+            finally:release.set();self.backend.release.set()
+        self.assertEqual("cancelled",self.wait(job)["status"])
+        self.assertFalse(self.path.exists())
+
+    def test_fallback_flushes_bounded_batches_before_the_final_verification(self):
+        original=self.backend.create;flushes=[]
+        def create(path):
+            allocation=original(path);flush=allocation.flush
+            def record():flushes.append(path.stat().st_size);flush()
+            allocation.flush=record
+            return allocation
+        with mock.patch.object(self.backend,"create",side_effect=create), \
+                mock.patch("placeholder_files.CHUNK_BYTES",1024), mock.patch("placeholder_files.FLUSH_BYTES",4096):
+            result=self.wait(self.call(action="create",path=str(self.path),size=10000)["job"])
+        self.assertEqual("completed",result["status"])
+        self.assertEqual([4096,8192,10000],flushes)
 
 
 @unittest.skipUnless(os.name == "nt", "Windows allocation APIs")

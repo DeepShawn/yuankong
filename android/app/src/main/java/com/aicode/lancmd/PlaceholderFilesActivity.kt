@@ -40,7 +40,7 @@ class PlaceholderFilesActivity : FeatureActivity() {
             setSingleLine();inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             contentDescription="占位文件大小 GB";setText(savedInstanceState?.getString("size") ?: "0")
         });box.addView(size)
-        box.addView(label("创建隐藏＋系统属性的普通文件，优先快速预分配真实空间，不支持时逐块写入；不覆盖同名文件，保留至少 1 GB 可用空间。速度取决于文件系统与磁盘。",12f,R.color.dim))
+        box.addView(label("创建隐藏＋系统属性的普通文件，优先自适应分批预分配真实空间，不支持时逐块写入；不覆盖同名文件，保留至少 1 GB 可用空间。慢速 U 盘会自动缩小批次。",12f,R.color.dim))
         create=primary(button("创建占位文件") { confirmCreate() });box.addView(create)
         body.addView(label("Windows 资源管理器默认隐藏这类文件；开启显示受保护的操作系统文件后仍可查看。安卓文件管理始终列出，可直接删除释放空间。手机断线继续创建；取消、失败或接收端退出会清理未完成文件。",12f,R.color.dim))
         refresh=button("刷新占位任务") { refreshJobs() };body.addView(refresh)
@@ -91,27 +91,31 @@ class PlaceholderFilesActivity : FeatureActivity() {
             if(items.length()==0)jobs.addView(label("本次接收端运行期间暂无占位任务。重启后可在目标目录管理已完成文件。",13f,R.color.dim))
             for(i in 0 until items.length()) {
                 val item=items.getJSONObject(i);val state=item.optString("status")
-                val active=state in listOf("queued","allocating","writing","verifying")
-                val title=when(state) { "queued"->"等待创建";"allocating"->"正在快速分配真实空间";"writing"->"正在占用空间";"verifying"->"正在核实磁盘分配";"completed"->"创建完成";"cancelled"->"已取消并清理";else->"创建失败" }
+                val active=state in listOf("queued","checking","allocating","writing","flushing","verifying","cancelling","cleaning","committing")
+                val title=when(state) { "queued"->"等待创建";"checking"->"正在检查目录与磁盘容量";"allocating"->"正在快速分配真实空间";"writing"->"正在占用空间";"flushing"->"正在刷新写入缓存";"verifying"->"正在核实磁盘分配";"cancelling"->"正在取消，等待磁盘返回并清理";"cleaning"->"正在关闭文件并清理";"committing"->"正在完成文件";"completed"->"创建完成";"cancelled"->"已取消并清理";else->"创建失败" }
                 jobs.addView(label(title,15f,if(state=="failed")R.color.danger else R.color.accent))
                 jobs.addView(label(item.getString("path"),12f,R.color.dim).apply { setTextIsSelectable(true) })
                 val total=item.optLong("size");val written=item.optLong("written")
                 jobs.addView(label("已完成 ${gb(written)} GB / ${gb(total)} GB"+(if(state=="completed")" · 实际分配 ${gb(item.optLong("allocated"))} GB" else ""),12f,R.color.dim))
                 jobs.addView(ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply {
-                    isIndeterminate=state=="allocating"
+                    isIndeterminate=active && state!="writing"
                     max=1000;progress=if(total==0L){if(state=="completed")1000 else 0}else (written.toDouble()/total*1000).toInt().coerceIn(0,1000)
                     progressTintList=android.content.res.ColorStateList.valueOf(color(R.color.accent))
                 },LinearLayout.LayoutParams(-1,dp(8)).apply { topMargin=dp(8);bottomMargin=dp(8) })
                 if(item.has("error"))jobs.addView(label(item.getString("error"),12f,R.color.danger))
-                if(active)jobs.addView(button("取消创建") {
+                if(active && item.optLong("idle_seconds")>=5)jobs.addView(label("正在等待磁盘响应，进度暂未更新；取消会在当前磁盘调用返回后清理。",12f,R.color.dim))
+                if(active && item.optBoolean("can_cancel",state !in listOf("cancelling","cleaning","committing")))jobs.addView(button("取消创建") {
                     if(!busy)task {
                         setBusy(true)
-                        try { pinnedCall(origin,"placeholders",JSONObject().put("action","cancel").put("job_id",item.getString("id")));status("已请求取消，等待清理完成") }
+                        try {
+                            val cancelled=pinnedCall(origin,"placeholders",JSONObject().put("action","cancel").put("job_id",item.getString("id")))
+                            status(if(cancelled.optBoolean("cancel_requested",true))"已请求取消，等待磁盘返回并清理完成" else "任务已进入完成阶段，请等待结果")
+                        }
                         finally { setBusy(false) }
                         refreshNow()
                     }
                 })
-                else jobs.addView(button("在文件管理定位") {
+                else if(!active)jobs.addView(button("在文件管理定位") {
                     task {
                         // Check the originating connection before navigating.
                         pinnedCall(origin,"capabilities")

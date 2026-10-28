@@ -96,6 +96,25 @@ class PlaceholderUiTest {
             controller.pause().stop().destroy()
         }
     }
+    @Test fun slowDiskCancellationRemainsPendingUntilCleanupCompletes() {
+        Stub().use { stub->
+            stub.jobState="checking";stub.slowCancel=true;stub.install()
+            val controller=Robolectric.buildActivity(PlaceholderFilesActivity::class.java).setup()
+            val root=controller.get().window.decorView
+            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="正在检查目录与磁盘容量" } && buttons(root).single { it.text=="刷新占位任务" }.isEnabled }
+            buttons(root).single { it.text=="取消创建" }.performClick()
+            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="正在取消，等待磁盘返回并清理" } && buttons(root).single { it.text=="刷新占位任务" }.isEnabled }
+            assertFalse(buttons(root).any { it.text=="在文件管理定位" || it.text=="取消创建" })
+            assertFalse(all(root).filterIsInstance<TextView>().any { it.text=="已取消并清理" })
+            stub.jobState="cleaning";buttons(root).single { it.text=="刷新占位任务" }.performClick()
+            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="正在关闭文件并清理" } && buttons(root).single { it.text=="刷新占位任务" }.isEnabled }
+            stub.jobState="cancelled";buttons(root).single { it.text=="刷新占位任务" }.performClick()
+            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="已取消并清理" } }
+            assertTrue(buttons(root).any { it.text=="在文件管理定位" })
+            controller.pause().stop().destroy()
+        }
+    }
+
     @Test fun fileManagerOpensPlaceholderPageAndShowsHiddenFiles() {
         Stub().use { stub->
             stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get();val root=activity.window.decorView
@@ -173,7 +192,7 @@ class PlaceholderUiTest {
 
     private class Stub:Closeable {
         private val server=ServerSocket(0);private val client=AgentClient("127.0.0.1",server.localPort)
-        val requests=CopyOnWriteArrayList<JSONObject>();private var jobState="";private var disconnected=false
+        val requests=CopyOnWriteArrayList<JSONObject>();@Volatile var jobState="";@Volatile var slowCancel=false;private var disconnected=false
         private val worker=Thread {
             try { server.accept().use { socket->
                 val reader=socket.getInputStream().bufferedReader();val writer=socket.getOutputStream().bufferedWriter()
@@ -183,7 +202,7 @@ class PlaceholderUiTest {
                         "storage"->result.put("home","E:\\").put("drives",JSONArray())
                         "ls"->result.put("path","E:\\").put("items",JSONArray().put(JSONObject().put("name","reserve.dat").put("dir",false).put("size",128).put("hidden",true).put("system",true)))
                         "placeholders"->{
-                            when(q.optString("action")){"create"->jobState="allocating";"cancel"->jobState="cancelled"}
+                            when(q.optString("action")){"create"->jobState="allocating";"cancel"->jobState=if(slowCancel)"cancelling" else "cancelled"}
                             result.put("items",JSONArray().apply { if(jobState.isNotEmpty())put(JSONObject().put("id","placeholder-job").put("path","E:\\LanCmd-placeholder.dat").put("size",500_000_000_000L).put("written",12).put("status",jobState)) })
                         }
                         "devices"->{
