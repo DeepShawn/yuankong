@@ -158,6 +158,31 @@ abstract class MiuixActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 不滚动的页面骨架：内容自己分配高度，用于画面要占满剩余空间的页面
+     * （远程桌面）。状态提示同样在顶部。
+     */
+    @Composable
+    protected fun FixedPage(title: String, content: @Composable ColumnScope.() -> Unit) {
+        Scaffold(
+            topBar = {
+                SmallTopAppBar(
+                    title = title,
+                    navigationIcon = {
+                        IconButton(onClick = { onBack() }) {
+                            Icon(painterResource(R.drawable.ic_back), "返回")
+                        }
+                    }
+                )
+            }
+        ) { insets ->
+            Column(modifier = Modifier.fillMaxSize().padding(insets)) {
+                StatusNote(noteText.value, noteFailed.value)
+                content()
+            }
+        }
+    }
+
     /** 顶栏返回键的行为，子类可覆盖（例如先提示未保存内容）。 */
     protected open fun onBack() {
         finish()

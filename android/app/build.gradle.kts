@@ -54,6 +54,14 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            // 逐个打印测试的开始与结果：界面迁移期间，一旦某个页面的布局测量
+            // 不收敛，测试进程会挂住而不是失败，日志里最后一个 STARTED 就是它。
+            all {
+                it.testLogging {
+                    events("started", "passed", "failed", "skipped")
+                    showStandardStreams = false
+                }
+            }
         }
     }
 
