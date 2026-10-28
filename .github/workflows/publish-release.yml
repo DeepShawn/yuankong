@@ -129,6 +129,10 @@ jobs:
               for name in ('python/_sqlite3.pyd', 'python/sqlite3.dll'):
                   if not package.read('LanCmd-Windows/' + name):
                       raise SystemExit('Missing SQLite runtime: ' + name)
+              for name in ('storage_reads.py', 'cursor_visibility.py', 'start.bat'):
+                  source = subprocess.check_output(['git', 'show', tag + ':windows/' + name])
+                  if package.read('LanCmd-Windows/' + name) != source:
+                      raise SystemExit('Windows startup file differs from tagged source: ' + name)
               for name in ('Start.exe', 'LanCmdAgent.exe', 'LanCmdCtl.exe', 'LanCmdCapture.exe', 'LanCmdRecord.exe'):
                   data = package.read('LanCmd-Windows/' + name)
                   pe = struct.unpack_from('<I', data, 0x3c)[0]
