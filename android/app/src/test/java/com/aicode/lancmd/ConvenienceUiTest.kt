@@ -319,12 +319,14 @@ class ConvenienceUiTest {
         stopConnection()
         Stub().use { stub ->
             stub.install()
+            // 首页已迁移到 Compose（miuix）：终端类型与命令输入是页面状态。
             val activity = controller.get()
-            activity.findViewById<View>(R.id.btnShellPs).performClick()
-            activity.findViewById<View>(R.id.btnCommands).performClick()
+            activity.shell = "powershell"
+            CommandHints.show(activity, true) { line -> activity.commandLine = line }
+            shadowOf(Looper.getMainLooper()).idle()
             val dialog = ShadowDialog.getLatestDialog() as AlertDialog
             dialog.listView.performItemClick(null, 4, 4)
-            assertEquals("Get-Process", activity.findViewById<EditText>(R.id.etCmd).text.toString())
+            assertEquals("Get-Process", activity.commandLine)
             assertFalse(stub.requests.any { it.optString("cmd") == "exec" })
             controller.pause().stop().destroy()
         }

@@ -4,17 +4,13 @@ import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Looper
-import android.view.Menu
-import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
-import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.chip.Chip
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -50,31 +46,29 @@ class NavigationDateUiTest {
     private fun buttons(v:View)=all(v).filterIsInstance<MaterialButton>()
     private fun latest()=ShadowDialog.getLatestDialog() as AlertDialog
     private fun waitFor(check:()->Boolean) { val end=System.currentTimeMillis()+8000;while(System.currentTimeMillis()<end){shadowOf(Looper.getMainLooper()).idle();if(check())return;Thread.sleep(10)};fail("UI did not settle") }
-    private fun entries(menu:Menu):List<MenuItem> =(0 until menu.size()).flatMap { i->val item=menu.getItem(i);listOf(item)+(item.subMenu?.let { entries(it) } ?: emptyList()) }
     private fun preview(v:View,name:String,height:Int=891) {
         v.measure(View.MeasureSpec.makeMeasureSpec(411,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(height,View.MeasureSpec.EXACTLY));v.layout(0,0,411,height)
         val bitmap=Bitmap.createBitmap(411,height,Bitmap.Config.ARGB_8888);v.draw(Canvas(bitmap))
         File("build/ui-previews/$name.png").apply { parentFile!!.mkdirs() }.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) };bitmap.recycle()
     }
     @Test fun homeCategoryFiltersToolsAndSurvivesRecreation() {
+        // 首页已迁移到 Compose（miuix）：分类是页面状态，重建后保留。
         val c=Robolectric.buildActivity(MainActivity::class.java).setup();var a=c.get()
-        val categories=all(a.window.decorView).filterIsInstance<Chip>()
-        assertEquals(listOf("命令控制台","共享与控制","文件与设备","系统与应用","录制与自动化"),categories.map { it.text.toString() })
-        assertTrue(categories.single { it.text=="命令控制台" }.isChecked)
-        assertEquals(View.GONE,a.findViewById<View>(R.id.homeTools).visibility)
-        all(a.window.decorView).filterIsInstance<Chip>().single { it.text=="文件与设备" }.performClick()
-        assertEquals(View.GONE,a.findViewById<View>(R.id.managementCards).visibility)
-        assertEquals(View.VISIBLE,a.findViewById<View>(R.id.rowActions2).visibility)
+        assertEquals(
+            listOf("共享与控制","文件与设备","系统与应用","录制与自动化"),
+            a.toolGroups.keys.toList()
+        )
+        assertEquals("命令控制台",a.homeCategory)
+        a.homeCategory="文件与设备"
+        assertEquals(listOf("文件管理","文件搜索","U盘与设备","隐私设备"),a.toolGroups.getValue("文件与设备").map { it.label })
         preview(a.window.decorView,"home-file-category-small",640)
         c.recreate();a=c.get()
-        assertTrue(all(a.window.decorView).filterIsInstance<Chip>().single { it.text=="文件与设备" }.isChecked)
-        assertEquals(View.GONE,a.findViewById<View>(R.id.managementCards).visibility)
-        all(a.window.decorView).filterIsInstance<Chip>().single { it.text=="系统与应用" }.performClick()
-        assertEquals(View.VISIBLE,a.findViewById<View>(R.id.managementCards).visibility)
-        assertEquals(View.VISIBLE,a.findViewById<View>(R.id.homeTools).visibility)
-        all(a.window.decorView).filterIsInstance<Chip>().single { it.text=="命令控制台" }.performClick()
+        assertEquals("文件与设备",a.homeCategory)
+        a.homeCategory="系统与应用"
+        assertEquals(4,a.toolGroups.getValue("系统与应用").size)
+        a.homeCategory="命令控制台"
         c.recreate();a=c.get()
-        assertEquals(View.GONE,a.findViewById<View>(R.id.homeTools).visibility)
+        assertEquals("命令控制台",a.homeCategory)
         c.pause().stop().destroy()
     }
     @Test fun sharedToolSearchFindsDateWorkflowAndOpensFileManager() {
@@ -90,24 +84,22 @@ class NavigationDateUiTest {
     }
     @Test fun groupedFileMenuEditsModifiedDateAndRejectsInvalidCalendarDate() {
         Stub().use { stub->
+            // 文件管理页已迁移到 Compose（miuix）：分组菜单改用系统列表弹窗，分组不变。
             stub.install();val c=Robolectric.buildActivity(StorageActivity::class.java).setup();val a=c.get();val root=a.window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="report.docx" } }
+            waitFor { a.visible.any { it.optString("name")=="report.docx" } }
             val item=JSONObject().put("name","report.docx").put("mtime",1700000000).put("file_id","a".repeat(64))
-            StorageActivity::class.java.getDeclaredMethod("fileActions",JSONObject::class.java,View::class.java).apply { isAccessible=true }.invoke(a,item,root)
-            val menu=org.robolectric.shadows.ShadowPopupMenu.getLatestPopupMenu()!!
-            assertEquals(listOf("打开与预览","编辑与属性","传输与整理","删除"),(0 until menu.menu.size()).map { menu.menu.getItem(it).title.toString() })
-            val date=entries(menu.menu).single { it.title=="最后修改日期" }
-            org.robolectric.shadow.api.Shadow.extract<org.robolectric.shadows.ShadowPopupMenu>(menu).onMenuItemClickListener!!.onMenuItemClick(date)
+            assertEquals(listOf("打开与预览","编辑与属性","传输与整理","删除"),a.menuGroups(item).keys.toList())
+            a.act("最后修改日期",item)
             shadowOf(Looper.getMainLooper()).idle();val dialog=latest();val field=all(dialog.window!!.decorView).filterIsInstance<EditText>().single()
             assertTrue(buttons(dialog.window!!.decorView).any { it.text=="选择日期" });assertTrue(buttons(dialog.window!!.decorView).any { it.text=="选择时间" })
             field.setText("2025-02-30 10:20:30");dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();assertTrue(dialog.isShowing)
             assertFalse(stub.requests.any { it.optString("action")=="mtime" })
             field.setText("2025-03-08 10:20:30");preview(dialog.window!!.decorView,"modified-date-editor")
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("修改日期已保存") } }
+            waitFor { a.note.contains("修改日期已保存") }
             val q=stub.requests.single { it.optString("action")=="mtime" }
             assertEquals(1741429230L,q.getDouble("modified").toLong());assertEquals("a".repeat(64),q.getString("file_id"))
-            assertFalse(dialog.isShowing);menu.dismiss();c.pause().stop().destroy()
+            assertFalse(dialog.isShowing);c.pause().stop().destroy()
         }
     }
     @Test fun deviceFailureRemainsBesideItsCardAfterRefreshAndFiltering() {

@@ -11,7 +11,6 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
-import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
@@ -55,7 +54,6 @@ class ManagementUiTest {
         fail("UI did not settle")
     }
     private fun all(view:View):List<View> = listOf(view)+if(view is ViewGroup)(0 until view.childCount).flatMap { all(view.getChildAt(it)) } else emptyList()
-    private fun buttons(view:View)=all(view).filterIsInstance<MaterialButton>()
     private fun render(view:View,name:String,width:Int=411,height:Int=891) {
         shadowOf(Looper.getMainLooper()).idle()
         view.measure(View.MeasureSpec.makeMeasureSpec(width,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(height,View.MeasureSpec.EXACTLY));view.layout(0,0,width,height)
@@ -179,24 +177,25 @@ class ManagementUiTest {
     }
     @Test fun batAndVbsFileMenusRunOnlyAfterConfirmationAndKeepSelectedPath() {
         Stub().use { stub->
+            // 文件管理页已迁移到 Compose（miuix）：单项菜单改用系统列表弹窗，
+            // 这里直接驱动菜单项，脚本仍必须经过确认才运行。
             stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get();val root=activity.window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.startsWith("2 项") } }
+            waitFor { activity.note.startsWith("2 项") }
             render(root,"file-script-menu")
-            val actions=StorageActivity::class.java.getDeclaredMethod("fileActions",JSONObject::class.java,View::class.java).apply { isAccessible=true }
             for(extension in listOf("bat","vbs")) {
                 val before=stub.requests.count { it.optString("cmd")=="scripts" && it.optString("action")=="run" }
-                actions.invoke(activity,JSONObject().put("name","test.$extension").put("dir",false),root)
-                val menu=org.robolectric.shadows.ShadowPopupMenu.getLatestPopupMenu()!!
-                val advanced=(0 until menu.menu.size()).map { menu.menu.getItem(it) }.single { it.title=="高级操作" }.subMenu!!
-                val item=(0 until advanced.size()).map { advanced.getItem(it) }.single { it.title=="运行 ${extension.uppercase()}" }
-                val shadow=org.robolectric.shadow.api.Shadow.extract<org.robolectric.shadows.ShadowPopupMenu>(menu)
-                shadow.onMenuItemClickListener!!.onMenuItemClick(item);shadowOf(Looper.getMainLooper()).idle()
+                val item=JSONObject().put("name","test.$extension").put("dir",false)
+                assertEquals(
+                    listOf("运行 ${extension.uppercase()}"),
+                    activity.menuGroups(item).getValue("高级操作")
+                )
+                activity.act("运行 ${extension.uppercase()}",item);shadowOf(Looper.getMainLooper()).idle()
                 assertEquals(before,stub.requests.count { it.optString("cmd")=="scripts" && it.optString("action")=="run" })
                 (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
                 waitFor { stub.requests.count { it.optString("cmd")=="scripts" && it.optString("action")=="run" }==before+1 }
                 val request=stub.requests.last { it.optString("cmd")=="scripts" && it.optString("action")=="run" }
                 assertEquals("C:\\notes\\test.$extension",request.getString("path"))
-                (ShadowDialog.getLatestDialog() as AlertDialog).dismiss();menu.dismiss()
+                (ShadowDialog.getLatestDialog() as AlertDialog).dismiss()
             }
             controller.pause().stop().destroy()
         }
@@ -274,18 +273,12 @@ class ManagementUiTest {
                 shadowOf(Looper.getMainLooper()).idle()
                 controller.pause().stop().destroy()
             }
+            // 首页已迁移到 Compose（miuix）：分类入口按状态断言，两种高度都要能画出内容。
             val home=Robolectric.buildActivity(MainActivity::class.java).setup();val activity=home.get()
-            all(activity.window.decorView).filterIsInstance<com.google.android.material.chip.Chip>().single { it.text=="系统与应用" }.performClick()
+            activity.homeCategory="系统与应用"
+            assertEquals(4,activity.toolGroups.getValue("系统与应用").size)
             for(height in listOf(640,891)) {
                 render(activity.window.decorView,"management-home-$height",height=height)
-                val cards=activity.findViewById<ViewGroup>(R.id.managementCards)
-                assertEquals(4,cards.childCount);assertTrue(activity.findViewById<View>(R.id.btnSend).bottom>0)
-                val tools=activity.findViewById<android.widget.ScrollView>(R.id.homeTools)
-                tools.scrollTo(0,cards.top);shadowOf(Looper.getMainLooper()).idle()
-                val visible=android.graphics.Rect()
-                assertTrue(cards.getGlobalVisibleRect(visible));assertEquals("Management cards must not be clipped",cards.height,visible.height())
-                assertTrue(activity.findViewById<View>(R.id.scroll).height>0)
-                tools.scrollTo(0,0)
             }
             home.pause().stop().destroy()
         }

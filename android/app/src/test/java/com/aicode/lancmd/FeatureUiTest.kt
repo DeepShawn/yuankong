@@ -6,9 +6,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Looper
 import android.view.View
-import android.widget.LinearLayout
-import android.widget.TextView
-import androidx.recyclerview.widget.RecyclerView
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
 import com.aicode.lancmd.net.parentOf
@@ -139,15 +136,15 @@ class FeatureUiTest {
             MainActivity::class.java.getDeclaredField("firewallChecked").apply { isAccessible = true }.setBoolean(activity, true)
             activity.onStatus(ConnectionManager.Status(state = ConnectionManager.State.CONNECTED, name = "个人电脑", host = "192.168.1.8", latencyMs = 12, paired = true))
             activity.onEvent("连接已就绪。选择上方功能，或在下方输入命令。", ConnectionManager.LogKind.INFO)
-            val rows = listOf(activity.findViewById<LinearLayout>(R.id.rowActions1), activity.findViewById(R.id.rowActions2))
-            val tiles = rows.flatMap { row -> (0 until row.childCount).map { row.getChildAt(it) } }
-            activity.findViewById<View>(R.id.cardDesktop).performClick()
+            // 首页已迁移到 Compose（miuix）：工具入口按名字驱动。
+            val labels = activity.toolGroups.values.flatten().map { it.label }
+            activity.openTool("远程桌面")
             assertEquals(DesktopActivity::class.java.name, shadowOf(activity).nextStartedActivity.component!!.className)
-            assertFalse("Screen is consolidated into the desktop card",tiles.any { it.contentDescription=="屏幕" })
+            assertFalse("Screen is consolidated into the desktop entry", labels.contains("屏幕"))
             val expected = mapOf("摄像头" to MediaActivity::class.java,
                 "按键" to ControlActivity::class.java, "消息" to ControlActivity::class.java, "文件管理" to StorageActivity::class.java, "文件搜索" to FileSearchActivity::class.java)
             expected.forEach { (label, type) ->
-                tiles.single { it.contentDescription == label }.performClick()
+                activity.openTool(label)
                 assertEquals(type.name, shadowOf(activity).nextStartedActivity.component!!.className)
             }
             render(activity, "home")
@@ -184,26 +181,13 @@ class FeatureUiTest {
         stopConnection()
         StubAgent().use { stub ->
             stub.install()
+            // 文件管理页已迁移到 Compose（miuix）：目录内容按页面状态断言，目录排在文件前。
             val controller = Robolectric.buildActivity(StorageActivity::class.java).setup()
             val activity = controller.get()
-            var list: RecyclerView? = null
-            fun find(view: View): RecyclerView? {
-                if (view is RecyclerView) return view
-                if (view is android.view.ViewGroup) for (i in 0 until view.childCount) find(view.getChildAt(i))?.let { return it }
-                return null
-            }
-            val deadline = System.currentTimeMillis() + 8000
-            while (System.currentTimeMillis() < deadline) {
-                shadowOf(Looper.getMainLooper()).idle()
-                list = find(activity.findViewById(android.R.id.content))
-                if (list?.adapter?.itemCount == 3) break
-                Thread.sleep(20)
-            }
-            assertEquals(3, list?.adapter?.itemCount)
+            waitUntil { activity.visible.size == 3 }
             render(activity, "storage")
-            val first = list!!.findViewHolderForAdapterPosition(0)!!.itemView as android.view.ViewGroup
-            val labels = first.getChildAt(1) as LinearLayout
-            assertEquals("Documents", (labels.getChildAt(0) as TextView).text.toString())
+            assertEquals("Documents", activity.visible.first().optString("name"))
+            assertTrue("目录应排在文件之前", activity.visible.first().optBoolean("dir"))
             controller.pause().stop().destroy()
         }
     }

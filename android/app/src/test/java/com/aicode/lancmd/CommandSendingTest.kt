@@ -3,9 +3,6 @@ package com.aicode.lancmd
 import android.app.Application
 import android.os.Looper
 import android.os.NetworkOnMainThreadException
-import android.widget.EditText
-import android.widget.ImageButton
-import android.widget.TextView
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
 import kotlinx.coroutines.Dispatchers
@@ -101,21 +98,22 @@ class CommandSendingTest {
                 .apply { isAccessible = true }
             clientField.set(ConnectionManager, agent.client)
             try {
+                // 首页已迁移到 Compose（miuix）：控制台与命令输入是页面状态。
                 val activity = controller.get()
-                activity.findViewById<EditText>(R.id.etCmd).setText("echo sent-from-ui-ok")
-                activity.findViewById<ImageButton>(R.id.btnSend).performClick()
-                val log = activity.findViewById<TextView>(R.id.tvLog)
+                activity.commandLine = "echo sent-from-ui-ok"
+                activity.sendTyped()
                 val deadline = System.nanoTime() + 5_000_000_000L
-                while (!log.text.contains("\nsent-from-ui-ok") && System.nanoTime() < deadline) {
+                while (!activity.consoleText.contains("\nsent-from-ui-ok") && System.nanoTime() < deadline) {
                     shadowOf(Looper.getMainLooper()).idle()
                     Thread.sleep(10)
                 }
-                assertTrue("点击发送应把 exec 帧发到主机: ${log.text}", agent.received.any {
+                val log = activity.consoleText
+                assertTrue("点击发送应把 exec 帧发到主机: $log", agent.received.any {
                     it.optString("cmd") == "exec" && it.optString("line") == "echo sent-from-ui-ok" &&
                         it.optInt("timeout") == 300
                 })
-                assertTrue("主机的输出应显示在控制台: ${log.text}", log.text.contains("\nsent-from-ui-ok"))
-                assertFalse(log.text.contains("NetworkOnMainThreadException"))
+                assertTrue("主机的输出应显示在控制台: $log", log.contains("\nsent-from-ui-ok"))
+                assertFalse(log.contains("NetworkOnMainThreadException"))
                 assertTrue("同一连接应能继续请求", runBlocking {
                     withContext(Dispatchers.IO) { agent.client.call("ping").optBoolean("ok") }
                 })

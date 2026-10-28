@@ -55,9 +55,8 @@ import top.yukonga.miuix.kmp.theme.darkColorScheme
 /**
  * 界面迁移到 miuix（MIUI 风格的 Compose 组件库）的公共部分。
  *
- * 迁移按页进行，期间 View 页面与 Compose 页面共存：
- * 已迁移的页面继承 [MiuixActivity] 用 Compose 描述界面，
- * 未迁移的页面仍继承 FeatureActivity。
+ * 全部页面都继承 [MiuixActivity]，界面由 Compose 描述；
+ * 自绘 View（远程画面、画板、虚拟键盘）通过 [HostedView] 嵌入。
  */
 @Composable
 fun LanCmdMiuixTheme(content: @Composable () -> Unit) {
@@ -108,8 +107,7 @@ fun StatusNote(text: String, failed: Boolean) {
 }
 
 /**
- * Compose 页面的基类：提供与 FeatureActivity 相同的连接绑定、
- * 后台任务和状态提示，但界面由 Compose 描述。
+ * 所有页面的基类：提供连接绑定、后台任务和状态提示，界面由 Compose 描述。
  */
 abstract class MiuixActivity : AppCompatActivity() {
     /** 打开页面时的连接，操作不会跟随电脑切换。 */
@@ -237,6 +235,18 @@ abstract class MiuixActivity : AppCompatActivity() {
             setPadding(px(14), paddingTop, px(14), paddingBottom)
         }
 
+    /** 供系统确认框内使用的按钮。 */
+    protected fun dialogButton(text: String, onClick: () -> Unit) =
+        com.google.android.material.button.MaterialButton(this).apply {
+            this.text = text
+            minHeight = px(48)
+            setTextColor(Themes.color(this@MiuixActivity, R.color.accent))
+            backgroundTintList = android.content.res.ColorStateList.valueOf(
+                Themes.color(this@MiuixActivity, R.color.surface_variant)
+            )
+            setOnClickListener { onClick() }
+        }
+
     /** 系统确认框内的纵向容器。 */
     protected fun dialogBox(): android.widget.LinearLayout = android.widget.LinearLayout(this).apply {
         orientation = android.widget.LinearLayout.VERTICAL
@@ -259,7 +269,7 @@ fun MiuixColumn(content: @Composable () -> Unit) {
 // ----------------------------------------------------------------- 排版组件
 //
 // 各页面只描述内容，留白、分区和圆角由这里统一给出，
-// 对应旧 View 版 Ui.kt 的作用。
+// 页面只描述内容，排版集中在这里。
 
 /** 卡片分区：可选分区标题 + 圆角卡片。 */
 @Composable

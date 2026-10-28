@@ -6,7 +6,6 @@ import android.os.Build
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
-import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.aicode.lancmd.net.ConnectionManager
 import org.junit.After
@@ -58,7 +57,7 @@ class ThemeTest {
         activity.onEvent("主题切换前的日志", ConnectionManager.LogKind.INFO)
         shadowOf(Looper.getMainLooper()).idle()
 
-        activity.findViewById<View>(R.id.btnTheme).performClick()
+        ThemeDialog(activity).show()
         shadowOf(Looper.getMainLooper()).idle()
         val dialog = org.robolectric.shadows.ShadowDialog.getLatestDialog() as AlertDialog
         assertTrue(dialog.isShowing)
@@ -74,7 +73,7 @@ class ThemeTest {
         shadowOf(Looper.getMainLooper()).idle()
         val recreated = controller.get()
         assertEquals(0xFFA98BFF.toInt(), Themes.color(recreated, R.color.accent))
-        assertTrue(recreated.findViewById<TextView>(R.id.tvLog).text.contains("主题切换前的日志"))
+        assertTrue(recreated.consoleText.contains("主题切换前的日志"))
         controller.pause().stop().destroy()
     }
 

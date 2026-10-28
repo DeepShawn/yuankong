@@ -7,11 +7,9 @@ import android.graphics.Canvas
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
-import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
-import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
@@ -54,7 +52,6 @@ class PlaceholderUiTest {
         fail("UI did not settle")
     }
     private fun all(view:View):List<View> = listOf(view)+if(view is ViewGroup)(0 until view.childCount).flatMap { all(view.getChildAt(it)) } else emptyList()
-    private fun buttons(root:View)=all(root).filterIsInstance<MaterialButton>()
     private fun latest()=ShadowDialog.getLatestDialog() as AlertDialog
     private fun choose(index:Int) { latest().listView.performItemClick(null,index,index.toLong());shadowOf(Looper.getMainLooper()).idle() }
     private fun render(view:View,name:String) {
@@ -148,10 +145,12 @@ class PlaceholderUiTest {
 
     @Test fun fileManagerOpensPlaceholderPageAndShowsHiddenFiles() {
         Stub().use { stub->
-            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get();val root=activity.window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="reserve.dat" } }
-            assertTrue(all(root).filterIsInstance<TextView>().any { it.text.contains("隐藏") && it.text.contains("系统") })
-            buttons(root).single { it.text=="占位文件" }.performClick();shadowOf(Looper.getMainLooper()).idle()
+            // 文件管理页已迁移到 Compose（miuix）：按页面状态断言隐藏 / 系统标记。
+            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get()
+            waitFor { activity.visible.any { it.optString("name")=="reserve.dat" } }
+            val reserve=activity.visible.single { it.optString("name")=="reserve.dat" }
+            assertTrue(reserve.optBoolean("hidden") && reserve.optBoolean("system"))
+            activity.openPlaceholder();shadowOf(Looper.getMainLooper()).idle()
             val opened=shadowOf(activity).nextStartedActivity
             assertEquals(PlaceholderFilesActivity::class.java.name,opened.component!!.className)
             assertEquals("E:\\",opened.getStringExtra("directory"))
@@ -160,10 +159,10 @@ class PlaceholderUiTest {
     }
     @Test fun usbSafeEjectAndForceDisconnectAreSeparateConfirmedActionsWithRestore() {
         Stub().use { stub->
-            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val root=controller.get().window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="reserve.dat" } }
+            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val page=controller.get()
+            waitFor { page.visible.any { it.optString("name")=="reserve.dat" } }
             fun select(force:Boolean) {
-                buttons(root).single { it.text=="U盘管理" }.performClick();shadowOf(Looper.getMainLooper()).idle();choose(if(force)1 else 0)
+                page.usbActions();shadowOf(Looper.getMainLooper()).idle();choose(if(force)1 else 0)
                 waitFor { latest().listView?.adapter?.count==1 };choose(0)
             }
             select(false);assertFalse(stub.requests.any { it.optString("action")=="eject" })
@@ -198,12 +197,12 @@ class PlaceholderUiTest {
     }
     @Test fun pendingUsbConfirmationCannotDisconnectANewComputer() {
         Stub().use { first->Stub().use { second->
-            first.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val root=controller.get().window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="reserve.dat" } }
-            buttons(root).single { it.text=="U盘管理" }.performClick();shadowOf(Looper.getMainLooper()).idle();choose(1)
+            first.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val page=controller.get()
+            waitFor { page.visible.any { it.optString("name")=="reserve.dat" } }
+            page.usbActions();shadowOf(Looper.getMainLooper()).idle();choose(1)
             waitFor { latest().listView?.adapter?.count==1 };choose(0)
             second.install();latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("电脑连接已改变") } }
+            waitFor { page.note.contains("电脑连接已改变") }
             assertFalse((first.requests+second.requests).any { it.optString("action")=="force_disconnect" })
             controller.pause().stop().destroy()
         } }
@@ -211,20 +210,16 @@ class PlaceholderUiTest {
 
     @Test fun fileDeletionResultAppearsAtTopAndDismissesConfirmation() {
         Stub().use { stub->
-            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get();val root=activity.window.decorView
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text=="reserve.dat" } }
-            StorageActivity::class.java.getDeclaredMethod("fileActions",JSONObject::class.java,View::class.java).apply { isAccessible=true }
-                .invoke(activity,JSONObject().put("name","reserve.dat").put("dir",false),root)
-            val menu=org.robolectric.shadows.ShadowPopupMenu.getLatestPopupMenu()!!
-            val item=(0 until menu.menu.size()).map { menu.menu.getItem(it) }.single { it.title=="删除" }
-            org.robolectric.shadow.api.Shadow.extract<org.robolectric.shadows.ShadowPopupMenu>(menu).onMenuItemClickListener!!.onMenuItemClick(item)
+            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val activity=controller.get()
+            waitFor { activity.visible.any { it.optString("name")=="reserve.dat" } }
+            activity.act("删除",JSONObject().put("name","reserve.dat").put("dir",false))
             shadowOf(Looper.getMainLooper()).idle();val confirmation=latest()
             assertFalse(stub.requests.any { it.optString("cmd")=="rm" })
             confirmation.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { all(root).filterIsInstance<TextView>().any { it.text.contains("删除完成") } }
+            waitFor { activity.note.contains("删除完成") }
             assertFalse(confirmation.isShowing)
             assertEquals("E:\\reserve.dat",stub.requests.single { it.optString("cmd")=="rm" }.getString("path"))
-            confirmation.dismiss();menu.dismiss();controller.pause().stop().destroy()
+            confirmation.dismiss();controller.pause().stop().destroy()
         }
     }
 
