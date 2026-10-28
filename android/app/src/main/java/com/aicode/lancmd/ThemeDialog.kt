@@ -121,6 +121,7 @@ class ThemeDialog(private val activity: AppCompatActivity) {
             (swatch.background as GradientDrawable).colors=if(tone.light)intArrayOf(option.lightSwatch,option.lightSwatch) else intArrayOf(option.swatch,option.swatch2)
             (swatch.background as GradientDrawable).setStroke(if (selected) dp(3) else 0, 0xFFFFFFFF.toInt())
             swatch.findViewWithTag<View>("check").visibility = if (selected) View.VISIBLE else View.INVISIBLE
+            swatch.findViewWithTag<TextView>("check").setTextColor(if(tone.light)0xFFFFFFFF.toInt() else 0xE6101010.toInt())
             view.isSelected = selected
         }
         toneViews.forEach { (option, view) ->

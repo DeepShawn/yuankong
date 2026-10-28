@@ -148,8 +148,14 @@ class MediaActivity : MiuixActivity() {
                     "进入应用内子页面时暂停取帧，返回继续；退出本页、离开应用或切换电脑会结束共享。" +
                         "全屏时画面等比显示，点右上角或返回键退出。"
                 )
-            }            }
+            }
+            }
         }
+    }
+
+    internal fun save() {
+        saveFrame = frame?.copyOf()
+        if (saveFrame != null) saveDocument.launch("LanCmd-${System.currentTimeMillis()}.jpg")
     }
 
     internal fun showFullscreen(value: Boolean) {

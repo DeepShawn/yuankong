@@ -30,12 +30,14 @@ fun WorkingArea(view:View,modifier:Modifier=Modifier,controlFraction:Float=.42f,
     val landscape=LocalConfiguration.current.orientation==Configuration.ORIENTATION_LANDSCAPE
     val density=LocalDensity.current
     BoxWithConstraints(modifier.fillMaxSize()) {
+        val availableWidth=maxWidth
+        val availableHeight=maxHeight
         if(landscape)Row(Modifier.fillMaxSize()) {
             HostedView(view,Modifier.weight(1f).fillMaxHeight().testTag("working-picture"))
-            Column(Modifier.width((maxWidth*.36f).coerceIn(220.dp,340.dp)).fillMaxHeight().verticalScroll(rememberScrollState()).testTag("working-controls"),content=controls)
+            Column(Modifier.width((availableWidth*.36f).coerceAtMost(340.dp)).fillMaxHeight().verticalScroll(rememberScrollState()).testTag("working-controls"),content=controls)
         } else Column(Modifier.fillMaxSize()) {
             HostedView(view,Modifier.fillMaxWidth().weight(1f).testTag("working-picture"))
-            val heightPixels=with(density){maxHeight.toPx()}.coerceAtLeast(1f)
+            val heightPixels=with(density){availableHeight.toPx()}.coerceAtLeast(1f)
             fun resize(value:Float) {onResize();fraction=value.coerceIn(.25f,.70f)}
             Box(Modifier.fillMaxWidth().height(24.dp).semantics {
                 contentDescription="调整画面与操作栏比例"
@@ -47,7 +49,7 @@ fun WorkingArea(view:View,modifier:Modifier=Modifier,controlFraction:Float=.42f,
             }},contentAlignment=Alignment.Center) {
                 Spacer(Modifier.width(44.dp).height(4.dp).background(MiuixTheme.colorScheme.outline,RoundedCornerShape(2.dp)))
             }
-            Column(Modifier.fillMaxWidth().height(maxHeight*fraction).verticalScroll(rememberScrollState()).testTag("working-controls"),content=controls)
+            Column(Modifier.fillMaxWidth().height(availableHeight*fraction).verticalScroll(rememberScrollState()).testTag("working-controls"),content=controls)
         }
     }
 }

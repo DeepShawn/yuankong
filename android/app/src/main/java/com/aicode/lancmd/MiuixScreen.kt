@@ -50,6 +50,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import androidx.core.view.WindowCompat
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
 import kotlinx.coroutines.CancellationException
@@ -191,6 +192,10 @@ abstract class MiuixActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         Themes.apply(this)
         super.onCreate(savedInstanceState)
+        WindowCompat.getInsetsController(window,window.decorView).apply {
+            isAppearanceLightStatusBars=Themes.tone(this@MiuixActivity).light
+            isAppearanceLightNavigationBars=Themes.tone(this@MiuixActivity).light
+        }
         AppVisibility.install(application)
         origin
     }
