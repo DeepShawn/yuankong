@@ -8,6 +8,7 @@ import android.widget.ImageView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -52,6 +53,7 @@ class MediaActivity : MiuixActivity() {
     private var deviceNames by mutableStateOf(listOf("开始后选择摄像头"))
     private var deviceIndex by mutableIntStateOf(0)
     private var devicesReady by mutableStateOf(false)
+    private var detailsExpanded by mutableStateOf(false)
 
     private var stream: Job? = null
     private var frame: ByteArray? = null
@@ -100,7 +102,8 @@ class MediaActivity : MiuixActivity() {
             Action("退出全屏", modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
                 showFullscreen(false)
             }
-        } else Page(if (camera) "摄像头" else "电脑屏幕") {
+        } else FixedPage(if(camera)"摄像头" else "电脑屏幕") {
+            WorkingArea(image,Modifier.fillMaxWidth().weight(1f),controlFraction=.30f) {
             if (camera) SectionCard {
                 ChoiceField(
                     items = deviceNames, title = "摄像头设备",
@@ -109,7 +112,6 @@ class MediaActivity : MiuixActivity() {
                     enabled = devicesReady
                 )
             }
-            HostedView(image, Modifier.fillMaxWidth().height(320.dp).padding(horizontal = 12.dp, vertical = 6.dp))
             SectionCard {
                 ActionRow {
                     Action(
@@ -126,8 +128,9 @@ class MediaActivity : MiuixActivity() {
                 ActionRow {
                     Action("保存当前帧", enabled = canSave, modifier = Modifier.weight(1f)) { save() }
                     Action("全屏", modifier = Modifier.weight(1f)) { showFullscreen(true) }
+                    SelectionAction("更多",selected=detailsExpanded,modifier=Modifier.weight(1f)){detailsExpanded=!detailsExpanded}
                 }
-                ActionRow {
+                if(detailsExpanded)ActionRow {
                     Action(
                         if (camera) "录制摄像头视频" else "录制屏幕视频",
                         modifier = Modifier.weight(1f)
@@ -141,17 +144,12 @@ class MediaActivity : MiuixActivity() {
                         openChild(Intent(this@MediaActivity, PrivacyDevicesActivity::class.java))
                     }
                 }
-                Note(
+                if(detailsExpanded)Note(
                     "进入应用内子页面时暂停取帧，返回继续；退出本页、离开应用或切换电脑会结束共享。" +
                         "全屏时画面等比显示，点右上角或返回键退出。"
                 )
-            }
+            }            }
         }
-    }
-
-    internal fun save() {
-        saveFrame = frame?.copyOf()
-        if (saveFrame != null) saveDocument.launch("LanCmd-${System.currentTimeMillis()}.jpg")
     }
 
     internal fun showFullscreen(value: Boolean) {

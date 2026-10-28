@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -20,6 +22,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.painterResource
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import androidx.compose.ui.unit.dp
 import com.aicode.lancmd.net.ConnectionManager
 import com.aicode.lancmd.net.FileTransfer
@@ -66,6 +72,8 @@ class StorageActivity : MiuixActivity() {
     internal var results by mutableStateOf<List<String>>(emptyList())
     private var resultsExpanded by mutableStateOf(false)
     private var delaySeconds by mutableStateOf(0)
+    private var toolsExpanded by mutableStateOf(false)
+    private var disksExpanded by mutableStateOf(false)
 
     private val highlightName by lazy { intent.getStringExtra("highlight").orEmpty() }
     private val highlightFolder by lazy { intent.getStringExtra("path").orEmpty() }
@@ -194,9 +202,9 @@ class StorageActivity : MiuixActivity() {
             RowItem(if (resultsExpanded) "收起逐项结果" else "展开逐项结果（${results.size}）") {
                 resultsExpanded = !resultsExpanded
             }
-            if (resultsExpanded) Note(results.joinToString("\n").take(100_000))
+            if (resultsExpanded) Column(Modifier.heightIn(max=144.dp).verticalScroll(rememberScrollState())) { Note(results.joinToString("\n").take(100_000)) }
         }
-        if (!multi && !operationsBusy) Row(
+        if (disksExpanded && !multi && !operationsBusy) Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                 .padding(horizontal = 12.dp, vertical = 4.dp)
         ) {
@@ -211,7 +219,7 @@ class StorageActivity : MiuixActivity() {
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                 .padding(horizontal = 8.dp)
         ) {
-            crumbs.forEach { crumb -> Action(crumb.label) { load(crumb.target) } }
+            crumbs.forEach { crumb -> SelectionAction(crumb.label) { load(crumb.target) } }
         }
         SectionCard {
             ActionRow {
@@ -220,7 +228,7 @@ class StorageActivity : MiuixActivity() {
                 Action("新建", modifier = Modifier.weight(1f)) { newItem() }
                 Action("上传", modifier = Modifier.weight(1f)) { upload() }
             }
-            ActionRow {
+            if(toolsExpanded)ActionRow {
                 Action("占位文件", modifier = Modifier.weight(1f)) { openPlaceholder() }
                 Action("文件任务", modifier = Modifier.weight(1f)) { showFileJobs() }
                 Action("延迟计划", modifier = Modifier.weight(1f)) { showFilePlans() }
@@ -228,7 +236,9 @@ class StorageActivity : MiuixActivity() {
             }
             Field(label = "搜索当前目录", value = query, onValueChange = { query = it; filter() })
             ActionRow {
-                Action("延迟 ${delaySeconds}s", modifier = Modifier.weight(1f)) {
+                SelectionAction("磁盘",selected=disksExpanded,modifier=Modifier.weight(1f)){disksExpanded=!disksExpanded}
+                SelectionAction("更多工具",selected=toolsExpanded,modifier=Modifier.weight(1f)){toolsExpanded=!toolsExpanded}
+                SelectionAction("延迟 ${delaySeconds}s", modifier = Modifier.weight(1f)) {
                     FileDelay.choose(this@StorageActivity) { delaySeconds = FileDelay.seconds(this@StorageActivity) }
                 }
                 Action(
@@ -274,8 +284,15 @@ class StorageActivity : MiuixActivity() {
                     checked = selection.containsKey(itemKey(item)),
                     onCheckedChange = { toggleSelection(item) },
                     enabled = !operationsBusy
-                ) else RowItem(name, summary, enabled = !operationsBusy) {
-                    if (item.optBoolean("dir")) load(joinPath(path, name)) else fileActions(item)
+                ) else Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        RowItem(name,summary,enabled=!operationsBusy,onLongClick={fileActions(item)}) {
+                            if(item.optBoolean("dir"))load(joinPath(path,name)) else fileActions(item)
+                        }
+                    }
+                    IconButton(enabled=!operationsBusy,onClick={fileActions(item)}) {
+                        Icon(painterResource(R.drawable.ic_more),"操作：$name")
+                    }
                 }
             }
         }
@@ -862,7 +879,7 @@ class StorageActivity : MiuixActivity() {
                         "rename",
                         JSONObject().put("path", joinPath(base, original!!)).put("to", joinPath(base, name))
                     )
-                    load(base)
+                    load(base,if(item==null)"文件夹已创建：$name" else "已重命名：$original → $name")
                 }
             }
         }

@@ -55,7 +55,7 @@ class PrivacyDevicesActivity : MiuixActivity() {
         SectionCard {
             ActionRow {
                 listOf("全部" to "all", "摄像头" to "camera", "麦克风" to "microphone").forEach { (name, kind) ->
-                    Action(name, primary = selectedKind == kind, modifier = Modifier.weight(1f)) {
+                    SelectionAction(name, selected = selectedKind == kind, modifier = Modifier.weight(1f)) {
                         selectedKind = kind
                     }
                 }

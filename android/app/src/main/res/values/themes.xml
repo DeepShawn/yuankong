@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.LanCmd" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="lcDanger">@color/danger</item>
+        <item name="lcWarn">@color/warn</item>
+        <item name="lcSuccess">@color/ok</item>
         <!-- 默认：深海背景 + 薄荷主题色 -->
         <item name="lcBg">#080C12</item>
         <item name="lcSurface">#101722</item>
@@ -40,7 +43,64 @@
         <item name="colorSurfaceContainerHighest">?attr/lcSurfaceHigh</item>
         <item name="colorOutline">?attr/lcOutline</item>
         <item name="colorOutlineVariant">?attr/lcOutlineSoft</item>
-        <item name="colorError">@color/danger</item>
+        <item name="colorError">?attr/lcDanger</item>
+        <item name="android:colorBackground">?attr/lcBg</item>
+        <item name="android:statusBarColor">?attr/lcBg</item>
+        <item name="android:navigationBarColor">?attr/lcBg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:textColorPrimary">?attr/lcText</item>
+        <item name="android:textColorSecondary">?attr/lcDim</item>
+        <item name="android:textColorHighlight">?attr/lcAccentDim</item>
+        <item name="shapeAppearanceSmallComponent">@style/ShapeAppearance.LanCmd.Small</item>
+        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.LanCmd.Medium</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.LanCmd.Dialog</item>
+        <item name="alertDialogTheme">@style/ThemeOverlay.LanCmd.AlertDialog</item>
+    </style>
+
+    <style name="Theme.LanCmd.Light" parent="Theme.Material3.Light.NoActionBar">
+        <item name="lcDanger">@color/danger</item>
+        <item name="lcWarn">@color/warn</item>
+        <item name="lcSuccess">@color/ok</item>
+        <!-- 默认：深海背景 + 薄荷主题色 -->
+        <item name="lcBg">#080C12</item>
+        <item name="lcSurface">#101722</item>
+        <item name="lcSurfaceVariant">#172131</item>
+        <item name="lcSurfaceHigh">#1E2A3D</item>
+        <item name="lcOutline">#24324A</item>
+        <item name="lcOutlineSoft">#1A2537</item>
+        <item name="lcText">#EAF1F8</item>
+        <item name="lcDim">#8B9AB0</item>
+        <item name="lcConsole">#0C121B</item>
+        <item name="lcOverlay">#F0080C12</item>
+        <item name="lcAccent">#3EE0B5</item>
+        <item name="lcAccentDim">#123F37</item>
+        <item name="lcAccentGlow">#333EE0B5</item>
+        <item name="lcAccent2">#5AA9FF</item>
+        <item name="lcAccentEnd">#2CC6C9</item>
+        <item name="lcOnAccent">#022B21</item>
+        <item name="lcHeroStart">#1A5A4C</item>
+        <item name="lcHeroCenter">#14403F</item>
+        <item name="lcHeroEnd">#172C4A</item>
+        <item name="lcHeroStroke">#3352E3BE</item>
+        <item name="lcHeroSub">#B8D4CF</item>
+        <item name="colorPrimary">?attr/lcAccent</item>
+        <item name="colorOnPrimary">?attr/lcOnAccent</item>
+        <item name="colorPrimaryContainer">?attr/lcAccentDim</item>
+        <item name="colorOnPrimaryContainer">?attr/lcText</item>
+        <item name="colorSecondary">?attr/lcAccent2</item>
+        <item name="colorOnSecondary">?attr/lcBg</item>
+        <item name="colorSecondaryContainer">?attr/lcAccentDim</item>
+        <item name="colorOnSecondaryContainer">?attr/lcAccent</item>
+        <item name="colorSurface">?attr/lcSurface</item>
+        <item name="colorOnSurface">?attr/lcText</item>
+        <item name="colorSurfaceVariant">?attr/lcSurfaceVariant</item>
+        <item name="colorOnSurfaceVariant">?attr/lcDim</item>
+        <item name="colorSurfaceContainer">?attr/lcSurface</item>
+        <item name="colorSurfaceContainerHigh">?attr/lcSurfaceVariant</item>
+        <item name="colorSurfaceContainerHighest">?attr/lcSurfaceHigh</item>
+        <item name="colorOutline">?attr/lcOutline</item>
+        <item name="colorOutlineVariant">?attr/lcOutlineSoft</item>
+        <item name="colorError">?attr/lcDanger</item>
         <item name="android:colorBackground">?attr/lcBg</item>
         <item name="android:statusBarColor">?attr/lcBg</item>
         <item name="android:navigationBarColor">?attr/lcBg</item>

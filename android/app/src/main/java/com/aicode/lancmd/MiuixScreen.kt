@@ -21,6 +21,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -65,6 +71,7 @@ import top.yukonga.miuix.kmp.extra.SuperArrow
 import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
+import top.yukonga.miuix.kmp.theme.lightColorScheme
 
 /**
  * 界面迁移到 miuix（MIUI 风格的 Compose 组件库）的公共部分。
@@ -87,9 +94,9 @@ fun LanCmdMiuixTheme(content: @Composable () -> Unit) {
  * 复用 View 版同一套颜色标记（[Themes.color] 按当前主题解析），
  * 所以两种页面在迁移期间颜色一致，用户的选择继续生效。
  */
-private fun lanCmdColors(context: Context): Colors {
+internal fun lanCmdColors(context: Context): Colors {
     fun pick(id: Int) = Color(Themes.color(context, id))
-    return darkColorScheme(
+    return (if(Themes.tone(context).light)lightColorScheme() else darkColorScheme()).copy(
         primary = pick(R.color.accent),
         onPrimary = pick(R.color.on_accent),
         primaryContainer = pick(R.color.accent_dim),
@@ -118,6 +125,7 @@ private fun lanCmdColors(context: Context): Colors {
         tertiaryContainerVariant=pick(R.color.surface_high),
         background = pick(R.color.bg),
         onBackground = pick(R.color.text),
+        onBackgroundVariant = pick(R.color.dim),
         surface = pick(R.color.surface),
         onSurface = pick(R.color.text),
         surfaceVariant = pick(R.color.surface_variant),
@@ -146,23 +154,24 @@ fun StatusNote(text: String, failed: Boolean) {
     val tint=if(failed)MiuixTheme.colorScheme.error else MiuixTheme.colorScheme.primary
     Card(modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp)
         .border(1.dp,tint.copy(alpha=.25f),RoundedCornerShape(18.dp)),cornerRadius=18.dp,
-        insideMargin=PaddingValues(12.dp),onClick={expanded.value=!expanded.value}) {
+        insideMargin=PaddingValues(8.dp),onClick={expanded.value=!expanded.value}) {
         Row(horizontalArrangement=Arrangement.spacedBy(10.dp),verticalAlignment=Alignment.CenterVertically) {
             Text(if(failed)"!" else "✓",color=tint,fontWeight=FontWeight.Bold)
-            Text(text,modifier=Modifier.weight(1f),fontSize=13.sp,lineHeight=19.sp,
-                maxLines=if(expanded.value)Int.MAX_VALUE else 4,overflow=TextOverflow.Ellipsis,
-                color=MiuixTheme.colorScheme.onSurface)
+            Column(Modifier.weight(1f).heightIn(max=if(expanded.value)160.dp else 44.dp).verticalScroll(rememberScrollState())) {
+                Text(text,fontSize=13.sp,lineHeight=19.sp,maxLines=if(expanded.value)Int.MAX_VALUE else 2,
+                    overflow=TextOverflow.Ellipsis,color=MiuixTheme.colorScheme.onSurface)
+            }
         }
     }
 }
 
 @Composable
-fun WorkspaceHeader(title:String,back:(()->Unit)?=null,subtitle:String="电脑控制工作区") {
-    Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
+fun WorkspaceHeader(title:String,back:(()->Unit)?=null,subtitle:String="") {
+    Row(Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically) {
         if(back!=null)IconButton(onClick=back) { Icon(painterResource(R.drawable.ic_back),"返回") }
         Column(Modifier.weight(1f).padding(start=if(back==null)0.dp else 8.dp)) {
-            Text(subtitle,fontSize=11.sp,letterSpacing=1.sp,color=MiuixTheme.colorScheme.primary)
-            Text(title,fontSize=25.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(top=4.dp))
+            if(subtitle.isNotBlank())Text(subtitle,fontSize=11.sp,letterSpacing=1.sp,color=MiuixTheme.colorScheme.primary)
+            Text(title,fontSize=22.sp,fontWeight=FontWeight.Bold,modifier=Modifier.padding(vertical=4.dp))
         }
     }
 }
@@ -332,25 +341,36 @@ fun MiuixColumn(content: @Composable () -> Unit) {
 
 /** 卡片分区：可选分区标题 + 圆角卡片。 */
 @Composable
-fun SectionCard(title: String? = null, content: @Composable ColumnScope.() -> Unit) {
-    if (title != null) Row(Modifier.fillMaxWidth().padding(start=22.dp,top=18.dp,bottom=8.dp),verticalAlignment=Alignment.CenterVertically) {
+fun SectionCard(title: String? = null, modifier:Modifier=Modifier, content: @Composable ColumnScope.() -> Unit) {
+    if (title != null) Row(Modifier.fillMaxWidth().padding(start=18.dp,top=10.dp,bottom=4.dp),verticalAlignment=Alignment.CenterVertically) {
         Spacer(Modifier.size(4.dp,14.dp).background(MiuixTheme.colorScheme.primary,RoundedCornerShape(2.dp)))
         Text(title,fontSize=13.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(start=8.dp),color=MiuixTheme.colorScheme.onSurfaceVariantSummary)
     }
-    Card(modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=5.dp)
+    Card(modifier=modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=4.dp)
         .border(1.dp,MiuixTheme.colorScheme.outline.copy(alpha=.25f),RoundedCornerShape(24.dp)),
-        cornerRadius=24.dp,insideMargin=PaddingValues(12.dp)) { content() }
+        cornerRadius=24.dp,insideMargin=PaddingValues(8.dp)) { content() }
 }
 
 /** 列表条目：标题 + 说明，可点击。 */
 @Composable
-fun RowItem(title: String, summary: String? = null, enabled: Boolean = true, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(enabled=enabled,onClick=onClick).padding(horizontal=8.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically) {
+@OptIn(ExperimentalFoundationApi::class)
+fun RowItem(title: String, summary: String? = null, enabled: Boolean = true, onLongClick:(()->Unit)?=null, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().combinedClickable(enabled=enabled,onClick=onClick,onLongClick=onLongClick).padding(horizontal=8.dp,vertical=10.dp).heightIn(min=48.dp),verticalAlignment=Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title,fontSize=16.sp,fontWeight=FontWeight.Medium,color=MiuixTheme.colorScheme.onSurface.copy(alpha=if(enabled)1f else .4f))
             if(!summary.isNullOrBlank())Text(summary,fontSize=12.sp,lineHeight=18.sp,modifier=Modifier.padding(top=5.dp),color=MiuixTheme.colorScheme.onSurfaceVariantSummary)
         }
         Text("›",fontSize=24.sp,color=MiuixTheme.colorScheme.primary,modifier=Modifier.padding(start=12.dp))
+    }
+}
+
+/** Compact visual selectors retain a 48 dp touch target. */
+@Composable
+fun SelectionAction(text:String,selected:Boolean=false,enabled:Boolean=true,modifier:Modifier=Modifier,onClick:()->Unit) {
+    Box(modifier.heightIn(min=48.dp).selectable(selected,enabled,role=Role.Button,onClick=onClick),contentAlignment=Alignment.Center) {
+        Text(text,fontSize=13.sp,textAlign=TextAlign.Center,
+            modifier=Modifier.fillMaxWidth().background(if(selected)MiuixTheme.colorScheme.primaryContainer else MiuixTheme.colorScheme.surfaceVariant,RoundedCornerShape(12.dp)).padding(horizontal=8.dp,vertical=7.dp),
+            color=if(!enabled)MiuixTheme.colorScheme.disabledOnSurface else if(selected)MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface)
     }
 }
 
@@ -368,7 +388,8 @@ fun InfoItem(title: String, summary: String? = null) {
 fun Note(text: String, modifier: Modifier = Modifier) {
     Text(
         text = text,
-        modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+        fontSize=13.sp,lineHeight=19.sp,
         color = MiuixTheme.colorScheme.onSurfaceVariantSummary
     )
 }
@@ -460,7 +481,8 @@ fun Field(
     onValueChange: (String) -> Unit,
     singleLine: Boolean = true,
     maxLines: Int = if (singleLine) 1 else 8,
-    keyboardOptions: KeyboardOptions = KeyboardOptions.Default
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    modifier:Modifier=Modifier
 ) {
     TextField(
         value = value,
@@ -469,6 +491,6 @@ fun Field(
         singleLine = singleLine,
         maxLines = maxLines,
         keyboardOptions = keyboardOptions,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+        modifier = modifier.fillMaxWidth().padding(vertical = 4.dp)
     )
 }

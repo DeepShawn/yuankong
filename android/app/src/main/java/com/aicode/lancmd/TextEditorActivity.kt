@@ -43,6 +43,7 @@ class TextEditorActivity : MiuixActivity() {
     private var savedEncoding = "utf-8"
     private var savedNewline = "crlf"
     private var loaded = false
+    private var settingsExpanded by mutableStateOf(false)
     private var setting = false
     private var saving = false
     private var loading = false
@@ -73,9 +74,11 @@ class TextEditorActivity : MiuixActivity() {
     }
 
     @Composable
-    private fun Screen() = Page("文本编辑") {
+    private fun Screen() = FixedPage("文本编辑") {
         SectionCard {
             InfoItem(path.substringAfterLast('\\').substringAfterLast('/'), path)
+            SelectionAction("编码 / 换行 / 自动保存",selected=settingsExpanded){settingsExpanded=!settingsExpanded}
+            if(settingsExpanded) {
             ChoiceField(
                 items = ENCODING_NAMES, title = "编码",
                 selectedIndex = encodingIndex,
@@ -86,16 +89,18 @@ class TextEditorActivity : MiuixActivity() {
                 selectedIndex = newlineIndex,
                 onSelectedIndexChange = { newlineIndex = it; changed() }
             )
+            }
         }
-        SectionCard("内容") {
+        SectionCard("内容",modifier=Modifier.weight(1f)) {
             Field(
                 label = "电脑文件文本内容",
                 value = body,
                 onValueChange = { edit(it) },
                 singleLine = false,
-                maxLines = 16
+                maxLines = Int.MAX_VALUE,
+                modifier=Modifier.weight(1f)
             )
-            SuperSwitch(
+            if(settingsExpanded)SuperSwitch(
                 checked = autoSave,
                 onCheckedChange = { autoSave = it; changed() },
                 title = "自动保存",

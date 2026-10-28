@@ -116,7 +116,6 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                 showFullscreen(false)
             }
         } else FixedPage("远程桌面") {
-            SectionCard {
                 ActionRow {
                     Action(
                         "开始共享",
@@ -126,21 +125,8 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                     ) { begin() }
                     Action("停止共享", enabled = sharing, modifier = Modifier.weight(1f)) { stopSession() }
                 }
-            }
-            // 横屏把画面和控制区并排，竖屏上下排。
-            if (landscape) Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                HostedView(screen, Modifier.weight(1f).fillMaxHeight().padding(8.dp))
-                Column(modifier = Modifier.width(300.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
-                    Dock()
-                }
-            } else Column(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                HostedView(screen, Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp))
-                Column(
-                    modifier = Modifier.fillMaxWidth()
-                        .height(if (mode == 1 && virtualKeyboardExpanded) 432.dp else 240.dp)
-                        .verticalScroll(rememberScrollState())
-                ) { Dock() }
-            }
+            WorkingArea(screen,Modifier.fillMaxWidth().weight(1f),onResize={screen.cancelGesture()}) { Dock() }
+
         }
     }
 
@@ -149,9 +135,9 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
         SectionCard {
             ActionRow {
                 listOf("触控", "键盘", "终端").forEachIndexed { index, title ->
-                    Action(
+                    SelectionAction(
                         title,
-                        primary = index == mode,
+                        selected = index == mode,
                         modifier = Modifier.weight(1f)
                     ) { mode = index }
                 }

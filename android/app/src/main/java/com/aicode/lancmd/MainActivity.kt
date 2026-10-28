@@ -193,10 +193,10 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                     onValueChange = { commandLine = it.take(8192) }
                 )
                 ActionRow {
-                    Action("CMD", primary = shell == "cmd", modifier = Modifier.weight(1f)) { shell = "cmd" }
-                    Action(
+                    SelectionAction("CMD", selected = shell == "cmd", modifier = Modifier.weight(1f)) { shell = "cmd" }
+                    SelectionAction(
                         "PowerShell",
-                        primary = shell == "powershell",
+                        selected = shell == "powershell",
                         modifier = Modifier.weight(1f)
                     ) { shell = "powershell" }
                     Action("发送", enabled = connected, primary = true, modifier = Modifier.weight(1f)) {
@@ -231,7 +231,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
             CATEGORIES.forEachIndexed { index,category ->
                 val selected=category==homeCategory
                 Column(Modifier.weight(1f).background(if(selected)MiuixTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,RoundedCornerShape(18.dp))
-                    .selectable(selected=selected,role=Role.Tab,onClick={homeCategory=category}).padding(vertical=10.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+                    .selectable(selected=selected,role=Role.Tab,onClick={homeCategory=category}).padding(vertical=6.dp),horizontalAlignment=Alignment.CenterHorizontally) {
                     Icon(painterResource(icons[index]),category,modifier=Modifier.size(21.dp),tint=if(selected)MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     Text(labels[index],fontSize=11.sp,fontWeight=if(selected)FontWeight.Bold else FontWeight.Normal,modifier=Modifier.padding(top=5.dp))
                 }

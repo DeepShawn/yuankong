@@ -7,6 +7,8 @@ import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import androidx.appcompat.app.AlertDialog
+import androidx.core.graphics.ColorUtils
+import androidx.compose.ui.graphics.toArgb
 import com.aicode.lancmd.net.ConnectionManager
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -39,17 +41,39 @@ class ThemeTest {
             Prefs.saveTheme(app, accent.key, tone.key)
             val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
             val activity = controller.get()
-            assertEquals(accent.label, accent.swatch, Themes.color(activity, R.color.accent))
+            val expected=if(tone.light)accent.lightSwatch else accent.swatch
+            assertEquals(accent.label, expected, Themes.color(activity, R.color.accent))
             assertEquals(tone.label, tone.swatch, Themes.color(activity, R.color.bg))
             // 状态色固定，不随主题变化
-            assertEquals(app.getColor(R.color.danger), Themes.color(activity, R.color.danger))
+            if(!tone.light)assertEquals(app.getColor(R.color.danger), Themes.color(activity, R.color.danger))
+            else assertTrue(ColorUtils.calculateContrast(Themes.color(activity,R.color.danger),Themes.color(activity,R.color.surface))>=4.5)
             render(activity.window.decorView, "theme-${accent.key}-${tone.key}")
             controller.pause().stop().destroy()
 
             val intent = android.content.Intent(app, MediaActivity::class.java).putExtra("kind", "screen")
             val feature = Robolectric.buildActivity(MediaActivity::class.java, intent).setup()
-            assertEquals(accent.swatch, Themes.color(feature.get(), R.color.accent))
+            assertEquals(expected, Themes.color(feature.get(), R.color.accent))
             feature.pause().stop().destroy()
+        }
+    }
+
+    class PaletteActivity:MiuixActivity()
+    @Test fun everyLightAccentHasReadableNativeAndComposeColors() {
+        val app=RuntimeEnvironment.getApplication()
+        for(tone in Themes.tones.filter{it.light})for(accent in Themes.accents) {
+            Prefs.saveTheme(app,accent.key,tone.key)
+            val controller=Robolectric.buildActivity(PaletteActivity::class.java).setup();val page=controller.get()
+            try {
+                val surface=Themes.color(page,R.color.surface)
+                for(id in listOf(R.color.text,R.color.dim,R.color.accent,R.color.danger,R.color.warn,R.color.ok)) {
+                    assertTrue("${tone.key}/${accent.key}/$id must contrast with the light surface",ColorUtils.calculateContrast(Themes.color(page,id),surface)>=4.5)
+                }
+                assertTrue(ColorUtils.calculateContrast(Themes.color(page,R.color.on_accent),Themes.color(page,R.color.accent))>=4.5)
+                val colors=lanCmdColors(page)
+                assertEquals(surface,colors.surfaceContainer.toArgb())
+                assertEquals(Themes.color(page,R.color.text),colors.onSurface.toArgb())
+                assertTrue(page.window.decorView.systemUiVisibility and android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR!=0)
+            }finally{controller.pause().stop().destroy()}
         }
     }
 
