@@ -27,7 +27,7 @@ class ThemeDialog(private val activity: AppCompatActivity) {
             setPadding(dp(22), dp(4), dp(22), dp(8))
         }
         body.addView(section("主题色"))
-        Themes.accents.chunked(3).forEach { group ->
+        Themes.accents.chunked(2).forEach { group ->
             val row = LinearLayout(activity)
             group.forEach { option ->
                 val chip = accentChip(option)
@@ -77,9 +77,9 @@ class ThemeDialog(private val activity: AppCompatActivity) {
 
     private fun accentChip(option: Themes.Option): View {
         val box = LinearLayout(activity).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, dp(6), 0, dp(6))
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(12), dp(8), dp(12))
             isClickable = true; isFocusable = true
             contentDescription = "主题色 ${option.label}"
             setOnClickListener { accent = option; refresh() }
@@ -95,11 +95,11 @@ class ThemeDialog(private val activity: AppCompatActivity) {
             setTextColor(0xE6101010.toInt())
             tag = "check"
         }, FrameLayout.LayoutParams(-1, -1))
-        box.addView(swatch, LinearLayout.LayoutParams(dp(46), dp(46)))
+        box.addView(swatch, LinearLayout.LayoutParams(dp(30), dp(30)))
         box.addView(TextView(activity).apply {
             text = option.label; textSize = 12.5f; gravity = Gravity.CENTER
             setTextColor(color(R.color.text))
-            setPadding(0, dp(6), 0, 0)
+            setPadding(dp(10), 0, 0, 0)
         })
         return box
     }

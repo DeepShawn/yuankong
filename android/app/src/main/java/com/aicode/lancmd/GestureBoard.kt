@@ -86,10 +86,16 @@ class GestureBoard(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val rect = bounds()
-        paint.style = Paint.Style.FILL; paint.color = 0xFFF5F7FA.toInt(); canvas.drawRoundRect(rect, 12f, 12f, paint)
-        paint.color = 0xFFE2E8F0.toInt(); paint.strokeWidth = 1f
-        for (i in 1..3) { canvas.drawLine(rect.left + rect.width() * i / 4, rect.top, rect.left + rect.width() * i / 4, rect.bottom, paint)
-            canvas.drawLine(rect.left, rect.top + rect.height() * i / 4, rect.right, rect.top + rect.height() * i / 4, paint) }
+        val unit=resources.displayMetrics.density
+        paint.style = Paint.Style.FILL; paint.color = Themes.color(context,R.color.surface_variant); canvas.drawRoundRect(rect, 24*unit, 24*unit, paint)
+        paint.color = Themes.color(context,R.color.outline);paint.strokeWidth=unit
+        val spacing=24*unit
+        var gx=rect.left+spacing
+        while(gx<rect.right-spacing/2) {
+            var gy=rect.top+spacing
+            while(gy<rect.bottom-spacing/2) {canvas.drawCircle(gx,gy,unit,paint);gy+=spacing}
+            gx+=spacing
+        }
         paint.color = Themes.color(context, R.color.accent); paint.strokeWidth = 3 * resources.displayMetrics.density; paint.style = Paint.Style.STROKE
         val path = Path(); var connected = false
         for (i in 0 until events.length()) {
@@ -100,7 +106,7 @@ class GestureBoard(context: Context) : View(context) {
         }
         canvas.drawPath(path, paint)
         if (events.length() == 0) {
-            paint.style = Paint.Style.FILL; paint.color = 0xFF64748B.toInt(); paint.textAlign = Paint.Align.CENTER; paint.textSize = 14 * resources.displayMetrics.scaledDensity
+            paint.style = Paint.Style.FILL; paint.color = Themes.color(context,R.color.dim); paint.textAlign = Paint.Align.CENTER; paint.textSize = 14 * resources.displayMetrics.scaledDensity
             canvas.drawText(if (recording) "在此移动、点击或拖动" else "点击「开始记录」后在此操作", rect.centerX(), rect.centerY(), paint)
         }
     }

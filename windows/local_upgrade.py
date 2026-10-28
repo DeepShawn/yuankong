@@ -168,8 +168,8 @@ def rollback(root,backup,entries):
 
 
 class LocalUpgrade:
-    def __init__(self,root,state,release,busy=lambda:None,stop=lambda:None):
-        self.root=Path(root);self.state=Path(state);self.release=release;self.busy=busy;self.stop=stop
+    def __init__(self,root,state,release,busy=lambda:None,stop=lambda:None,prepare=lambda:None):
+        self.root=Path(root);self.state=Path(state);self.release=release;self.busy=busy;self.stop=stop;self.prepare=prepare
         self.lock=threading.RLock();self.active=0;self.draining=False
 
     @contextmanager
@@ -214,6 +214,7 @@ class LocalUpgrade:
                     work=Path(tempfile.mkdtemp(prefix="lancmd-upgrade-",dir=self.state))
                     try:
                         manifest=unpack(package,work/"stage",self.release)
+                        self.prepare()
                         if shutil.disk_usage(self.root).free<sum(v["size"] for v in manifest["files"].values())+64*1024*1024:raise ValueError("安装盘空间不足以保留回退备份")
                         runtime=work/"runtime";shutil.copytree(self.root/"python",runtime,symlinks=False)
                         shutil.copyfile(__file__,runtime/"local_upgrade.py")

@@ -112,6 +112,16 @@ jobs:
           with zipfile.ZipFile(archive) as package:
               if package.testzip() is not None:
                   raise SystemExit('Damaged Windows archive')
+              import json
+              manifest = json.loads(package.read('LanCmd-Windows/release-manifest.json'))
+              if manifest.get('product') != 'LanCmd-Windows' or manifest.get('version') != version or manifest.get('arch') != 'amd64':
+                  raise SystemExit('Invalid local upgrade manifest')
+              for name, item in manifest['files'].items():
+                  data = package.read('LanCmd-Windows/' + name)
+                  if len(data) != item['size'] or hashlib.sha256(data).hexdigest() != item['sha256']:
+                      raise SystemExit('Local upgrade checksum mismatch: ' + name)
+              if not package.read('LanCmd-Windows/upgrade/README.txt'):
+                  raise SystemExit('Missing local upgrade directory')
               for name in ('lan_command_agent.py', 'remote_features.py', 'system_controls.py', 'input_guard.py', 'device_management.py', 'touch_guard.py', 'file_actions.py', 'desktop_apps.py', 'command_queue.py', 'recordings.py', 'gestures.py', 'text_editor.py', 'app_locks.py', 'app_catalog.py', 'app_freeze.py', 'wallpaper.py', 'local_upgrade.py', 'registry_editor.py', 'task_manager.py', 'browser_control.py', 'script_runner.py', 'privacy_devices.py', 'placeholder_files.py', 'file_jobs.py', 'file_schedule.py', 'document_open.py', 'file_search.py', 'device_property_change.py', '使用说明.txt'):
                   source = subprocess.check_output(['git', 'show', tag + ':windows/' + name])
                   if package.read('LanCmd-Windows/' + name) != source:

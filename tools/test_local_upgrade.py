@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import sys
 import tempfile
+import subprocess
 import unittest
 import zipfile
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"windows"))
@@ -99,6 +100,38 @@ class WallpaperTest(unittest.TestCase):
             class Backend:
                 def apply(self,*args):raise AssertionError("must not change desktop")
             with self.assertRaises(ValueError):Wallpaper(root/"saved",Backend()).request(dict(action="set",path=str(image)),ValueError)
+
+
+@unittest.skipUnless(os.name=="nt","Windows process and replacement APIs")
+class NativeUpgradeTest(unittest.TestCase):
+    def test_helper_installs_and_rolls_back_only_its_isolated_test_child(self):
+        from local_upgrade import write_json
+        for fails in (False,True):
+            with self.subTest(startup_failure=fails),tempfile.TemporaryDirectory() as folder:
+                base=Path(folder);root=base/"install";root.mkdir();work=base/"work";work.mkdir();stage=work/"stage";stage.mkdir()
+                runtime=root/"python"
+                junction=subprocess.run(["cmd","/c","mklink","/J",str(runtime),sys.base_prefix],capture_output=True)
+                self.assertEqual(0,junction.returncode,junction.stderr)
+                # Both old and new dummy receivers have a short, finite lifetime.
+                source="import json,os,pathlib,time\np=pathlib.Path(os.environ['LANCMD_UPGRADE_READY']);t=p.with_suffix('.tmp');t.write_text(json.dumps(dict(version='3.4.0',pid=os.getpid())));os.replace(t,p)\ntime.sleep(2)\n"
+                old=b"import time;time.sleep(2)\n";(root/"lan_command_agent.py").write_bytes(old);(root/"Start.exe").write_bytes(b"old")
+                (stage/"lan_command_agent.py").write_text("raise RuntimeError('simulated startup failure')\n" if fails else source)
+                (stage/"Start.exe").write_bytes(b"new");write_json(stage/MANIFEST,{})
+                parent=subprocess.Popen([sys.executable,"-c","import time;time.sleep(3)"],creationflags=0x08000000)
+                plan=dict(root=str(root),work=str(work),parent=parent.pid,state=str(base/"status.json"),version="3.4.0",files=["lan_command_agent.py","Start.exe"])
+                write_json(work/"plan.json",plan);helper=None
+                try:
+                    helper=subprocess.Popen([sys.executable,str(Path(__file__).resolve().parents[1]/"windows/local_upgrade.py"),"--apply",str(work/"plan.json")],creationflags=0x08000000)
+                    self.assertEqual(0,helper.wait(15));parent.wait(3)
+                    report=json.loads((base/"status.json").read_text(encoding="utf-8"))
+                    self.assertEqual("rolled_back" if fails else "completed",report["status"],report)
+                    self.assertEqual(b"old" if fails else b"new",(root/"Start.exe").read_bytes())
+                    if fails:self.assertEqual(old,(root/"lan_command_agent.py").read_bytes())
+                    else:self.assertEqual(b"old",(work/"backup/Start.exe").read_bytes())
+                finally:
+                    if parent.poll() is None:parent.terminate();parent.wait(3)
+                    if helper is not None and helper.poll() is None:helper.terminate();helper.wait(3)
+                    runtime.rmdir()
 
 
 if __name__=="__main__":unittest.main()

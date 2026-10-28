@@ -1137,9 +1137,11 @@ from file_search import FileSearch
 from local_upgrade import LocalUpgrade
 import weakref
 _connections=weakref.WeakSet()
+_connections_lock=threading.RLock()
 
 def upgrade_busy():
-    if any(st.uploads or st.downloads for st in list(_connections)):return "请先完成或取消手机文件传输"
+    with _connections_lock:connections=list(_connections)
+    if any(st.uploads or st.downloads for st in connections):return "请先完成或取消手机文件传输"
     for manager in (_placeholders,_file_jobs,_file_schedule):
         with manager.lock:
             if any(not job["done"].is_set() for job in manager.jobs.values()):return "请先完成或取消文件任务、占位文件和延迟文件操作"
@@ -1152,7 +1154,6 @@ def upgrade_busy():
     with _remote.pointer_lock:
         if _remote.playback_owner or _remote.pointer_owners:return "请先停止手势回放和拖动"
     # Worker exit/EOF restores held suspension counts before package replacement.
-    _app_freeze.prepare_upgrade()
     return None
 
 def upgrade_stop():
@@ -1200,7 +1201,7 @@ _file_jobs = FileJobs(os.path.join(APP_DIR,"file-jobs.json"),protected=(_capture
 
 
 _file_search = FileSearch(os.path.join(APP_DIR,"file-search"))
-_updates=LocalUpgrade(_capture_dir,os.path.join(APP_DIR,"upgrade"),VERSION,upgrade_busy,upgrade_stop)
+_updates=LocalUpgrade(_capture_dir,os.path.join(APP_DIR,"upgrade"),VERSION,upgrade_busy,upgrade_stop,_app_freeze.prepare_upgrade)
 
 
 def remote_capabilities():
@@ -1302,7 +1303,7 @@ class ClientState(object):
         self.uploads = {}
         self.downloads = {}
         self.last_active = time.time()
-        _connections.add(self)
+        with _connections_lock:_connections.add(self)
 
     def touch(self):
         self.last_active = time.time()
