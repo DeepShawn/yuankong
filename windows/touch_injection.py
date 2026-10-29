@@ -96,6 +96,7 @@ class NativeTouch:
             while not self.user.InjectTouchInput(len(array), array):
                 error = ctypes.get_last_error()
                 if error != 21 or time.monotonic() >= deadline:  # ERROR_NOT_READY: timestamp granularity.
+                    if error == 87:self.points.clear()  # Windows cancels all contacts for an invalid frame.
                     raise RuntimeError('Windows 触控注入失败（错误 %s），未回退为鼠标模拟' % error)
                 time.sleep(.001)
         finally:self.user.SetMessageExtraInfo(previous)
@@ -160,6 +161,7 @@ class TouchWorker:
             text=True, encoding='utf-8', creationflags=0x08000000, close_fds=True)
         self.lines = queue.Queue()
         self.sequence = 0
+        self.closed = False
         def read():
             try:
                 for line in self.process.stdout:self.lines.put(json.loads(line))
@@ -167,7 +169,10 @@ class TouchWorker:
             finally:self.lines.put(None)
         self.reader = threading.Thread(target=read, daemon=True);self.reader.start()
         try:self._receive(0)
-        except Exception:self.close();raise
+        except Exception:
+            try:self.close()
+            except Exception:pass
+            raise
 
     def _receive(self, sequence):
         try:result = self.lines.get(timeout=3)
@@ -186,9 +191,12 @@ class TouchWorker:
     def close(self):
         if not self.process.stdin.closed:self.process.stdin.close()
         try:
-            if self.process.wait(5):raise RuntimeError('Windows 触点释放失败')
-        finally:
-            self.reader.join(1);self.process.stdout.close()
+            result = self.process.wait(5)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError('Windows 触点仍在释放，恢复进程将继续执行')
+        self.closed = True
+        self.reader.join(1);self.process.stdout.close()
+        if result:raise RuntimeError('Windows 触点释放失败，触控进程已退出')
 
 
 class TouchInjection:
@@ -237,8 +245,11 @@ class TouchInjection:
         worker = self.worker
         self.owners.clear();self.points.clear();self.active = None
         if worker is not None:
-            worker.close()
-            self.worker = None
+            try:worker.close()
+            except Exception:
+                if getattr(worker,'closed',False):self.worker = None
+                raise
+            else:self.worker = None
 
     def _watch(self):
         try:

@@ -44,7 +44,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 APP_ID = "LANCMD"
-VERSION = "3.5.3"
+VERSION = "3.5.0"
+BUILD_VERSION = "3.5.4"
+RELEASE_TAG = "v3.5.0-touch.1"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1238,7 +1240,7 @@ _file_jobs = FileJobs(os.path.join(APP_DIR,"file-jobs.json"),protected=(_capture
 
 
 _file_search = FileSearch(os.path.join(APP_DIR,"file-search"))
-_updates=LocalUpgrade(_capture_dir,os.path.join(APP_DIR,"upgrade"),VERSION,upgrade_busy,upgrade_stop,_app_freeze.prepare_upgrade)
+_updates=LocalUpgrade(_capture_dir,os.path.join(APP_DIR,"upgrade"),BUILD_VERSION,upgrade_busy,upgrade_stop,_app_freeze.prepare_upgrade,display_version=VERSION)
 _startup_network=StartupNetwork(_capture_dir,WindowsStartupNetwork(_capture_dir,is_admin,
     lambda:(load_cfg()["port"],load_cfg()["discovery_port"]),_netsh),log)
 
@@ -1253,7 +1255,7 @@ def remote_capabilities():
         if os.path.isfile(_remote.backend.capture_exe):
             features.extend(["screen", "camera"])
     # session_seconds 为 None 表示共享会话不设时长上限
-    return {"version": VERSION, "features": features, "session_seconds": None}
+    return {"version": VERSION, "build_version": BUILD_VERSION, "release_tag": RELEASE_TAG, "features": features, "session_seconds": None}
 
 
 def cmd_audio(q):
@@ -1617,7 +1619,7 @@ def tcp_server(cfg):
     ready=os.environ.pop("LANCMD_UPGRADE_READY",None)
     if ready:
         from local_upgrade import write_json
-        health=dict(version=VERSION,pid=os.getpid())
+        health=dict(version=BUILD_VERSION,display_version=VERSION,pid=os.getpid())
         nonce=os.environ.pop("LANCMD_UPGRADE_NONCE",None)
         if nonce:health["nonce"]=nonce
         write_json(ready,health)

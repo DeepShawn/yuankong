@@ -130,6 +130,7 @@ jobs:
         shell: python
         run: |
           import hashlib
+          import json
           import os
           from pathlib import Path
           import re
@@ -145,11 +146,14 @@ jobs:
           subprocess.run([str(tools / 'zipalign'), '-c', '-P', '16', '4', str(apk)], check=True)
           metadata = subprocess.check_output([str(tools / 'aapt2'), 'dump', 'badging', str(apk)], text=True)
           version = re.search(r"versionName='([0-9.]+)'", metadata).group(1)
-          if os.environ['GITHUB_REF'].startswith('refs/tags/') and os.environ['GITHUB_REF_NAME'] != 'v' + version:
+          identity = json.loads(Path('release.json').read_text())
+          if version != identity['display_version'] or int(re.search(r"versionCode='([0-9]+)'", metadata).group(1)) != identity['android_version_code']:
+              raise SystemExit('APK differs from declared display version or upgrade code')
+          if os.environ['GITHUB_REF'].startswith('refs/tags/') and os.environ['GITHUB_REF_NAME'] != identity['tag']:
               raise SystemExit('Git tag and Android version do not match')
           output = Path('dist')
           output.mkdir(exist_ok=True)
-          destination = output / ('LanCmd-' + version + '.apk')
+          destination = output / ('LanCmd-' + identity['tag'][1:] + '.apk')
           shutil.copyfile(apk, destination)
           digest = hashlib.sha256(destination.read_bytes()).hexdigest()
           (output / 'SHA256SUMS-Android.txt').write_text(digest + '  ' + destination.name + '\n')

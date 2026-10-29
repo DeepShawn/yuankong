@@ -346,8 +346,7 @@ class DesktopUiTest {
                 page.begin();waitUntil{page.sharing && stub.requests.any{it.second.optString("cmd")=="touch"}}
                 for(index in 0..2)page.mode=index
                 controller.pause().stop()
-                shadowOf(Looper.getMainLooper()).idleFor(1000,TimeUnit.MILLISECONDS)
-                controller.start().resume()
+                controller.start().resume().visible()
                 waitUntil{stub.requests.count{it.second.optString("cmd")=="screen"}>=2}
                 assertFalse(stub.requests.any{it.second.optString("cmd")=="cursor"})
                 page.stopSession();waitUntil{!page.sharing}

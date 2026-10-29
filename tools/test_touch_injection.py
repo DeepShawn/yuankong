@@ -90,6 +90,32 @@ class TouchTest(unittest.TestCase):
 
 @unittest.skipUnless(os.name == 'nt', 'Requires Windows official touch injection and app WM_TOUCH')
 class NativeTouchTest(unittest.TestCase):
+    def test_touch_promotion_reaches_legacy_apps_while_local_mouse_hook_is_active(self):
+        from cursor_window_fixture import CursorWindow
+        from input_guard import InputGuard, NativeInputGuard
+        class Guard(NativeInputGuard):
+            def __init__(self):
+                super().__init__()
+                self.touch = SimpleNamespace(start=lambda:None,stop=lambda:None,ping=lambda:None)
+        guard = InputGuard(Guard())
+        with CursorWindow() as app:
+            worker = None
+            try:
+                guard.pause('native-test',lambda:True)
+                worker = TouchWorker()
+                x,y = app.initial['x'], app.initial['y']
+                worker.call('frame',[point(x=x,y=y)])
+                worker.call('frame',[point(state='up',x=x,y=y)])
+                deadline = time.monotonic()+2
+                while True:
+                    events = app.report('probe')['mouse_taps']
+                    if any(p['message']==0x202 for p in events):break
+                    if time.monotonic()>=deadline:self.fail('Native touch promotion was blocked by local-input hook: '+str(events))
+                    time.sleep(.02)
+            finally:
+                if worker:worker.close()
+                guard.close()
+
     def test_official_worker_delivers_app_touch_frames_and_eof_releases_contacts(self):
         from cursor_window_fixture import CursorWindow
         with CursorWindow(touch=True) as app:

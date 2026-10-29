@@ -495,7 +495,6 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
     override fun onStart() {
         super.onStart()
         pageVisible = true
-        updateCursorVisibility()
         ConnectionManager.addListener(this)
     }
 
@@ -511,7 +510,6 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
     override fun onStop() {
         ConnectionManager.removeListener(this)
         pageVisible = false
-        updateCursorVisibility()
         screen.cancelGesture()
         if (isFinishing) { sessionJob?.cancel(); terminalJob?.cancel(); localRequest?.cancel() }
         super.onStop()

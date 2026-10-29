@@ -44,9 +44,16 @@ jobs:
           from pathlib import Path
 
           tag = os.environ['RELEASE_TAG']
-          if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag):
+          if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-touch\.[1-9][0-9]*)?', tag):
               raise SystemExit('Use a semantic version release tag')
           sha = subprocess.check_output(['git', 'rev-parse', tag + '^{commit}'], text=True).strip()
+          present = subprocess.run(['git', 'cat-file', '-e', tag + ':release.json'], capture_output=True).returncode == 0
+          identity = json.loads(subprocess.check_output(['git', 'show', tag + ':release.json'])) if present else dict(tag=tag,display_version=tag[1:],windows_build_version=tag[1:])
+          if identity['tag'] != tag or not all(re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', identity[key]) for key in ('display_version','windows_build_version')):
+              raise SystemExit('Release tag is not bound to the tagged version metadata')
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('EXPECTED_DISPLAY_VERSION=' + identity['display_version'] + '\n')
+              env.write('EXPECTED_WINDOWS_BUILD=' + identity['windows_build_version'] + '\n')
           for variable, workflow in [('ANDROID_RUN', 'android-release.yml'), ('WINDOWS_RUN', 'windows-features.yml')]:
               run_id = os.environ[variable]
               if not run_id.isdecimal():
@@ -114,8 +121,10 @@ jobs:
                   raise SystemExit('Damaged Windows archive')
               import json
               manifest = json.loads(package.read('LanCmd-Windows/release-manifest.json'))
-              if manifest.get('product') != 'LanCmd-Windows' or manifest.get('version') != version or manifest.get('arch') != 'amd64':
+              if manifest.get('product') != 'LanCmd-Windows' or manifest.get('version') != os.environ['EXPECTED_WINDOWS_BUILD'] or manifest.get('arch') != 'amd64':
                   raise SystemExit('Invalid local upgrade manifest')
+              if manifest.get('display_version',manifest['version']) != os.environ['EXPECTED_DISPLAY_VERSION']:
+                  raise SystemExit('Windows display version differs from tagged identity')
               for name, item in manifest['files'].items():
                   data = package.read('LanCmd-Windows/' + name)
                   if len(data) != item['size'] or hashlib.sha256(data).hexdigest() != item['sha256']:
@@ -129,7 +138,9 @@ jobs:
               for name in ('python/_sqlite3.pyd', 'python/sqlite3.dll'):
                   if not package.read('LanCmd-Windows/' + name):
                       raise SystemExit('Missing SQLite runtime: ' + name)
-              for name in ('storage_reads.py', 'cursor_visibility.py', 'force_delete.py', 'startup_network.py', 'start.bat'):
+              for name in ('storage_reads.py', 'cursor_visibility.py', 'force_delete.py', 'startup_network.py', 'touch_injection.py', 'start.bat'):
+                  if name == 'touch_injection.py' and subprocess.run(['git', 'cat-file', '-e', tag + ':windows/' + name],capture_output=True).returncode:
+                      continue
                   source = subprocess.check_output(['git', 'show', tag + ':windows/' + name])
                   if name == 'start.bat':
                       # Match .gitattributes: Git stores LF, checkout/package uses CRLF.
@@ -150,12 +161,14 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
+          title="LanCmd $version"
+          if [ "$version" != "$EXPECTED_DISPLAY_VERSION" ]; then title="LanCmd $EXPECTED_DISPLAY_VERSION（原生触控版）"; fi
           notes="docs/releases/$RELEASE_TAG.md"
           assets=("dist/LanCmd-$version.apk" "dist/LanCmd-Windows-$version.zip" "dist/SHA256SUMS-$version.txt")
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
-            gh release edit "$RELEASE_TAG" --draft=false --latest --title "LanCmd $version" --notes-file "$notes"
+            gh release edit "$RELEASE_TAG" --draft=false --latest --title "$title" --notes-file "$notes"
           else
-            gh release create "$RELEASE_TAG" --verify-tag --latest --title "LanCmd $version" --notes-file "$notes" "${assets[@]}"
+            gh release create "$RELEASE_TAG" --verify-tag --latest --title "$title" --notes-file "$notes" "${assets[@]}"
           fi
           gh release view "$RELEASE_TAG" --json url,tagName,isDraft,assets

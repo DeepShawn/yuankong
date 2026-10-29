@@ -88,6 +88,8 @@ def main():
     requests = queue.SimpleQueue()
     moves = [0]
     touch_events = []
+    mouse_taps = []
+    user.GetMessageExtraInfo.restype = ctypes.c_ssize_t
     class TouchInput(ctypes.Structure):
         _fields_ = [('x', w.LONG), ('y', w.LONG), ('source', w.HANDLE), ('id', w.DWORD),
                     ('flags', w.DWORD), ('mask', w.DWORD), ('time', w.DWORD),
@@ -106,10 +108,11 @@ def main():
         return {'visible': bool(current.flags & 1), 'flags': current.flags,
                 'foreground': user.GetForegroundWindow() == window,
                 'moves': moves[0], 'cursor': current.cursor, 'custom': custom,
-                'selected': user.GetCursor(), 'display_count': display_count, 'touch_events': list(touch_events),
+                'selected': user.GetCursor(), 'display_count': display_count, 'touch_events': list(touch_events), 'mouse_taps': list(mouse_taps),
                 'x': (left + 75 - user.GetSystemMetrics(76)) / user.GetSystemMetrics(78),
                 'y': (175 - user.GetSystemMetrics(77)) / user.GetSystemMetrics(79)}
     def proc(hwnd, message, word, long):
+        if message in (0x201,0x202):mouse_taps.append(dict(message=message,extra=user.GetMessageExtraInfo()))
         if message == 0x240:  # WM_TOUCH proves native touch delivery to an app.
             count = word & 0xffff
             inputs = (TouchInput * count)()
