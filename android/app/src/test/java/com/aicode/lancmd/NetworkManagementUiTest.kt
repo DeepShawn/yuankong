@@ -42,10 +42,16 @@ class NetworkManagementUiTest {
         while(System.currentTimeMillis()<end){shadowOf(Looper.getMainLooper()).idleFor(10,java.util.concurrent.TimeUnit.MILLISECONDS);if(check())return;Thread.sleep(10)}
         fail("网络管理界面没有完成预期状态")
     }
+    private fun enter(page:NetworkManagementActivity) {
+        waitFor{page.supported && !page.busy && page.administrator}
+        page.managementPassword="test-only-password";page.unlock()
+        waitFor{page.authorized && page.snapshots.isNotEmpty() && (!page.busy || page.job?.optJSONObject("question")!=null)}
+    }
     @Test fun allFourAreasRefreshWithoutSendingChanges() {
         Stub().use {stub ->
             stub.install();val controller=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=controller.get()
             try {
+                enter(page)
                 waitFor{page.supported && !page.busy && page.snapshots.containsKey("hotspot")}
                 for(area in listOf("wifi","bluetooth","adapters")){page.selectArea(area);waitFor{!page.busy && page.snapshots.containsKey(area)}}
                 assertEquals(setOf("hotspot","wifi","bluetooth","adapters"),page.snapshots.keys.toSet())
@@ -67,6 +73,7 @@ class NetworkManagementUiTest {
         Stub(fail=true).use {stub ->
             stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
             try {
+                enter(page)
                 waitFor{page.supported && !page.busy && page.snapshots.isNotEmpty()}
                 page.hotspotPassword="secret<&password";page.wifiPassword="wifi-password";page.pairingPin="9876"
                 val state=Bundle();c.saveInstanceState(state)
@@ -83,6 +90,7 @@ class NetworkManagementUiTest {
         Stub(pair=true).use {stub ->
             stub.install();var c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();var page=c.get()
             try {
+                enter(page)
                 waitFor{page.supported && !page.busy && page.snapshots.isNotEmpty()}
                 page.selectArea("bluetooth");waitFor{!page.busy && page.snapshots.containsKey("bluetooth")}
                 page.submit("bluetooth","pair",JSONObject().put("id","device"))
@@ -90,6 +98,7 @@ class NetworkManagementUiTest {
                 assertFalse(stub.requests.any{it.optString("action")=="answer"})
                 val saved=Bundle();c.saveInstanceState(saved);c.pause().stop().destroy()
                 c=Robolectric.buildActivity(NetworkManagementActivity::class.java).create(saved).start().resume().visible();page=c.get()
+                enter(page)
                 waitFor{page.job?.optJSONObject("question")!=null}
                 page.pairingPin="123456";page.answerPairing(true)
                 waitFor{!page.busy && page.job?.has("finished")==true}
@@ -103,6 +112,7 @@ class NetworkManagementUiTest {
         Stub(dropReply=true).use {stub ->
             stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
             try {
+                enter(page)
                 waitFor{page.supported && !page.busy && page.snapshots.isNotEmpty()}
                 page.submit("hotspot","restart",JSONObject())
                 waitFor{stub.requests.any{it.optString("action")=="submit"} && stub.client?.closed==true}
@@ -118,6 +128,7 @@ class NetworkManagementUiTest {
         Stub().use {stub ->
             stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
             try {
+                enter(page)
                 waitFor{page.supported && !page.busy && page.snapshots.isNotEmpty()}
                 page.selectArea("bluetooth");waitFor{!page.busy && page.snapshots.containsKey("bluetooth")}
                 compose.onNodeWithText("展开设备级启停").performSemanticsAction(SemanticsActions.OnClick){it()}
@@ -136,6 +147,7 @@ class NetworkManagementUiTest {
         Stub().use {stub ->
             stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
             try {
+                enter(page)
                 waitFor{page.supported && !page.busy && page.snapshots.isNotEmpty()}
                 compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("禁止联网"))
                 compose.onNodeWithText("禁止联网").performSemanticsAction(SemanticsActions.OnClick){it()}
@@ -153,6 +165,7 @@ class NetworkManagementUiTest {
         Stub(discovery=true).use {stub ->
             stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
             try {
+                enter(page)
                 waitFor{page.supported && !page.busy && page.snapshots.isNotEmpty()}
                 compose.onNodeWithText("请开启热点并刷新").assertDoesNotExist()
                 compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("选择热点网卡"))
@@ -174,6 +187,7 @@ class NetworkManagementUiTest {
         Stub(discovery=true).use {stub ->
             stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
             try {
+                enter(page)
                 waitFor{page.supported && !page.busy && page.snapshots.isNotEmpty()}
                 val message="热点已开启，尚未识别专用网卡；请刷新或选择热点网卡"
                 page.render(JSONObject().put("area","hotspot").put("snapshot",JSONObject().put("state","On")
@@ -185,13 +199,109 @@ class NetworkManagementUiTest {
         }
     }
 
-    private class Stub(val supported:Boolean=true,val fail:Boolean=false,val pair:Boolean=false,val dropReply:Boolean=false,val discovery:Boolean=false):Closeable {
+    @Test fun passwordGateRejectsWrongPasswordAndDoesNotReadOrChangeDevicesBeforeLogin() {
+        Stub().use {stub ->
+            stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
+            try {
+                waitFor{page.supported && !page.busy && page.administrator}
+                page.refresh();page.submit("hotspot","start",JSONObject())
+                assertFalse(stub.requests.any{it.optString("action") in listOf("refresh","submit","status")})
+                compose.onNodeWithText("网络管理密码").assertExists()
+                page.managementPassword="wrong";page.unlock();waitFor{!page.busy && page.note.contains("密码错误")}
+                assertFalse(page.authorized);assertEquals("",page.managementPassword)
+                enter(page)
+                assertTrue(stub.requests.filter{it.optString("action")=="refresh"}.all{it.optString("network_token").length==64})
+                compose.onNodeWithText("锁定网络管理").performSemanticsAction(SemanticsActions.OnClick){it()}
+                assertFalse(page.authorized);assertTrue(page.snapshots.isEmpty())
+                compose.onNodeWithText("网络管理密码").assertExists()
+                val saved=Bundle();c.saveInstanceState(saved)
+                assertFalse(saved.keySet().any{it.contains("password",true) || it.contains("token",true)})
+            } finally{c.pause().stop().destroy()}
+        }
+    }
+    @Test fun nonAdministratorCannotEnterOrEnableNetworkDevices() {
+        Stub(admin=false).use {stub ->
+            stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
+            try {
+                waitFor{page.supported && !page.busy && page.note.contains("管理员身份")}
+                compose.onNodeWithText("验证并进入").assertIsNotEnabled()
+                page.refresh();page.submit("bluetooth","device",JSONObject().put("instance","bt-device").put("enabled",false))
+                assertFalse(stub.requests.any{it.optString("action") in listOf("refresh","submit")})
+            } finally{c.pause().stop().destroy()}
+        }
+    }
+    @Test fun multiSelectBluetoothSendsOneConfirmedBatchAndDisplaysEachResult() {
+        Stub(multiple=true).use {stub ->
+            stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
+            try {
+                enter(page);page.selectArea("bluetooth");waitFor{!page.busy && page.snapshots.containsKey("bluetooth")}
+                compose.onNodeWithText("展开设备级启停").performSemanticsAction(SemanticsActions.OnClick){it()}
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("选择 测试设备"))
+                compose.onNodeWithText("选择 测试设备").performSemanticsAction(SemanticsActions.OnClick){it()}
+                compose.onNodeWithText("选择 测试设备").assertIsOn()
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("选择 第二设备"))
+                compose.onNodeWithText("选择 第二设备").performSemanticsAction(SemanticsActions.OnClick){it()}
+                compose.onNodeWithText("选择 第二设备").assertIsOn()
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("批量停用"))
+                compose.onNodeWithText("批量停用").performSemanticsAction(SemanticsActions.OnClick){it()}
+                assertFalse(stub.requests.any{it.optString("action")=="submit"})
+                compose.onNodeWithText("执行").performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{!page.busy && page.job?.has("finished")==true}
+                val q=stub.requests.single{it.optString("action")=="submit"}
+                assertEquals("device_batch",q.getString("operation"));assertEquals("bluetooth",q.getString("area"))
+                assertEquals(setOf("bt-device","bt-two"),q.getJSONObject("params").getJSONArray("instances").let{a->(0 until a.length()).map{a.getString(it)}.toSet()})
+                assertFalse(q.getJSONObject("params").getBoolean("enabled"))
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("驱动拒绝请求"))
+                compose.onNodeWithText("已确认设备停用").assertExists();compose.onNodeWithText("驱动拒绝请求").assertExists()
+            } finally{c.pause().stop().destroy()}
+        }
+    }
+    @Test fun selectedAdaptersAndHotspotClientsUseTheirOwnBatchOperations() {
+        Stub(multiple=true).use {stub ->
+            stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
+            try {
+                enter(page);page.selectArea("adapters");waitFor{!page.busy && page.snapshots.containsKey("adapters")}
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("全选"))
+                compose.onNodeWithText("全选").performSemanticsAction(SemanticsActions.OnClick){it()}
+                compose.onNodeWithText("批量启用").performSemanticsAction(SemanticsActions.OnClick){it()}
+                compose.onNodeWithText("执行").performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{!page.busy && page.job?.has("finished")==true}
+                val adapter=stub.requests.single{it.optString("operation")=="adapter_batch"}
+                assertEquals(2,adapter.getJSONObject("params").getJSONArray("adapters").length())
+                page.selectArea("hotspot")
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("全选客户端"))
+                compose.onNodeWithText("全选客户端").performSemanticsAction(SemanticsActions.OnClick){it()}
+                compose.onNodeWithText("批量禁止联网").performSemanticsAction(SemanticsActions.OnClick){it()}
+                compose.onNodeWithText("执行").performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{!page.busy && stub.requests.any{it.optString("operation")=="client_access_batch"}}
+                val clients=stub.requests.single{it.optString("operation")=="client_access_batch"}
+                assertEquals(2,clients.getJSONObject("params").getJSONArray("addresses").length());assertTrue(clients.getJSONObject("params").getBoolean("blocked"))
+            } finally{c.pause().stop().destroy()}
+        }
+    }
+    @Test fun expiredSessionReturnsToPasswordGateWithoutResubmittingTheChange() {
+        Stub().use {stub ->
+            stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
+            try {
+                enter(page);stub.expired=true;page.refresh()
+                waitFor{!page.authorized && !page.busy}
+                assertTrue(page.snapshots.isEmpty());assertTrue(page.note.contains("验证已失效"))
+                compose.onNodeWithText("网络管理密码").assertExists()
+                enter(page)
+                assertFalse(stub.requests.any{it.optString("action")=="submit"})
+            } finally{c.pause().stop().destroy()}
+        }
+    }
+
+    private class Stub(val supported:Boolean=true,val fail:Boolean=false,val pair:Boolean=false,val dropReply:Boolean=false,val discovery:Boolean=false,val admin:Boolean=true,val multiple:Boolean=false):Closeable {
         val requests=CopyOnWriteArrayList<JSONObject>()
         private val server=ServerSocket(0)
         private val clients=CopyOnWriteArrayList<AgentClient>()
         var client:AgentClient?=null
         @Volatile private var submitted:JSONObject?=null
         @Volatile private var answered=false
+        @Volatile var expired=false
+        private val sessions=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         private val thread=Thread {
             try {while(!server.isClosed){val socket=server.accept();Thread {
                 try {socket.use {
@@ -199,7 +309,16 @@ class NetworkManagementUiTest {
                     while(true) {
                         val q=JSONObject(input.readLine()?:break);requests.add(q)
                         val r=JSONObject().put("id",q.getInt("id")).put("ok",true)
-                        if(q.optString("cmd")=="capabilities")r.put("features",JSONArray().apply{if(supported){put("network_management");put("network_device_state");put("hotspot_client_access");if(discovery)put("hotspot_adapter_selection")}})
+                        if(q.optString("cmd")=="capabilities")r.put("features",JSONArray().apply{if(supported){put("network_management");put("network_device_state");put("hotspot_client_access");put("network_password");put("network_batch");if(discovery)put("hotspot_adapter_selection")}})
+                        else if(q.optString("action")=="auth_status")r.put("admin",admin).put("requires_password",true)
+                        else if(q.optString("action")=="unlock") {
+                            if(admin && q.optString("password")=="test-only-password") {
+                                val token=java.util.UUID.randomUUID().toString().replace("-","")+java.util.UUID.randomUUID().toString().replace("-","")
+                                sessions.add(token);expired=false;r.put("network_token",token).put("admin",true).put("expires_in",1800)
+                            } else r.put("ok",false).put("error","网络管理密码错误")
+                        }
+                        else if(q.optString("action")=="lock"){sessions.remove(q.optString("network_token"));r.put("locked",true)}
+                        else if(expired || q.optString("network_token") !in sessions)r.put("ok",false).put("error","NETWORK_AUTH_REQUIRED: 请重新输入网络管理密码")
                         else {
                             if(q.optString("action")=="submit"){submitted=q;if(dropReply)break}
                             if(q.optString("action")=="answer")answered=true
@@ -209,6 +328,12 @@ class NetworkManagementUiTest {
                                 .put("interfaces",JSONArray()).put("devices",JSONArray()).put("adapters",JSONArray()).put("radios",JSONArray())
                                 .put("hardware",JSONArray().put(JSONObject().put("id",if(area=="bluetooth")"bt-device" else "net-device")
                                     .put("name","测试设备").put("enabled",true).put("problem",0))))
+                            if(multiple) {
+                                r.getJSONObject("snapshot").getJSONArray("hardware").put(JSONObject().put("id",if(area=="bluetooth")"bt-two" else "net-two")
+                                    .put("name","第二设备").put("enabled",true).put("problem",0))
+                                r.getJSONObject("snapshot").getJSONArray("clients").put(JSONObject().put("address","02:AA:BB:CC:DD:EE").put("hosts",JSONArray()))
+                                for(index in 1..2)r.getJSONObject("snapshot").getJSONArray("adapters").put(JSONObject().put("id","11111111-2222-3333-4444-55555555555$index").put("name","测试网卡$index").put("status","Up"))
+                            }
                             if(discovery && area=="hotspot") {
                                 val adapter=JSONObject().put("id","11111111-2222-3333-4444-555555555555").put("name","本地连接* 9")
                                     .put("description","Wi-Fi Direct").put("ipv4",JSONArray().put("10.77.20.1/24"))
@@ -223,6 +348,9 @@ class NetworkManagementUiTest {
                                     .put("message",if(fail)"网卡拒绝此次操作" else "已读取实际状态")
                                 if(pair && !answered)job.put("question",JSONObject().put("id","b".repeat(32)).put("kind","ProvidePin"))
                                 else job.put("finished",1)
+                                if(submitted!!.optString("operation").endsWith("_batch"))job.put("result",JSONObject().put("items",JSONArray()
+                                    .put(JSONObject().put("name","测试设备").put("confirmed",true).put("message","已确认设备停用"))
+                                    .put(JSONObject().put("name","第二设备").put("confirmed",false).put("message","驱动拒绝请求"))))
                                 r.put("job",job)
                             }
                         }

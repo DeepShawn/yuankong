@@ -1,4 +1,5 @@
 """Network changes stay asynchronous, authenticated, idempotent and secret-free."""
+import hashlib
 import ctypes
 import io
 import json
@@ -15,9 +16,13 @@ import xml.etree.ElementTree as E
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'windows'))
 from native_wifi import NativeWifi, Guid, Interface, Available, Profile, ConnectionParameters, profile_xml
-from network_management import NetworkManagement, WindowsNetwork, NetworkHardware, NETWORK_CLASSES, validate
+from network_management import NetworkAuthorization, NetworkManagement, WindowsNetwork, NetworkHardware, NETWORK_CLASSES, validate
 
 class Error(Exception):pass
+TEST_PASSWORD='test-only-network-password'
+TEST_SALT=b'unit-test-salt-01'
+TEST_VERIFIER=hashlib.pbkdf2_hmac('sha256',TEST_PASSWORD.encode(),TEST_SALT,NetworkAuthorization.ITERATIONS)
+def authorization(**options):return NetworkAuthorization(salt=TEST_SALT,verifier=TEST_VERIFIER,admin=lambda:True,**options)
 
 class FakeNetwork:
     def __init__(self):self.calls=[];self.release=threading.Event();self.entered=threading.Event();self.block=False;self.pair=False
@@ -33,8 +38,10 @@ class FakeNetwork:
         return dict(confirmed=True,message='已确认')
 
 class NetworkJobsTest(unittest.TestCase):
-    def setUp(self):self.backend=FakeNetwork();self.manager=NetworkManagement(self.backend,grace=0)
-    def call(self,owner='phone',**q):return self.manager.request(q,owner,Error)
+    def setUp(self):
+        self.backend=FakeNetwork();self.manager=NetworkManagement(self.backend,grace=0,authorization=authorization())
+        self.tokens={owner:self.manager.request(dict(action='unlock',password=TEST_PASSWORD),owner,Error)['network_token'] for owner in ('phone','other')}
+    def call(self,owner='phone',**q):return self.manager.request(dict(q,network_token=self.tokens.get(owner)),owner,Error)
     def submit(self,**fields):return self.call(action='submit',area='hotspot',operation='start',confirm=True,**fields)
     def wait(self,ident):
         end=time.monotonic()+4
@@ -107,6 +114,71 @@ class NetworkJobsTest(unittest.TestCase):
         actual=self.call(area='bluetooth',job=result['job']['id'])
         self.assertFalse(actual['snapshot']['supported']);self.assertIn('设备不可用',final['job']['message'])
 
+class NetworkAuthorizationTest(unittest.TestCase):
+    def setUp(self):
+        self.now=1000.;self.backend=FakeNetwork();self.auth=authorization(clock=lambda:self.now)
+        self.manager=NetworkManagement(self.backend,grace=0,authorization=self.auth)
+    def call(self,owner='phone',**q):return self.manager.request(q,owner,Error)
+    def unlock(self,owner='phone'):return self.call(owner,action='unlock',password=TEST_PASSWORD)['network_token']
+    def test_all_inventory_and_mutations_require_a_password_before_creating_jobs(self):
+        self.assertTrue(self.call(action='auth_status')['admin'])
+        for action in ('refresh','scan','status','submit','answer'):
+            with self.subTest(action=action),self.assertRaisesRegex(Error,'NETWORK_AUTH_REQUIRED'):
+                self.call(action=action,operation='start',confirm=True)
+        self.assertFalse(self.manager.jobs);self.assertFalse(self.backend.calls)
+        with self.assertRaisesRegex(Error,'密码错误'):self.call(action='unlock',password='incorrect')
+        token=self.unlock();self.assertEqual(64,len(token))
+        self.assertNotIn(TEST_PASSWORD,str(self.auth.sessions));self.assertNotIn(token,str(self.manager.jobs))
+        result=self.call(action='refresh',network_token=token)
+        self.assertIn('job',result)
+    def test_token_belongs_to_one_phone_expires_and_can_be_revoked(self):
+        token=self.unlock()
+        with self.assertRaisesRegex(Error,'NETWORK_AUTH_REQUIRED'):self.call(owner='other',network_token=token)
+        self.call(owner='other',action='lock',network_token=token);self.call(network_token=token)
+        self.now+=1800
+        with self.assertRaisesRegex(Error,'NETWORK_AUTH_REQUIRED'):self.call(network_token=token)
+        token=self.unlock();self.call(action='lock',network_token=token)
+        with self.assertRaisesRegex(Error,'NETWORK_AUTH_REQUIRED'):self.call(network_token=token)
+        with self.assertRaisesRegex(Error,'NETWORK_AUTH_REQUIRED'):self.call(network_token={'bad':'token'})
+    def test_windows_administrator_is_required_at_login_and_every_request(self):
+        self.auth.admin=lambda:False
+        self.assertFalse(self.call(action='auth_status')['admin'])
+        with self.assertRaisesRegex(Error,'NETWORK_ADMIN_REQUIRED'):self.unlock()
+        self.auth.admin=lambda:True;token=self.unlock();self.auth.admin=lambda:False
+        with self.assertRaisesRegex(Error,'NETWORK_ADMIN_REQUIRED'):self.call(action='refresh',network_token=token)
+        self.assertFalse(self.backend.calls);self.assertFalse(self.manager.jobs)
+    def test_repeated_failures_are_throttled_and_retry_does_not_save_password(self):
+        for _ in range(5):
+            with self.assertRaisesRegex(Error,'密码错误'):self.call(action='unlock',password='incorrect')
+        with self.assertRaisesRegex(Error,'尝试过多'):self.unlock()
+        self.now+=31;token=self.unlock();self.assertEqual(64,len(token))
+        self.assertNotIn(TEST_PASSWORD,str(self.auth.__dict__))
+    def test_unlock_removes_credentials_even_when_validation_fails(self):
+        for password in ('incorrect','',None,{'bad':'value'}):
+            q=dict(action='unlock',password=password)
+            with self.assertRaisesRegex(Error,'密码错误'):self.manager.request(q,'phone',Error)
+            self.assertNotIn('password',q)
+        self.assertFalse(self.auth.sessions);self.assertFalse(self.manager.jobs)
+
+    def test_global_throttle_cannot_be_bypassed_by_random_phone_ids(self):
+        for index in range(30):
+            with self.assertRaisesRegex(Error,'密码错误'):self.call(owner='phone-'+str(index),action='unlock',password='incorrect')
+        with self.assertRaisesRegex(Error,'尝试过多'):self.unlock(owner='new-phone')
+        self.assertFalse(self.auth.sessions);self.now+=61
+        self.assertEqual(64,len(self.unlock(owner='new-phone')))
+
+    def test_expiry_during_a_batch_does_not_cancel_or_repeat_the_windows_job(self):
+        self.backend.block=True;token=self.unlock()
+        query=dict(action='submit',operation='device_batch',area='bluetooth',params=dict(instances=['a','b'],enabled=False),confirm=True,request_id='c'*32)
+        result=self.call(network_token=token,**query);ident=result['job']['id']
+        self.assertTrue(self.backend.entered.wait(1));self.now+=1800
+        with self.assertRaisesRegex(Error,'NETWORK_AUTH_REQUIRED'):self.call(job=ident,network_token=token)
+        self.backend.release.set();token=self.unlock()
+        deadline=time.monotonic()+3
+        while not self.call(job=ident,network_token=token)['job'].get('finished') and time.monotonic()<deadline:time.sleep(.01)
+        again=self.call(network_token=token,**query)
+        self.assertEqual(ident,again['job']['id']);self.assertEqual(1,len(self.backend.calls))
+
 class NetworkValidationTest(unittest.TestCase):
     def test_device_changes_require_exact_instance_boolean_and_current_area(self):
         with self.assertRaises(ValueError):validate('bluetooth','device',dict(instance='device',enabled=1))
@@ -128,6 +200,36 @@ class NetworkValidationTest(unittest.TestCase):
         with mock.patch('network_management.change_state',return_value={}) as change:
             device.set_enabled('bt-1',False)
         self.assertEqual(NETWORK_CLASSES,change.call_args.args[2]);self.assertEqual(2,len(NETWORK_CLASSES))
+    def test_batch_validation_is_bounded_typed_and_rejects_duplicates(self):
+        for values in ([],['a']*2,list(map(str,range(33)))):
+            with self.assertRaises(ValueError):validate('bluetooth','device_batch',dict(instances=values,enabled=False))
+        with self.assertRaises(ValueError):validate('wifi','device_batch',dict(instances=['a'],enabled=1))
+        with self.assertRaises(ValueError):validate('wifi','adapter_batch',dict(adapters=[str(uuid.uuid4())],enabled=True))
+        self.assertEqual(['a','b'],validate('bluetooth','device_batch',dict(instances=['a','b'],enabled=False))['instances'])
+        self.assertEqual(['02:21:32:43:54:65'],validate('hotspot','client_access_batch',dict(addresses=['022132435465'],blocked=True))['addresses'])
+    def test_device_batch_reads_once_continues_after_failure_and_keeps_exact_results(self):
+        backend=WindowsNetwork();backend.hw=mock.Mock()
+        backend.hardware=mock.Mock(return_value=[dict(id='bt-a',kind='bluetooth',name='A',enabled=True,problem=0),
+            dict(id='bt-b',kind='bluetooth',name='B',enabled=True,problem=0),dict(id='net-x',kind='net',enabled=True,problem=0)])
+        backend.hw.set_enabled.side_effect=[OSError('driver rejected A'),{}]
+        backend.hw.status.return_value=dict(enabled=False,problem=22)
+        with mock.patch('network_management.ctypes_admin',return_value=True):
+            result=backend.perform('bluetooth','device_batch',dict(instances=['bt-a','bt-b','net-x','missing'],enabled=False),None)
+        self.assertFalse(result['confirmed']);self.assertEqual([False,True,False,False],[r['confirmed'] for r in result['items']])
+        self.assertEqual(['bt-a','bt-b'],[c.args[0] for c in backend.hw.set_enabled.call_args_list]);backend.hardware.assert_called_once()
+    def test_adapter_batch_confirms_real_state_and_continues_after_a_driver_failure(self):
+        backend=WindowsNetwork();a,b,c=[str(uuid.uuid4()) for _ in range(3)]
+        items=[dict(id=x,name=x,status='Up') for x in (a,b,c)]
+        def run(q):
+            if q['operation']=='status':return dict(adapters=items)
+            if q['adapter']==a:raise OSError('refused')
+            if q['adapter']==b:items[1]['status']='Disabled'
+            return {}
+        backend.run=mock.Mock(side_effect=run)
+        with mock.patch('network_management.ctypes_admin',return_value=True):
+            result=backend.perform('adapters','adapter_batch',dict(adapters=[a,b,c],enabled=False),None)
+        self.assertEqual([False,True,False],[r['confirmed'] for r in result['items']]);self.assertFalse(result['confirmed'])
+
     def test_profile_xml_escapes_credentials_and_uses_exact_ssid_bytes(self):
         ssid='办公<&WiFi'.encode().hex();secret='test<&password'
         xml=profile_xml(ssid,'办公<&WiFi',7,secret)

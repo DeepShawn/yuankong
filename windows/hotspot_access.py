@@ -274,7 +274,12 @@ class HotspotAccess:
                 message='已选择热点网卡：'+chosen['name'] if chosen else '已恢复自动识别；'+discovered['notice'])
 
     def change(self,mac,blocked,snapshot):
-        mac=address(mac)
+        return self.change_many([mac],blocked,snapshot)
+
+    def change_many(self,macs,blocked,snapshot):
+        if not isinstance(macs,list) or not 1<=len(macs)<=32 or type(blocked) is not bool:raise ValueError('请选择 1–32 台客户端及目标状态')
+        macs=[address(mac) for mac in macs]
+        if len(set(macs))!=len(macs):raise ValueError('客户端不能重复')
         with self.lock:
             desired=set(self.blocked)
             if blocked:
@@ -283,11 +288,11 @@ class HotspotAccess:
                 for item in snapshot.get('clients',[]):
                     try:connected.add(address(item['address']))
                     except (KeyError,ValueError):continue
-                if mac not in connected:raise ValueError('该 MAC 当前未连接此热点，请刷新后重新选择')
-                desired.add(mac)
+                if not set(macs)<=connected:raise ValueError('所选 MAC 当前未连接此热点，请刷新后重新选择')
+                desired.update(macs)
                 if len(desired)>64:raise ValueError('热点限制最多保留 64 台设备')
             else:
-                desired.discard(mac)
+                desired.difference_update(macs)
                 try:interface=self.private(snapshot)
                 except ValueError:interface=None
             entries=[dict(address=value,interface=interface['id']) for value in sorted(desired)] if interface else []
@@ -301,4 +306,5 @@ class HotspotAccess:
                     self.applied=[]
                 raise
             self.blocked=desired;self.interface=interface;self.load_error=self.error=''
-            return dict(confirmed=True,message='已安装指定客户端的禁止联网规则，Wi-Fi 可能仍显示已连接' if blocked else '已移除指定客户端的联网限制')
+            return dict(confirmed=True,items=[dict(id=mac,name=mac,confirmed=True,message='已禁止联网' if blocked else '已恢复联网') for mac in macs],
+                message=f'已禁止 {len(macs)} 台客户端联网，Wi-Fi 可能仍显示已连接' if blocked else f'已移除 {len(macs)} 台客户端的联网限制')

@@ -17,12 +17,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "LanCmd"
             VALUE "FileDescription",  "LanCmd 局域网命令接收端"
-            VALUE "FileVersion",      "3.8.1.0"
+            VALUE "FileVersion",      "3.9.0.0"
             VALUE "InternalName",     "LanCmdAgent"
             VALUE "LegalCopyright",   "LanCmd"
             VALUE "OriginalFilename", "LanCmdAgent.exe"
             VALUE "ProductName",      "LanCmd"
-            VALUE "ProductVersion",   "3.8.1.0"
+            VALUE "ProductVersion",   "3.9.0.0"
         END
     END
     BLOCK "VarFileInfo"
