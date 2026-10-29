@@ -119,6 +119,19 @@ class CursorTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'not verified'):control.set_hidden('phone',True,lambda:True)
         self.assertTrue(worker.closed);self.assertIsNone(control.worker);self.assertFalse(control.owners)
 
+    def test_custom_white_cursor_is_not_mistaken_for_transparency_and_must_be_replaced(self):
+        native=NativeCursors.__new__(NativeCursors)
+        native.blank=101;native.native_error=None;native.reapply_at=time.monotonic()+100
+        native.reference=(32,64,4,b'\xff'*128+b'\0'*128)
+        # Swapping AND and XOR makes a solid white cursor, not a hidden one.
+        native._mask=mock.Mock(return_value=(32,64,4,b'\0'*128+b'\xff'*128))
+        self.assertFalse(native.transparent(999))
+        native.user=SimpleNamespace(SetCursor=mock.Mock())
+        native._current=mock.Mock(side_effect=[SimpleNamespace(flags=1,cursor=999),SimpleNamespace(flags=1,cursor=101)])
+        self.assertTrue(native.refresh());native.user.SetCursor.assert_called_once_with(101)
+        native._current=mock.Mock(return_value=SimpleNamespace(flags=1,cursor=999))
+        with self.assertRaisesRegex(RuntimeError,'未确认隐藏'):native.refresh()
+
 
 @unittest.skipUnless(os.name=='nt','Requires Windows cursor bitmap and recovery APIs')
 class NativeCursorTest(unittest.TestCase):
@@ -130,6 +143,20 @@ class NativeCursorTest(unittest.TestCase):
             self.assertTrue(native.transparent(native._load(32512)))
             current=native._current()
             if current.flags & 1:self.assertTrue(native.transparent(current.cursor))
+            import ctypes
+            mask=(ctypes.c_ubyte*128)()
+            white=(ctypes.c_ubyte*128)(*([255]*128))
+            custom=native.user.CreateCursor(None,0,0,32,32,mask,white)
+            self.assertTrue(custom)
+            try:
+                self.assertFalse(native.transparent(custom), 'A solid white custom cursor must stay distinguishable')
+                native.user.SetCursor(custom)
+                self.assertTrue(native.refresh())
+                current=native._current()
+                if current.flags & 1:self.assertTrue(native.transparent(current.cursor))
+            finally:
+                native.user.SetCursor(native.blank)
+                native.user.DestroyCursor(custom)
             self.assertTrue(native.user.SystemParametersInfoW(0x57,0,None,0))
             native.reapply_at=0
             self.assertTrue(native.refresh())

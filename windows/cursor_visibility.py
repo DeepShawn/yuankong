@@ -53,6 +53,7 @@ class NativeCursors:
         self.native_error = None
         self.reapply_at = 0
         self.replacing = False
+        self.reference = None
 
     def _blank(self):
         and_mask = (ctypes.c_ubyte * 128)(*([255] * 128))
@@ -91,8 +92,11 @@ class NativeCursors:
     def transparent(self, handle):
         if handle == self.blank and handle:
             return True
+        return self.reference is not None and self._mask(handle) == self.reference
+
+    def _mask(self, handle):
         if not handle or self.gdi is None:
-            return False
+            return None
         from ctypes import wintypes as w
         gdi = self.gdi
         gdi.GetObjectW.argtypes = [w.HANDLE, ctypes.c_int, ctypes.c_void_p]
@@ -101,22 +105,20 @@ class NativeCursors:
         gdi.DeleteObject.argtypes = [w.HANDLE]
         icon = self.IconInfo()
         if not self.user.GetIconInfo(handle, ctypes.byref(icon)):
-            return False
+            return None
         try:
             if icon.color or not icon.mask:
-                return False
+                return None
             bitmap = self.Bitmap()
             if not gdi.GetObjectW(icon.mask, ctypes.sizeof(bitmap), ctypes.byref(bitmap)):
-                return False
+                return None
             size = bitmap.stride * bitmap.height
             if bitmap.depth != 1 or bitmap.height % 2 or not 0 < size <= 1024 * 1024:
-                return False
+                return None
             payload = (ctypes.c_ubyte * size)()
             if gdi.GetBitmapBits(icon.mask, size, payload) != size:
-                return False
-            bits = bytes(payload); half = size // 2
-            return (bits[:half] == b'\xff' * half and bits[half:] == b'\0' * half or
-                    bits[:half] == b'\0' * half and bits[half:] == b'\xff' * half)
+                return None
+            return bitmap.width, bitmap.height, bitmap.stride, bytes(payload)
         finally:
             if icon.mask:gdi.DeleteObject(icon.mask)
             if icon.color:gdi.DeleteObject(icon.color)
@@ -144,6 +146,9 @@ class NativeCursors:
 
     def hide(self):
         self.blank = self._blank()
+        self.reference = self._mask(self.blank)
+        if self.real and self.reference is None:
+            raise RuntimeError('Windows 无法校验透明光标位图')
         self._install_hook()
         self._replace()
         self.refresh()
