@@ -1,6 +1,8 @@
 package com.aicode.lancmd
 
 import android.os.Bundle
+import android.net.Uri
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.*
 import com.aicode.lancmd.net.AgentClient
@@ -9,6 +11,8 @@ import com.aicode.lancmd.net.FileTransfer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /** User-supplied ZIPs only. Rebind after an upgrade only to the same computer. */
@@ -18,7 +22,15 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
     private var current by mutableStateOf("")
     private var currentBuild = ""
     private var report by mutableStateOf("")
-    private var busy by mutableStateOf(false)
+    internal var busy by mutableStateOf(false)
+    internal var uploading by mutableStateOf(false)
+    private var picking by mutableStateOf(false)
+    private var uploadProgress by mutableStateOf<FileTransfer.Progress?>(null)
+    private var uploadJob:Job?=null
+    private val pickPackage=registerForActivityResult(ActivityResultContracts.OpenDocument()) {uri ->
+        picking=false
+        if(uri!=null)uploadPackage(uri) else status("已取消选择升级包")
+    }
     private var selected by mutableStateOf<JSONObject?>(null)
     internal var restarting by mutableStateOf(false)
     private var owner:AgentClient?=null
@@ -40,13 +52,23 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
         targetVersion=state?.getString("target_version").orEmpty();requestId=state?.getString("request_id").orEmpty()
         current=state?.getString("current").orEmpty();directory=state?.getString("directory").orEmpty()
         currentBuild=state?.getString("current_build") ?: current
+        picking=state?.getBoolean("picking") ?: false
         content {
             ListPage("Windows 本地升级") {
-                item {SectionCard("手动放入升级包") {
+                item {SectionCard("本地 Windows 升级包") {
                     InfoItem("接收端版本",current)
                     InfoItem("电脑上的 upgrade 文件夹",directory.ifBlank{"正在读取…"})
-                    Note("将完整的新版本 Windows ZIP 放入此文件夹，再刷新列表。仅使用本机文件，不下载升级包。")
-                    Action("刷新本地升级包",enabled=!busy && !restarting){refresh()}
+                    Note("直接选择手机里的完整 Windows ZIP，上传到电脑 upgrade 文件夹；也可手动放入后刷新。上传完成后再校验并安装。")
+                    Action("选择并上传 ZIP",enabled=!busy && !restarting && !picking,primary=true){choosePackage()}
+                    Action("刷新本地升级包",enabled=!busy && !restarting && !picking){refresh()}
+                    if(uploading) {
+                        uploadProgress?.let {p ->
+                            Note("正在上传 · ${p.percent}% · ${FileTransfer.humanSize(p.done)} / ${FileTransfer.humanSize(p.total)}")
+                            Progress(p.percent/100f)
+                        }
+                        Action("取消上传"){uploadJob?.cancel()}
+                    }
+                    Note("仅上传所选本地文件，不在线下载。新版确认启动后自动清理已用和旧版升级 ZIP，失败包及回退备份保留。")
                     if(report.isNotBlank())Note(report)
                     if(restarting) {
                         Note("更新会先断开连接，退出旧接收端，再解压替换并运行 start.bat；启动 CMD 自动退出。手机会等待原电脑重新连接并显示结果。")
@@ -56,14 +78,59 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
                 if(packages.isEmpty() && !restarting)item{EmptyNote("尚未发现 ZIP 升级包")}
                 items(packages,key={it.optString("name")}) {item ->SectionCard {
                     InfoItem(item.optString("name"),FileTransfer.humanSize(item.optLong("size"))+"\nSHA256: "+item.optString("sha256"))
-                    Action("校验并安装",enabled=!busy && !restarting && item.optString("sha256").length==64,primary=true){selected=item}
+                    Action("校验并安装",enabled=!busy && !restarting && !picking && item.optString("sha256").length==64,primary=true){selected=item}
                 }}
             }
             selected?.let {item ->ConfirmAction("安装本地 Windows 升级包？",item.optString("name")+
                 "\n先校验完整包并尝试解冻应用，然后断开当前连接、退出旧接收端，解压替换原目录并自动运行 start.bat，启动 CMD 自动退出。\n录制、传输、脚本和延迟任务须先完成或取消。失败时尝试回退，请保留备份。",
                 confirm="开始升级",onDismiss={selected=null},onConfirm={selected=null;install(item)})}
         }
-        if(restarting)watchUpgrade() else refresh()
+        if(restarting)watchUpgrade() else if(!picking)refresh()
+    }
+
+    internal fun choosePackage() {
+        if(busy || restarting || picking)return
+        picking=true
+        try {pickPackage.launch(arrayOf("application/zip","application/x-zip-compressed","application/octet-stream"))}
+        catch(e:Exception){picking=false;status(e.message ?: "无法打开文件选择器",true)}
+    }
+
+    internal fun uploadPackage(uri:Uri) {
+        if(busy || restarting)return
+        busy=true;uploading=true;uploadProgress=null
+        uploadJob=task {try {
+            val source=owner ?: error("请先连接电脑")
+            check(sameComputer(source)){"电脑已切换，请重新打开本地升级页；未上传到新电脑"}
+            val name=withContext(Dispatchers.IO){FileTransfer.displayName(this@UpgradeActivity,uri)}
+            check(validUpgradeZipName(name)){"请选择文件名有效的 .zip 升级包"}
+            val latest=pinnedCall(source,"upgrade",timeout=60_000)
+            showReport(latest)
+            check(directory.isNotBlank()){"电脑未返回 upgrade 文件夹，请刷新后重试"}
+            var uploadedName=name
+            suspend fun send()=FileTransfer.uploadRevision(this@UpgradeActivity,uri,
+                directory.trimEnd('\\','/')+"\\"+uploadedName,source,{p ->runOnUiThread{if(!isDestroyed)uploadProgress=p}},
+                maxBytes=512L*1024*1024,overwrite=false)
+            val uploaded=try {send()} catch(e:java.io.IOException) {
+                if(e.message?.startsWith("目标已存在:")!=true)throw e
+                uploadedName=name.dropLast(4).take(210)+"-"+java.util.UUID.randomUUID().toString().take(8)+".zip"
+                status("同名升级包已保留，另存为 $uploadedName")
+                send()
+            }
+            val result=pinnedCall(source,"upgrade",timeout=60_000)
+            renderPackages(result)
+            // Older receivers return only the first five directory entries.
+            // Keep the completed upload selectable even when their list omits it.
+            val item=JSONObject().put("name",uploadedName).put("size",uploaded.optLong("size"))
+                .put("sha256",uploaded.optString("sha256"))
+            packages=listOf(item)+packages.filter{it.optString("name")!=uploadedName}.take(4)
+            status("上传完成：$uploadedName；请选择「校验并安装」")
+        }catch(e:CancellationException){status("上传已取消，未完成文件已请求清理");throw e}
+        finally{uploading=false;busy=false;uploadProgress=null}}
+    }
+
+    private fun renderPackages(result:JSONObject) {
+        val list=result.getJSONArray("items");packages=(0 until list.length()).map{list.getJSONObject(it)}
+        showReport(result)
     }
 
     private fun showReport(result:JSONObject):String {
@@ -85,6 +152,10 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
         }
         report=label+job.optString("error").takeIf{it.isNotBlank()}.let{if(it==null)"" else "\n$it"}+
             job.optString("backup").takeIf{it.isNotBlank()}.let{if(it==null)"" else "\n备份：$it"}
+        job.optJSONObject("cleanup")?.let {cleanup ->
+            report+=if(cleanup.optString("status")=="running")"\n正在后台清理旧升级 ZIP" else "\n升级 ZIP 清理：${cleanup.optInt("deleted")} 个"+
+                if(cleanup.optInt("failed")>0)"；${cleanup.optInt("failed")} 个未清理，可稍后手动处理" else ""
+        }
         return phase
     }
 
@@ -93,8 +164,7 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
         busy=true
         task {try {
             val result=pinnedCall(owner,"upgrade",timeout=60_000)
-            val list=result.getJSONArray("items");packages=(0 until list.length()).map{list.getJSONObject(it)}
-            showReport(result);status("已读取 ${packages.size} 个本地 ZIP")
+            renderPackages(result);status("已读取 ${packages.size} 个本地 ZIP")
         }finally{busy=false}}
     }
 
@@ -175,6 +245,11 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
         state.putBoolean("restarting",restarting);state.putString("target_version",targetVersion);state.putString("request_id",requestId)
         state.putString("current",current);state.putString("directory",directory)
         state.putString("current_build",currentBuild)
+        state.putBoolean("picking",picking)
         super.onSaveInstanceState(state)
     }
 }
+
+internal fun validUpgradeZipName(name:String):Boolean = name.length in 5..255 && name.endsWith(".zip",true) &&
+    name.none{it.code<32 || it in "\\/:*?\"<>|"} &&
+    !Regex("(?i)^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\.|$)").containsMatchIn(name)

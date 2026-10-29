@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -96,6 +97,55 @@ class UpgradeDisconnectTest(unittest.TestCase):
             with mock.patch.object(agent,'PID_PATH',str(path)):
                 agent.cleanup_pid();self.assertTrue(path.exists())
                 path.write_text(str(os.getpid()));agent.cleanup_pid();self.assertFalse(path.exists())
+
+
+class UpgradeCleanupTest(unittest.TestCase):
+    def setUp(self):
+        self.fixture=fixtures.UpgradeTest();self.fixture.setUp();self.addCleanup(self.fixture.doCleanups)
+        self.root=self.fixture.root/'installed';self.root.mkdir();(self.root/'upgrade').mkdir()
+        self.work=self.root/'.upgrade/run-test';self.work.mkdir(parents=True)
+        (self.work/'backup').mkdir();(self.work/'backup/notes.txt').write_text('recovery')
+        self.package=self.root/'upgrade/used.zip';shutil.copyfile(self.fixture.zip,self.package)
+        shutil.copyfile(self.fixture.zip,self.work/'package.zip')
+        self.state=self.fixture.root/'state';self.state.mkdir()
+        self.manager=upgrade.LocalUpgrade(self.root,self.state,'3.4.0')
+        self.report=dict(status='starting',version='3.4.0',pid=os.getpid(),request_id='a'*32,backup=str(self.work/'backup'))
+    def save(self):upgrade.write_json(self.state/'upgrade-status.json',self.report)
+    def test_only_verified_used_and_older_archives_are_removed_not_backups_future_or_damaged_files(self):
+        future=self.root/'upgrade/future.zip'
+        upgrade.build_manifest(self.fixture.package,'3.4.1');self.fixture.archive();shutil.copyfile(self.fixture.zip,future)
+        damaged=self.root/'upgrade/damaged.zip'
+        (self.fixture.package/'Start.exe').write_bytes(b'wrong content');self.fixture.archive();shutil.copyfile(self.fixture.zip,damaged)
+        unrelated=self.root/'upgrade/photos.zip';unrelated.write_bytes(b'photos, not a release')
+        result=upgrade.cleanup_packages(self.root,self.work,'3.4.0')
+        self.assertEqual(2,result['deleted']);self.assertFalse(self.package.exists());self.assertFalse((self.work/'package.zip').exists())
+        for path in (future,damaged,unrelated,self.work/'backup/notes.txt'):self.assertTrue(path.exists(),str(path))
+    def test_cleanup_waits_for_completed_report_of_this_healthy_process(self):
+        self.save();thread=self.manager.cleanup_after_start(self.work/'healthy.json',timeout=2)
+        time.sleep(.05);self.assertTrue(self.package.exists())
+        self.report['status']='completed';self.save();thread.join(3)
+        self.assertFalse(thread.is_alive());self.assertFalse(self.package.exists())
+        final=json.loads((self.state/'upgrade-status.json').read_text())
+        self.assertEqual('completed',final['status']);self.assertEqual(2,final['cleanup']['deleted'])
+    def test_failed_or_another_process_update_keeps_all_packages(self):
+        for phase,pid in [('rolled_back',os.getpid()),('completed',os.getpid()+1)]:
+            with self.subTest(phase=phase):
+                self.report.update(status=phase,pid=pid);self.save()
+                thread=self.manager.cleanup_after_start(self.work/'healthy.json',timeout=.1);thread.join(1)
+                self.assertFalse(thread.is_alive());self.assertTrue(self.package.exists())
+    def test_outside_workspace_and_changed_job_cannot_trigger_cleanup(self):
+        self.assertIsNone(self.manager.cleanup_after_start(self.fixture.root/'healthy.json'))
+        result=upgrade.cleanup_packages(self.root,self.work,'3.4.0',allowed=lambda:False)
+        self.assertEqual(0,result['deleted']);self.assertTrue(self.package.exists())
+    def test_files_replaced_during_validation_are_not_removed(self):
+        if os.name=='nt':
+            with upgrade.cleanup_archive(self.package):
+                with self.assertRaises(OSError):os.replace(self.work/'package.zip',self.package)
+        else:
+            with upgrade.cleanup_archive(self.package) as (_,remove):
+                os.replace(self.work/'package.zip',self.package)
+                with self.assertRaisesRegex(ValueError,'已变化'):remove()
+        self.assertTrue(self.package.exists())
 
 
 @unittest.skipUnless(os.name=="nt","Windows exclusive listener rebinding")

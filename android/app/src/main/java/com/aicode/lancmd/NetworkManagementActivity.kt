@@ -22,6 +22,8 @@ import java.util.UUID
 class NetworkManagementActivity : MiuixActivity() {
     internal var area by mutableStateOf("hotspot")
     internal var supported by mutableStateOf(false)
+    private var hardwareSupported by mutableStateOf(false)
+    private var devicesExpanded by mutableStateOf(false)
     internal var busy by mutableStateOf(false)
     internal var job by mutableStateOf<JSONObject?>(null)
     internal val snapshots = mutableStateMapOf<String, JSONObject>()
@@ -76,6 +78,7 @@ class NetworkManagementActivity : MiuixActivity() {
                         snapshots[area]?.optString("error")?.takeIf{it.isNotBlank()}?.let{Note(it)}
                     }}
                     val snapshot=snapshots[area] ?: JSONObject()
+                    item {HardwareControls(snapshot)}
                     when(area) {
                         "hotspot" -> {
                             item {HotspotControls(snapshot)}
@@ -180,6 +183,7 @@ class NetworkManagementActivity : MiuixActivity() {
         task {
             val caps=pinnedCall(owner,"capabilities").optJSONArray("features")
             supported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="network_management"}
+            hardwareSupported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="network_device_state"}
             if(!supported){status("请完整更新 Windows 接收端后使用网络与蓝牙",true);return@task}
             if(pendingArea.isNotBlank())watchPending() else refresh()
         }
@@ -216,6 +220,32 @@ class NetworkManagementActivity : MiuixActivity() {
                 }
             }
             if(snapshot.has("radios") && snapshot.rows("radios").isEmpty())Note("没有可由 Windows 管理的无线开关")
+        }
+    }
+
+    @Composable private fun HardwareControls(snapshot:JSONObject) {
+        SectionCard(if(area=="bluetooth")"蓝牙设备级启停" else "电脑网络设备级启停") {
+            if(!hardwareSupported)Note("设备级启停需完整更新并重启 Windows 接收端")
+            else {
+                Action(if(devicesExpanded)"收起设备级启停" else "展开设备级启停"){devicesExpanded=!devicesExpanded}
+                if(devicesExpanded) {
+                Note("停用会使设备停止工作并可能断开当前连接，需要电脑管理员权限。停用后可在此启用；这与关闭无线开关不同。")
+                snapshot.rows("hardware").forEach {device ->
+                    InfoItem(device.optString("name").ifBlank{device.optString("id")},
+                        "${if(device.optInt("problem")==22)"已停用" else if(device.optBoolean("enabled"))"已启用" else "状态异常"} · 驱动代码 ${device.optInt("problem")}\n${device.optString("error")}")
+                    val valid=device.optInt("problem",-1) in listOf(0,22) && device.optString("error").isBlank()
+                    ActionRow {
+                        Action("启用设备",enabled=canChange() && valid,modifier=Modifier.weight(1f)) {
+                            ask("device",JSONObject().put("instance",device.optString("id")).put("enabled",true),"启用 ${device.optString("name")}。")
+                        }
+                        Action("停用设备",enabled=canChange() && valid,modifier=Modifier.weight(1f)) {
+                            ask("device",JSONObject().put("instance",device.optString("id")).put("enabled",false),"停用 ${device.optString("name")}，相关网络或蓝牙设备将断开；若用于当前连接，可能需要在电脑端重新启用。")
+                        }
+                    }
+                }
+                snapshot.optString("hardware_error").takeIf{it.isNotBlank()}?.let{Note(it)}
+                }
+            }
         }
     }
 

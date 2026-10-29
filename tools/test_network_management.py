@@ -15,7 +15,7 @@ import xml.etree.ElementTree as E
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'windows'))
 from native_wifi import NativeWifi, Guid, Interface, Available, Profile, ConnectionParameters, profile_xml
-from network_management import NetworkManagement, WindowsNetwork, validate
+from network_management import NetworkManagement, WindowsNetwork, NetworkHardware, NETWORK_CLASSES, validate
 
 class Error(Exception):pass
 
@@ -108,6 +108,26 @@ class NetworkJobsTest(unittest.TestCase):
         self.assertFalse(actual['snapshot']['supported']);self.assertIn('设备不可用',final['job']['message'])
 
 class NetworkValidationTest(unittest.TestCase):
+    def test_device_changes_require_exact_instance_boolean_and_current_area(self):
+        with self.assertRaises(ValueError):validate('bluetooth','device',dict(instance='device',enabled=1))
+        backend=WindowsNetwork();backend.hw=mock.Mock()
+        backend.hardware=mock.Mock(return_value=[dict(id='net-1',kind='net',enabled=True,problem=0)])
+        with mock.patch('network_management.ctypes_admin',return_value=True):
+            with self.assertRaisesRegex(ValueError,'当前分类'):backend.perform('bluetooth','device',dict(instance='net-1',enabled=False),None)
+            backend.hw.set_enabled.assert_not_called()
+            backend.hw.status.return_value=dict(enabled=False,problem=22)
+            result=backend.perform('wifi','device',dict(instance='net-1',enabled=False),None)
+        self.assertTrue(result['confirmed']);backend.hw.set_enabled.assert_called_once_with('net-1',False)
+    def test_device_changes_never_auto_elevate_or_target_usb_parent_classes(self):
+        backend=WindowsNetwork();backend.hw=mock.Mock()
+        backend.hardware=mock.Mock(return_value=[dict(id='bt-1',kind='bluetooth',enabled=True,problem=0)])
+        with mock.patch('network_management.ctypes_admin',return_value=False),self.assertRaisesRegex(ValueError,'管理员'):
+            backend.perform('bluetooth','device',dict(instance='bt-1',enabled=False),None)
+        backend.hw.set_enabled.assert_not_called()
+        device=NetworkHardware.__new__(NetworkHardware)
+        with mock.patch('network_management.change_state',return_value={}) as change:
+            device.set_enabled('bt-1',False)
+        self.assertEqual(NETWORK_CLASSES,change.call_args.args[2]);self.assertEqual(2,len(NETWORK_CLASSES))
     def test_profile_xml_escapes_credentials_and_uses_exact_ssid_bytes(self):
         ssid='办公<&WiFi'.encode().hex();secret='test<&password'
         xml=profile_xml(ssid,'办公<&WiFi',7,secret)
@@ -154,6 +174,12 @@ class NetworkTransportTest(unittest.TestCase):
 
 @unittest.skipUnless(os.name=='nt','Requires real Windows WLAN and WinRT metadata')
 class NativeNetworkTest(unittest.TestCase):
+    def test_native_network_and_bluetooth_inventory_is_read_only_and_has_real_problem_codes(self):
+        items=WindowsNetwork().hardware()
+        self.assertIsInstance(items,list)
+        for item in items:
+            self.assertIn(item['kind'],('net','bluetooth'));self.assertIsInstance(item['id'],str)
+            self.assertIsInstance(item['problem'],int)
     def test_native_wlan_structures_match_windows_abi_and_service_errors_are_explicit(self):
         self.assertEqual([16,532,628,516,40],[ctypes.sizeof(t) for t in (Guid,Interface,Available,Profile,ConnectionParameters)])
         try:result=NativeWifi().status()

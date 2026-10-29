@@ -201,7 +201,11 @@ function Adapter-Status {
 }
 
 try {
-    if($request.area -eq 'adapters') {
+    if($request.area -eq 'hardware') {
+        $data=@{devices=@(Get-PnpDevice -PresentOnly -ErrorAction Stop | Where-Object {$_.Class -in @('Net','Bluetooth')} | ForEach-Object {
+            @{id=[string]$_.InstanceId;name=[string]$_.FriendlyName;kind=if($_.Class -eq 'Net'){'net'}else{'bluetooth'}}
+        })}
+    } elseif($request.area -eq 'adapters') {
         if($request.operation -ne 'status') {
             $adapter=@(Get-NetAdapter | Where-Object {$_.InterfaceGuid.ToString() -eq $request.adapter})
             if($adapter.Count -ne 1){throw '网卡已变化，请刷新并重新选择'}

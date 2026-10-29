@@ -1,7 +1,17 @@
 package com.aicode.lancmd
 
 import android.app.Application
+import android.app.Activity
+import android.content.ContentProvider
+import android.content.ContentValues
+import android.content.Intent
+import android.content.pm.ProviderInfo
+import android.database.Cursor
+import android.database.MatrixCursor
+import android.net.Uri
 import android.os.Looper
+import android.os.ParcelFileDescriptor
+import android.provider.OpenableColumns
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -19,6 +29,8 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.ConscryptMode
+import org.robolectric.shadows.ShadowContentResolver
+import java.io.File
 import java.io.Closeable
 import java.io.IOException
 import java.net.ServerSocket
@@ -110,24 +122,120 @@ class UpgradeUiTest {
             }
         }
     }
-    private class Stub(val identity:String="same-pc",val version:String="3.4.1",phase:String="",val dropApplyReply:Boolean=false,buildVersion:String?=null,val targetVersion:String="3.4.2"):Closeable {
+
+    private fun document(name:String="LanCmd-Windows-new.zip"):Uri {
+        val app=RuntimeEnvironment.getApplication()
+        val source=File(app.cacheDir,"selected-upgrade.zip").apply{writeBytes(byteArrayOf(80,75,3,4)+ByteArray(32768){42})}
+        val provider=object:ContentProvider() {
+            override fun onCreate()=true
+            override fun getType(uri:Uri)="application/zip"
+            override fun query(uri:Uri,projection:Array<out String>?,selection:String?,selectionArgs:Array<out String>?,sortOrder:String?):Cursor =
+                MatrixCursor(arrayOf(OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE)).apply{addRow(arrayOf(name,source.length()))}
+            override fun openFile(uri:Uri,mode:String)=ParcelFileDescriptor.open(source,ParcelFileDescriptor.MODE_READ_ONLY)
+            override fun insert(uri:Uri,values:ContentValues?):Uri?=null
+            override fun delete(uri:Uri,selection:String?,selectionArgs:Array<out String>?)=0
+            override fun update(uri:Uri,values:ContentValues?,selection:String?,selectionArgs:Array<out String>?)=0
+        }
+        provider.attachInfo(app,ProviderInfo().apply{authority="upgrade-upload"})
+        ShadowContentResolver.registerProviderInternal("upgrade-upload",provider)
+        return Uri.parse("content://upgrade-upload/local.zip")
+    }
+
+    @Test fun upgradePagePicksAndUploadsZipThenRefreshesWithoutAutomaticallyInstalling() {
+        Stub().use {stub ->
+            stub.install();val c=Robolectric.buildActivity(UpgradeActivity::class.java).setup();val page=c.get()
+            try {
+                waitFor{page.note.startsWith("已读取")}
+                compose.onNodeWithText("选择并上传 ZIP").performSemanticsAction(SemanticsActions.OnClick){it()}
+                val picker=shadowOf(page).nextStartedActivityForResult
+                assertEquals(Intent.ACTION_OPEN_DOCUMENT,picker.intent.action)
+                shadowOf(page).receiveResult(picker.intent,Activity.RESULT_OK,Intent().setData(document()))
+                waitFor{!page.busy && page.note.contains("上传完成")}
+                val begin=stub.requests.single{it.optString("cmd")=="upload" && it.optString("action")=="begin"}
+                assertEquals("C:\\LanCmd\\upgrade\\LanCmd-Windows-new.zip",begin.getString("path"))
+                assertFalse(begin.getBoolean("overwrite"))
+                assertTrue(stub.uploaded);assertFalse(stub.requests.any{it.optString("action")=="apply"})
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("LanCmd-Windows-new.zip"))
+                compose.onNodeWithText("LanCmd-Windows-new.zip").assertExists()
+            }finally{c.pause().stop().destroy()}
+        }
+    }
+
+    @Test fun existingPackageIsKeptAndTheNewUploadUsesAnotherName() {
+        Stub(collision=true).use {stub ->
+            stub.install();val c=Robolectric.buildActivity(UpgradeActivity::class.java).setup();val page=c.get()
+            try {
+                waitFor{!page.busy && page.note.startsWith("已读取")};page.uploadPackage(document())
+                waitFor{!page.busy && page.note.contains("上传完成")}
+                val begins=stub.requests.filter{it.optString("cmd")=="upload" && it.optString("action")=="begin"}
+                assertEquals(2,begins.size);assertNotEquals(begins[0].getString("path"),begins[1].getString("path"))
+                assertTrue(begins.none{it.optBoolean("overwrite",true)})
+            }finally{c.pause().stop().destroy()}
+        }
+    }
+
+    @Test fun failedUploadAbortsItsPartialFileAndNeverStartsInstallation() {
+        Stub(failChunk=true).use {stub ->
+            stub.install();val c=Robolectric.buildActivity(UpgradeActivity::class.java).setup();val page=c.get()
+            try {
+                waitFor{!page.busy && page.note.startsWith("已读取")};page.uploadPackage(document())
+                waitFor{!page.busy && page.note.contains("磁盘写入失败")}
+                assertTrue(stub.requests.any{it.optString("cmd")=="upload" && it.optString("action")=="abort"})
+                assertFalse(stub.uploaded);assertFalse(stub.requests.any{it.optString("action")=="apply"})
+            }finally{c.pause().stop().destroy()}
+        }
+    }
+
+    @Test fun changingComputerWhileThePickerIsOpenNeverUploadsToTheReplacement() {
+        Stub().use {old ->Stub(identity="other-pc").use {other ->
+            old.install();val c=Robolectric.buildActivity(UpgradeActivity::class.java).setup();val page=c.get()
+            try {
+                waitFor{!page.busy && page.note.startsWith("已读取")};other.install();page.uploadPackage(document())
+                waitFor{!page.busy && page.note.contains("电脑已切换")}
+                assertTrue(other.requests.isEmpty());assertFalse(old.requests.any{it.optString("cmd")=="upload"})
+            }finally{c.pause().stop().destroy()}
+        }}
+    }
+
+    @Test fun pathLikeProviderNamesAreRejectedBeforeAnyUpload() {
+        Stub().use {stub ->
+            stub.install();val c=Robolectric.buildActivity(UpgradeActivity::class.java).setup();val page=c.get()
+            try {
+                waitFor{!page.busy && page.note.startsWith("已读取")};page.uploadPackage(document("../outside.zip"))
+                waitFor{!page.busy && page.note.contains("文件名有效")}
+                assertFalse(stub.requests.any{it.optString("cmd")=="upload"})
+            }finally{c.pause().stop().destroy()}
+        }
+    }
+
+    private class Stub(val identity:String="same-pc",val version:String="3.4.1",phase:String="",val dropApplyReply:Boolean=false,buildVersion:String?=null,val targetVersion:String="3.4.2",val collision:Boolean=false,val failChunk:Boolean=false):Closeable {
         @Volatile var phase=phase
         @Volatile var buildVersion=buildVersion
         val server=ServerSocket(0);val client=AgentClient("127.0.0.1",server.localPort)
         val requests=CopyOnWriteArrayList<JSONObject>()
         @Volatile var requestId=""
         @Volatile var reportId=""
+        @Volatile var uploaded=false
+        private var uploadName="";private var begins=0
         val thread=Thread {
             try{server.accept().use {socket ->
                 val input=socket.getInputStream().bufferedReader();val output=socket.getOutputStream().bufferedWriter()
                 while(true){val q=JSONObject(input.readLine()?:break);val result=JSONObject().put("id",q.getInt("id")).put("ok",true)
-                    if(q.optString("action")=="apply") {
+                    if(q.optString("cmd")=="upload") {
+                        when(q.optString("action")) {
+                            "begin" -> {begins++;uploadName=q.getString("path").substringAfterLast('\\')
+                                if(collision && begins==1)result.put("ok",false).put("error","目标已存在: $uploadName")
+                                else result.put("sid","test-upload").put("chunk",16384)}
+                            "chunk" -> if(failChunk)result.put("ok",false).put("error","磁盘写入失败")
+                            "end" -> {uploaded=true;result.put("size",32772).put("sha256","c".repeat(64))}
+                        }
+                    }else if(q.optString("action")=="apply") {
                         requestId=q.getString("request_id")
                         if(dropApplyReply){requests.add(q);client.close();break}
                         result.put("restarting",true).put("version",targetVersion).put("request_id",requestId).put("message","准备退出旧接收端")
                     }else {
                         result.put("directory","C:\\LanCmd\\upgrade").put("current",version)
-                            .put("items",JSONArray().put(JSONObject().put("name","LanCmd-Windows-3.4.2.zip").put("size",1234).put("sha256","a".repeat(64))))
+                            .put("items",JSONArray().put(JSONObject().put("name",if(uploaded)uploadName else "LanCmd-Windows-3.4.2.zip").put("size",1234).put("sha256","a".repeat(64))))
                             .put("status",JSONObject().put("status",this@Stub.phase).put("version",targetVersion).put("request_id",reportId))
                         this@Stub.buildVersion?.let{result.put("current_build",it)}
                     }
