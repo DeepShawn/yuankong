@@ -898,7 +898,7 @@ class StorageActivity : MiuixActivity() {
                 lastError = true
                 status(lastResult!!, true)
             }
-            finally { remoteJob = null; operationsBusy = false; transferText = "" }
+            finally { remoteJob = null; operationsBusy = false; transferText = ""; forceConfirmation = null }
         }
     }
 

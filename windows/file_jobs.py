@@ -267,6 +267,7 @@ class FileJobs:
 
     def _run(self, job):
         data = job["data"]
+        waiting = False
         try:
             data["status"] = "running"
             for item in data["items"]:
@@ -297,11 +298,12 @@ class FileJobs:
                     data["status"] = "cancelled"
                 elif any(i["status"] == "needs_confirmation" for i in data["items"]):
                     data.update(status="needs_confirmation", confirmation_id=uuid.uuid4().hex)
+                    waiting = True
                 else:
                     data["status"] = "completed"
         finally:
             with self.lock:
-                if data["status"] != "needs_confirmation":
+                if not waiting:
                     data["finished"] = time.time()
                     job["done"].set()
 

@@ -88,7 +88,7 @@ class PackagedStartupTest(unittest.TestCase):
                 call("hello", client_id="shipped-startup", client="Package regression")
                 capabilities = call("capabilities")
                 self.assertEqual(self.version, capabilities["version"])
-                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete"):
+                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network"):
                     self.assertIn(feature, capabilities["features"])
 
     def test_console_launcher_runs_shipped_python_and_all_feature_imports(self):
