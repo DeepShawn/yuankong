@@ -194,7 +194,7 @@ class NativeForceDelete:
         try:
             return self._delete_handle(path, original)
         except OSError as exc:
-            if exc.winerror not in (5, 32, 33):
+            if exc.winerror not in (5, 32, 33, 1224):  # Includes a user-mapped file section.
                 raise
             original_error = exc
         blockers = self.blockers(path)
@@ -222,7 +222,7 @@ class NativeForceDelete:
                 result["ended"] = list(ended)
                 return result
             except OSError as exc:
-                if exc.winerror not in (5, 32, 33) or attempt == 9:
+                if exc.winerror not in (5, 32, 33, 1224) or attempt == 9:
                     raise
                 if cancel.wait(.1):
                     check()

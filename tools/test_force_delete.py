@@ -125,11 +125,12 @@ class OccupantRaceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "data"; path.write_text("data")
             backend = NativeForceDelete.__new__(NativeForceDelete)
-            error = OSError("file occupied"); error.winerror = 32
-            backend._delete_handle = mock.Mock(side_effect=error)
             backend.blockers = mock.Mock(return_value=[holder(created="reused")])
             backend.end = mock.Mock()
-            with self.assertRaises(FileInUse): backend.remove(path, path.lstat(), [holder()], threading.Event())
+            for code in (32, 1224):
+                error = OSError("file occupied"); error.winerror = code
+                backend._delete_handle = mock.Mock(side_effect=error)
+                with self.assertRaises(FileInUse): backend.remove(path, path.lstat(), [holder()], threading.Event())
             backend.end.assert_not_called(); self.assertTrue(path.exists())
 
 
