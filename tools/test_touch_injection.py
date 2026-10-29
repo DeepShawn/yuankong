@@ -21,6 +21,23 @@ def point(ident=0, state='down', x=.25, y=.5):return dict(id=ident, state=state,
 
 
 class TouchTest(unittest.TestCase):
+    def test_controller_exposes_contact_state_without_worker_transport_ids(self):
+        class Worker:
+            def __init__(self):self.active=0;self.closed=False
+            def call(self,action='ping',contacts=None):
+                if action=='frame':self.active=sum(p['state']!='up' for p in contacts)
+                if action=='cancel':self.active=0
+                return dict(id=999,ok=True,active=self.active)
+            def close(self):self.closed=True
+        worker=Worker();control=TouchInjection(lambda:worker,interval=.01)
+        try:
+            ready=control.request('phone','start',None,lambda:True)
+            self.assertEqual({'active','api','max_contacts'},set(ready))
+            self.assertEqual({'active':1},control.request('phone','frame',[point()],lambda:True))
+            self.assertEqual({'active':0},control.request('phone','cancel',None,lambda:True))
+        finally:control.release('phone')
+        self.assertTrue(worker.closed)
+
     def test_touch_promotion_does_not_unlock_unrelated_physical_or_software_input(self):
         with authorized_promotion([dict(x=100,y=200,state='down')]):
             self.assertTrue(authorized_touch_mouse(0x201,1,0xff51578c,100,200))

@@ -273,11 +273,11 @@ class TouchInjection:
                 if self.thread is None:
                     self.thread = threading.Thread(target=self._watch, daemon=True, name='lancmd-native-touch')
                     self.thread.start()
-                return dict(result, api='InjectTouchInput', max_contacts=MAX_CONTACTS)
+                return dict(active=result['active'], api='InjectTouchInput', max_contacts=MAX_CONTACTS)
             if owner not in self.owners or self.worker is None:raise RuntimeError('请先开始 Windows 原生触控')
             if self.active is not None and self.active != owner:raise RuntimeError('其他连接正在进行触摸操作')
             if action == 'cancel':
-                result = self.worker.call('cancel');self.points.clear();self.active = None;return result
+                result = self.worker.call('cancel');self.points.clear();self.active = None;return {'active':result['active']}
             if action != 'frame':raise ValueError('无效的原生触控操作')
             frame = validate(contacts, self.points)
             try:result = self.worker.call('frame', frame)
@@ -286,7 +286,7 @@ class TouchInjection:
                 raise
             self.points = {p['id']: p for p in frame if p['state'] != 'up'}
             self.active = owner if self.points else None
-            return result
+            return {'active':result['active']}
 
     def release(self, owner):
         with self.lock:

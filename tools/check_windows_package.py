@@ -81,11 +81,15 @@ class PackagedStartupTest(unittest.TestCase):
     def assert_connected(self):
         with socket.create_connection(("127.0.0.1", self.port), timeout=5) as connection:
             with connection.makefile("rwb") as stream:
+                request_id = 100
                 def call(cmd, **fields):
-                    stream.write(json.dumps(dict(id=1, cmd=cmd, **fields)).encode() + b"\n")
+                    nonlocal request_id
+                    request_id += 1
+                    stream.write(json.dumps(dict(id=request_id, cmd=cmd, **fields)).encode() + b"\n")
                     stream.flush()
                     response = json.loads(stream.readline())
                     self.assertTrue(response["ok"], response)
+                    self.assertEqual(request_id,response['id'],'Worker IPC IDs must never replace phone RPC IDs')
                     return response
                 call("hello", client_id="shipped-startup", client="Package regression")
                 capabilities = call("capabilities")
