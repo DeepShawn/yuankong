@@ -142,5 +142,8 @@ class NativeNetworkTest(unittest.TestCase):
         result=WindowsNetwork().read('adapters')
         self.assertTrue(result['supported']);self.assertNotIn('password',json.dumps(result).lower())
         for item in result['adapters']:uuid.UUID(item['id'])
+    def test_bluetooth_snapshot_handles_a_machine_without_physical_radios(self):
+        result=WindowsNetwork().read('bluetooth')
+        self.assertIsInstance(result['radios'],list);self.assertIsInstance(result['devices'],list)
 
 if __name__=='__main__':unittest.main()

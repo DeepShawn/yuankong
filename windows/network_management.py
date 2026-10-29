@@ -108,6 +108,7 @@ class WindowsNetwork:
                 if line is None:raise OSError('Windows 网络接口未返回结果：'+' '.join(errors)[-1200:])
                 try:result=json.loads(line)
                 except ValueError:continue
+                if not isinstance(result,dict):continue
                 if result.get('type')=='pairing':
                     answer=challenge(result) if challenge else dict(confirm=False)
                     process.stdin.write(json.dumps(dict(answer,id=result['id']))+'\n');process.stdin.flush()
@@ -178,6 +179,7 @@ class NetworkManagement:
         try:
             if refresh:
                 result=self.backend.wlan().status(scan=True,ident=params.get('interface')) if scan and isinstance(self.backend,WindowsNetwork) else self.backend.read(area)
+                if scan:result['message']='已请求 Wi-Fi 扫描；请数秒后刷新查看新发现的网络'
             else:
                 time.sleep(self.grace)  # Let the phone receive its job ID before a link changes.
                 with network_change():result=self.backend.perform(area,data['operation'],params,lambda event:self._question(job,event))
@@ -222,7 +224,7 @@ class NetworkManagement:
                     request_id=q.get('request_id')
                     if request_id is None:request_id=uuid.uuid4().hex
                     if not isinstance(request_id,str) or not re.fullmatch('[0-9a-f]{32}',request_id):raise ValueError('网络请求编号无效')
-                    fingerprint=hashlib.sha256(json.dumps([area,operation,params],sort_keys=True).encode()).hexdigest()
+                    fingerprint=hashlib.sha256(json.dumps([area,operation,action=='scan',params],sort_keys=True).encode()).hexdigest()
                     existing=next((j for j in self.jobs.values() if j['owner']==owner and j['public']['request_id']==request_id),None)
                     if existing:
                         if existing['fingerprint']!=fingerprint:raise ValueError('请求编号已用于其他操作')

@@ -3,6 +3,7 @@ package com.aicode.lancmd
 import android.os.Bundle
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -61,11 +62,13 @@ class NetworkManagementActivity : MiuixActivity() {
             if(pendingArea.isNotBlank())area=pendingArea
         }
         content {
+            val listState=rememberLazyListState()
+            LaunchedEffect(area,wifiSelection,adapterSelection){listState.scrollToItem(0)}
             FixedPage("网络与蓝牙") {
                 ActionRow {areas.forEachIndexed {index,key ->
                     SelectionAction(labels[index],selected=area==key,modifier=Modifier.weight(1f)) {selectArea(key)}
                 }}
-                androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f).fillMaxWidth(),state=listState) {
                     item {SectionCard {
                         Action(if(busy)"正在处理，可等待或返回" else "刷新设备与连接",enabled=supported && !busy,primary=true){refresh()}
                         if(!supported)Note("需要完整更新 Windows 接收端，设备能力以电脑实际结果为准。")
