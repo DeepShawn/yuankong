@@ -19,7 +19,7 @@ import zipfile
 LIMIT=512*1024*1024
 MANIFEST="release-manifest.json"
 REQUIRED={"LanCmdAgent.exe","LanCmdCtl.exe","Start.exe","start.bat","lan_command_agent.py","local_upgrade.py","python/pythonw.exe","python/python311.dll"}
-REMOTE_COMMANDS={"upgrade","capabilities","screen","camera","session","input","pointer","local_input","cursor","gestures"}
+REMOTE_COMMANDS={"upgrade","capabilities","screen","camera","session","input","pointer","touch","local_input","cursor","gestures"}
 
 class RecoveryError(OSError):pass
 

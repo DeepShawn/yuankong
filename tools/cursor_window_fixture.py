@@ -13,8 +13,8 @@ from cursor_visibility import NativeCursors
 
 
 class CursorWindow:
-    def __init__(self, left=100):
-        self.process = subprocess.Popen([sys.executable, os.path.abspath(__file__), str(left)],
+    def __init__(self, left=100, touch=False):
+        self.process = subprocess.Popen([sys.executable, os.path.abspath(__file__), str(left)] + (['--touch'] if touch else []),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding='utf-8')
         self.lines = queue.Queue()
@@ -87,6 +87,14 @@ def main():
     if not custom:raise ctypes.WinError(ctypes.get_last_error())
     requests = queue.SimpleQueue()
     moves = [0]
+    touch_events = []
+    class TouchInput(ctypes.Structure):
+        _fields_ = [('x', w.LONG), ('y', w.LONG), ('source', w.HANDLE), ('id', w.DWORD),
+                    ('flags', w.DWORD), ('mask', w.DWORD), ('time', w.DWORD),
+                    ('extra', ctypes.c_size_t), ('cx', w.DWORD), ('cy', w.DWORD)]
+    user.GetTouchInputInfo.argtypes = [w.HANDLE, w.UINT, ctypes.POINTER(TouchInput), ctypes.c_int]
+    user.CloseTouchInputHandle.argtypes = [w.HANDLE]
+    user.RegisterTouchWindow.argtypes = [w.HWND, w.ULONG]
     left = int(sys.argv[1]) if len(sys.argv) > 1 else 100
     def report():
         # Query the owning queue without ever increasing its existing count.
@@ -98,10 +106,18 @@ def main():
         return {'visible': bool(current.flags & 1), 'flags': current.flags,
                 'foreground': user.GetForegroundWindow() == window,
                 'moves': moves[0], 'cursor': current.cursor, 'custom': custom,
-                'selected': user.GetCursor(), 'display_count': display_count,
+                'selected': user.GetCursor(), 'display_count': display_count, 'touch_events': list(touch_events),
                 'x': (left + 75 - user.GetSystemMetrics(76)) / user.GetSystemMetrics(78),
                 'y': (175 - user.GetSystemMetrics(77)) / user.GetSystemMetrics(79)}
     def proc(hwnd, message, word, long):
+        if message == 0x240:  # WM_TOUCH proves native touch delivery to an app.
+            count = word & 0xffff
+            inputs = (TouchInput * count)()
+            try:
+                if user.GetTouchInputInfo(long, count, inputs, ctypes.sizeof(TouchInput)):
+                    touch_events.extend(dict(id=p.id, flags=p.flags, x=p.x, y=p.y) for p in inputs)
+            finally:user.CloseTouchInputHandle(long)
+            return 0
         if message in (0x20, 0x200):  # Real WM_SETCURSOR / WM_MOUSEMOVE path.
             user.SetCursor(custom)
             if message == 0x200:moves[0] += 1
@@ -127,6 +143,7 @@ def main():
     window = user.CreateWindowExW(0, name, 'Cursor regression fixture', 0x00CF0000,
                                   left, 100, 300, 300, None, None, instance, None)
     if not window:raise ctypes.WinError(ctypes.get_last_error())
+    if '--touch' in sys.argv and not user.RegisterTouchWindow(window, 1):raise ctypes.WinError(ctypes.get_last_error())
     shown = 0
     try:
         user.ShowWindow(window, 5)

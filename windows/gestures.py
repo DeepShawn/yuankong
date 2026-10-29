@@ -65,7 +65,7 @@ class Gestures:
             except ValueError as e:
                 raise error(str(e))
             with self.remote.pointer_lock:
-                if self.remote.playback_owner is not None or self.remote.pointer_owners:
+                if self.remote.playback_owner is not None or self.remote.pointer_owners or self.remote.touch_owner is not None:
                     raise error("鼠标正在使用，请先结束拖动或手势回放")
                 self.remote.playback_owner = session.sid
             job = {"session": session, "cancel": threading.Event(), "data": dict(id=uuid.uuid4().hex,

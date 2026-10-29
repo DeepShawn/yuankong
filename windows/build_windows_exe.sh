@@ -61,7 +61,7 @@ rm -f "$PKG/python"/_msi.pyd \
       "$PKG/python"/winsound.pyd "$PKG/python"/_decimal.pyd "$PKG/python"/_elementtree.pyd \
       "$PKG/python"/_asyncio.pyd "$PKG/python"/_zoneinfo.pyd "$PKG/python"/_multiprocessing.pyd
 cp "使用说明.txt" "$PKG/使用说明.txt"
-cp local_upgrade.py "$PKG/"
+cp local_upgrade.py touch_injection.py "$PKG/"
 mkdir -p "$PKG/upgrade"
 cp upgrade/README.txt "$PKG/upgrade/"
 python3 - "$PKG" "$VER" <<'PY'
