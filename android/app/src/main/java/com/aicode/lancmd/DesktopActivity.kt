@@ -327,7 +327,10 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                     }
                 ) error("请完整更新 Windows 1.6.0 接收端，新版本支持屏幕触控")
                 if ((0 until capabilities.length()).none { capabilities.optString(it) == "cursor_visibility_verified" }) {
-                    error("远程控制需要确认 Windows 系统光标已隐藏，请完整更新 Windows 3.5.0 接收端后再开始；手机触控圆点仍保留")
+                    error("远程控制需要确认 Windows 系统光标已隐藏，请完整更新 Windows 3.5.3 接收端后再开始；手机触控圆点仍保留")
+                }
+                if ((0 until capabilities.length()).none { capabilities.optString(it) == "cursor_visibility_input_queue" }) {
+                    error("电脑端仍使用旧光标逻辑，请停止旧接收端并完整更新 Windows 3.5.3 后重新启动；只更新安卓无法修复电脑上的光标")
                 }
                 status("正在连接画面、键鼠与终端…")
                 suspend fun connection(): AgentClient {

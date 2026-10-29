@@ -15,6 +15,7 @@ import unittest
 from unittest import mock
 import uuid
 import zipfile
+from cursor_window_fixture import CursorWindow
 
 
 class PackagedStartupTest(unittest.TestCase):
@@ -88,15 +89,24 @@ class PackagedStartupTest(unittest.TestCase):
                 call("hello", client_id="shipped-startup", client="Package regression")
                 capabilities = call("capabilities")
                 self.assertEqual(self.version, capabilities["version"])
-                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network", "cursor_visibility_verified"):
+                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network", "cursor_visibility_verified", "cursor_visibility_input_queue"):
                     self.assertIn(feature, capabilities["features"])
-                lease = call("session", scope="input")["sid"]
-                try:
-                    cursor = call("cursor", sid=lease, hidden=True)
-                    self.assertTrue(cursor["hidden"])
-                    self.assertTrue(cursor["verified"], "Packaged receiver must verify native cursor hiding")
-                finally:
-                    call("session", action="end", sid=lease)
+                with CursorWindow() as window:
+                    self.assertGreaterEqual(window.initial['display_count'], 0)
+                    lease = call("session", scope="input")["sid"]
+                    try:
+                        cursor = call("cursor", sid=lease, hidden=True)
+                        self.assertTrue(cursor["hidden"])
+                        self.assertTrue(cursor["verified"], "Packaged receiver must verify native cursor hiding")
+                        for _ in range(3):
+                            call('pointer', sid=lease, action='click', x=window.initial['x'], y=window.initial['y'])
+                            current = window.report('probe')
+                            self.assertEqual(current['custom'], current['selected'])
+                            self.assertLess(current['display_count'], 0, current)
+                            self.assertFalse(current['visible'], current)
+                    finally:
+                        call("session", action="end", sid=lease)
+                    self.assertEqual(window.initial['display_count'], window.report('probe')['display_count'])
 
     def test_console_launcher_runs_shipped_python_and_all_feature_imports(self):
         result = subprocess.run([str(self.package / "LanCmdCtl.exe"), "--status"],

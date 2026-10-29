@@ -137,7 +137,13 @@ class WindowsBackend:
         self._input(lambda: self._mouse_event({"left": 0x0004, "right": 0x0010, "middle": 0x0040}[button]))
 
     def pointer(self, action, x, y, button, delta, allowed):
-        return self._input(lambda: self._pointer(action, x, y, button, delta, allowed))
+        def inject():
+            if self.cursor_visibility is not None:
+                # Suppress the destination application's input-queue cursor
+                # before SendInput can trigger its WM_SETCURSOR handler.
+                self.cursor_visibility.prepare(x, y)
+            return self._pointer(action, x, y, button, delta, allowed)
+        return self._input(inject)
 
     def _pointer(self, action, x, y, button, delta, allowed):
         if not allowed():
