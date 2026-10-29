@@ -301,12 +301,16 @@ class NativeCursors:
             time.sleep(.016)
 
     def restore(self):
+        failure = None
         if self.hook:
             self.user.UnhookWinEvent(self.hook)
             self.hook = None
         if self.input_mask:
-            self.input_mask.release()
-            self.input_mask = None
+            try:
+                self.input_mask.release()
+                self.input_mask = None
+            except Exception as exc:
+                failure = exc  # Still restore the standard scheme this time.
         if self.changed:
             if not self.user.SystemParametersInfoW(0x57, 0, None, 0):  # SPI_SETCURSORS
                 raise RuntimeError('Windows 鼠标指针恢复失败')
@@ -315,6 +319,7 @@ class NativeCursors:
             self.user.SetCursor(self._load(32512))
             self.user.DestroyCursor(self.blank)
             self.blank = None
+        if failure:raise failure
 
 
 def recovery_worker(native, input_stream, output_stream, watchdog=4):

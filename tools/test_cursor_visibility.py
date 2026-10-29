@@ -41,6 +41,23 @@ class FakeWorker:
 
 
 class CursorTest(unittest.TestCase):
+    def test_failed_queue_detach_cannot_skip_scheme_recovery_and_is_retried(self):
+        native = NativeCursors.__new__(NativeCursors)
+        native.hook, native.changed, native.blank = None, True, 101
+        mask = SimpleNamespace(release=mock.Mock(side_effect=[RuntimeError('detach retry'), None]))
+        native.input_mask = mask
+        native.user = SimpleNamespace(SystemParametersInfoW=mock.Mock(return_value=True),
+            SetCursor=mock.Mock(), DestroyCursor=mock.Mock())
+        native._load = mock.Mock(return_value=202)
+        with self.assertRaisesRegex(RuntimeError, 'detach retry'):native.restore()
+        native.user.SystemParametersInfoW.assert_called_once_with(0x57, 0, None, 0)
+        native.user.DestroyCursor.assert_called_once_with(101)
+        self.assertIs(native.input_mask, mask)
+        native.restore()
+        self.assertIsNone(native.input_mask)
+        self.assertEqual(2, mask.release.call_count)
+        self.assertEqual(1, native.user.SystemParametersInfoW.call_count)
+
     def test_input_queue_release_balances_only_our_calls_and_retries_detach_without_incrementing_again(self):
         mask = InputCursorMask.__new__(InputCursorMask)
         mask.user = SimpleNamespace(ShowCursor=mock.Mock(), AttachThreadInput=mock.Mock(side_effect=[False, True]))
