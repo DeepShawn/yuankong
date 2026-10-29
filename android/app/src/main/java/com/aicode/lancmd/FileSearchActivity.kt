@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
@@ -67,6 +68,8 @@ class FileSearchActivity : MiuixActivity() {
     private var searching: Job? = null
     private var querySequence = 0
     private var statusBusy = false
+    internal val resultListState = LazyListState()
+    private var restoreScroll: Pair<Int, Int>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,6 +77,11 @@ class FileSearchActivity : MiuixActivity() {
         scopeIndex = savedInstanceState?.getInt("scope", 0) ?: 0
         kindIndex = savedInstanceState?.getInt("filter", 0) ?: 0
         sortIndex = savedInstanceState?.getInt("sort", 0) ?: 0
+        offset = savedInstanceState?.getInt("offset", 0)?.coerceAtLeast(0) ?: 0
+        settingsExpanded = savedInstanceState?.getBoolean("settings") ?: false
+        if (savedInstanceState != null) restoreScroll =
+            savedInstanceState.getInt("listIndex").coerceAtLeast(0) to
+                savedInstanceState.getInt("listOffset").coerceAtLeast(0)
         status("首次建立索引后可快速搜索文件名和路径；文件变动后请更新索引。")
         content { Screen() }
     }
@@ -96,7 +104,7 @@ class FileSearchActivity : MiuixActivity() {
             Action("索引范围"){chooseRoots()}
         }
         Note("结果 · $pageLabel")
-        LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+        LazyColumn(Modifier.fillMaxWidth().weight(1f), state = resultListState) {
             if(items.isEmpty())item{EmptyNote("没有匹配结果；先建立索引，或修改关键词。")}
             items(items,key={it.path}) { entry ->
                 RowItem((if(entry.dir)"📁 " else "")+entry.name,"${entry.parent}\n${entry.detail}"){actions(entry)}
@@ -113,6 +121,10 @@ class FileSearchActivity : MiuixActivity() {
         outState.putInt("scope", scopeIndex)
         outState.putInt("filter", kindIndex)
         outState.putInt("sort", sortIndex)
+        outState.putInt("offset", offset)
+        outState.putBoolean("settings", settingsExpanded)
+        outState.putInt("listIndex", restoreScroll?.first ?: resultListState.firstVisibleItemIndex)
+        outState.putInt("listOffset", restoreScroll?.second ?: resultListState.firstVisibleItemScrollOffset)
         super.onSaveInstanceState(outState)
     }
 
@@ -174,7 +186,7 @@ class FileSearchActivity : MiuixActivity() {
             val generation = index.optDouble("updated", 0.0)
             if (generation != updated || index.optBoolean("available") && searching == null) {
                 updated = generation
-                search(true)
+                search(false)
             }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { indexInfo = e.message.orEmpty(); status(e.message ?: "无法读取搜索状态", true) }
@@ -189,6 +201,8 @@ class FileSearchActivity : MiuixActivity() {
     /** 翻页；[delta] 为一页的偏移量。 */
     internal fun offsetBy(delta: Int) {
         offset = (offset + delta).coerceAtLeast(0)
+        restoreScroll = null
+        resultListState.requestScrollToItem(0)
         search(false)
     }
 
@@ -229,7 +243,11 @@ class FileSearchActivity : MiuixActivity() {
     }
 
     internal fun search(reset: Boolean) {
-        if (reset) offset = 0
+        if (reset) {
+            offset = 0
+            restoreScroll = null
+            resultListState.requestScrollToItem(0)
+        }
         val sequence = ++querySequence
         val text = query
         val start = offset
@@ -246,6 +264,13 @@ class FileSearchActivity : MiuixActivity() {
                 )
                 if (sequence != querySequence) return@launch
                 total = result.getInt("total")
+                if (start > 0 && start >= total) {
+                    offset = if (total == 0) 0 else ((total - 1) / 100) * 100
+                    restoreScroll = null
+                    resultListState.requestScrollToItem(0)
+                    search(false)
+                    return@launch
+                }
                 val list = result.getJSONArray("items")
                 items = (0 until list.length()).map { index ->
                     val item = list.getJSONObject(index)
@@ -261,6 +286,10 @@ class FileSearchActivity : MiuixActivity() {
                         dir = item.optBoolean("dir"),
                         fileId = item.getString("file_id")
                     )
+                }
+                restoreScroll?.let { (index, scroll) ->
+                    resultListState.requestScrollToItem(index.coerceAtMost((items.size - 1).coerceAtLeast(0)), scroll)
+                    restoreScroll = null
                 }
                 pageLabel = if (total == 0) "0 项" else "${start + 1}–${start + items.size} / $total"
                 hasPrevious = start > 0

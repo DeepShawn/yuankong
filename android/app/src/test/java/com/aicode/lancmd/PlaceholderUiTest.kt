@@ -114,10 +114,13 @@ class PlaceholderUiTest {
             stub.supportsModes=false;stub.install()
             val controller=Robolectric.buildActivity(PlaceholderFilesActivity::class.java,Intent(RuntimeEnvironment.getApplication(),PlaceholderFilesActivity::class.java).putExtra("directory","E:\\")).setup()
             val page=controller.get()
-            waitFor { !page.busy }
+            // busy starts false before the initial asynchronous status read.
+            // Do not confirm creation until that read has actually completed.
+            waitFor { stub.requests.any { it.optString("cmd")=="placeholders" } && !page.busy }
             page.confirmCreate();shadowOf(Looper.getMainLooper()).idle()
             latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-            waitFor { page.note.contains("旧版不支持稳定模式") }
+            try { waitFor { page.note.contains("旧版不支持稳定模式") } }
+            catch(error:Throwable) { throw AssertionError("状态=${page.note}；RPC=${stub.requests}",error) }
             assertFalse(stub.requests.any { it.optString("action")=="create" })
             controller.pause().stop().destroy()
         }
