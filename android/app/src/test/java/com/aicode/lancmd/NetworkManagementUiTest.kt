@@ -149,7 +149,43 @@ class NetworkManagementUiTest {
         }
     }
 
-    private class Stub(val supported:Boolean=true,val fail:Boolean=false,val pair:Boolean=false,val dropReply:Boolean=false):Closeable {
+    @Test fun hotspotAlreadyOnCanSelectAnAdapterWithoutResubmittingAClientBlock() {
+        Stub(discovery=true).use {stub ->
+            stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
+            try {
+                waitFor{page.supported && !page.busy && page.snapshots.isNotEmpty()}
+                compose.onNodeWithText("请开启热点并刷新").assertDoesNotExist()
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("选择热点网卡"))
+                compose.onNodeWithText("选择热点网卡").performSemanticsAction(SemanticsActions.OnClick){it()}
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("使用 本地连接* 9"))
+                compose.onNodeWithText("使用 本地连接* 9").performSemanticsAction(SemanticsActions.OnClick){it()}
+                assertFalse(stub.requests.any{it.optString("action")=="submit"})
+                compose.onNodeWithText("执行").performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{!page.busy && stub.requests.any{it.optString("operation")=="hotspot_interface"}}
+                val q=stub.requests.single{it.optString("operation")=="hotspot_interface"}
+                assertEquals("11111111-2222-3333-4444-555555555555",q.getJSONObject("params").getString("interface"))
+                assertFalse(stub.requests.any{it.optString("operation")=="client_access"})
+                assertEquals("manual",page.snapshots["hotspot"]!!.getString("adapter_source"))
+            }finally{c.pause().stop().destroy()}
+        }
+    }
+
+    @Test fun hotspotIdentificationErrorIsDisplayedOnlyOnceWhileTheHotspotIsOn() {
+        Stub(discovery=true).use {stub ->
+            stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
+            try {
+                waitFor{page.supported && !page.busy && page.snapshots.isNotEmpty()}
+                val message="热点已开启，尚未识别专用网卡；请刷新或选择热点网卡"
+                page.render(JSONObject().put("area","hotspot").put("snapshot",JSONObject().put("state","On")
+                    .put("adapter_notice",message).put("access_error",message))
+                    .put("job",JSONObject().put("status","failed").put("message",message)))
+                compose.onAllNodesWithText(message).assertCountEquals(1)
+                compose.onNodeWithText("热点已开启").assertExists()
+            }finally{c.pause().stop().destroy()}
+        }
+    }
+
+    private class Stub(val supported:Boolean=true,val fail:Boolean=false,val pair:Boolean=false,val dropReply:Boolean=false,val discovery:Boolean=false):Closeable {
         val requests=CopyOnWriteArrayList<JSONObject>()
         private val server=ServerSocket(0)
         private val clients=CopyOnWriteArrayList<AgentClient>()
@@ -163,7 +199,7 @@ class NetworkManagementUiTest {
                     while(true) {
                         val q=JSONObject(input.readLine()?:break);requests.add(q)
                         val r=JSONObject().put("id",q.getInt("id")).put("ok",true)
-                        if(q.optString("cmd")=="capabilities")r.put("features",JSONArray().apply{if(supported){put("network_management");put("network_device_state");put("hotspot_client_access")}})
+                        if(q.optString("cmd")=="capabilities")r.put("features",JSONArray().apply{if(supported){put("network_management");put("network_device_state");put("hotspot_client_access");if(discovery)put("hotspot_adapter_selection")}})
                         else {
                             if(q.optString("action")=="submit"){submitted=q;if(dropReply)break}
                             if(q.optString("action")=="answer")answered=true
@@ -173,6 +209,14 @@ class NetworkManagementUiTest {
                                 .put("interfaces",JSONArray()).put("devices",JSONArray()).put("adapters",JSONArray()).put("radios",JSONArray())
                                 .put("hardware",JSONArray().put(JSONObject().put("id",if(area=="bluetooth")"bt-device" else "net-device")
                                     .put("name","测试设备").put("enabled",true).put("problem",0))))
+                            if(discovery && area=="hotspot") {
+                                val adapter=JSONObject().put("id","11111111-2222-3333-4444-555555555555").put("name","本地连接* 9")
+                                    .put("description","Wi-Fi Direct").put("ipv4",JSONArray().put("10.77.20.1/24"))
+                                r.getJSONObject("snapshot").put("state","On").put("adapter_candidates",JSONArray().put(adapter))
+                                    .put("adapter_notice","热点已开启，尚未识别专用网卡；请刷新或选择热点网卡")
+                                if(submitted?.optString("operation")=="hotspot_interface")r.getJSONObject("snapshot")
+                                    .put("selected_adapter",adapter).put("adapter_source","manual").put("adapter_notice","")
+                            }
                             if(submitted!=null && q.optString("action")!="refresh") {
                                 val job=JSONObject().put("id","a".repeat(32)).put("area",submitted!!.optString("area"))
                                     .put("request_id",submitted!!.optString("request_id")).put("status",if(pair && !answered)"awaiting_input" else if(fail)"failed" else "completed")

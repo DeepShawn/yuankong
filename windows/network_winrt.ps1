@@ -51,19 +51,14 @@ function Set-Hotspot($manager,[bool]$on) {
     if($result.Status.ToString() -ne 'Success'){throw ('移动热点操作失败：'+$result.Status.ToString()+' '+$result.AdditionalErrorMessage)}
 }
 
-function Hotspot-Status($manager) {
-    $config=$manager.GetCurrentAccessPointConfiguration()
-    $clients=@($manager.GetTetheringClients() | ForEach-Object {
-        @{address=$_.MacAddress;hosts=@($_.HostNames | ForEach-Object {$_.CanonicalName})}
-    })
-    $band=if($config.PSObject.Properties.Name -contains 'Band'){$config.Band.ToString()}else{'SystemManaged'}
-    $private=@();$privateError=''
+function Hotspot-Inventory {
+    $adapters=@(Get-NetAdapter -IncludeHidden -ErrorAction Stop)
+    $private=@();$privateError='';$neighborError='';$addressError=''
     try {
         $sharing=New-Object -ComObject HNetCfg.HNetShare
-        $adapters=@(Get-NetAdapter -IncludeHidden -ErrorAction Stop)
         foreach($connection in $sharing.EnumEveryConnection) {
-            $configSharing=$sharing.INetSharingConfigurationForINetConnection($connection)
-            if($configSharing.SharingEnabled -and $configSharing.SharingConnectionType -eq 1) {
+            $sharingConfig=$sharing.INetSharingConfigurationForINetConnection($connection)
+            if($sharingConfig.SharingEnabled -and $sharingConfig.SharingConnectionType -eq 1) {
                 $props=$sharing.NetConnectionProps($connection)
                 foreach($adapter in $adapters | Where-Object {$_.InterfaceGuid -eq [Guid]$props.Guid}) {
                     $private+=@{id=$adapter.InterfaceGuid.ToString();name=$adapter.Name;index=$adapter.ifIndex}
@@ -71,10 +66,42 @@ function Hotspot-Status($manager) {
             }
         }
     } catch {$privateError=$_.Exception.Message}
-    return @{supported=$true;state=$manager.TetheringOperationalState.ToString();name=$config.Ssid;
+    try {$addresses=@(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop)} catch {$addresses=@();$addressError=$_.Exception.Message}
+    try {$neighbors=@(Get-NetNeighbor -ErrorAction Stop)} catch {$neighbors=@();$neighborError=$_.Exception.Message}
+    try {$devices=@(Get-CimInstance Win32_NetworkAdapter -ErrorAction Stop)} catch {$devices=@()}
+    $inventory=@($adapters | ForEach-Object {
+        $adapter=$_;$pnp=[string]$adapter.PnPDeviceID
+        $device=@($devices | Where-Object {$_.GUID -and [Guid]$_.GUID -eq $adapter.InterfaceGuid}) | Select-Object -First 1
+        if(!$pnp -and $device){$pnp=[string]$device.PNPDeviceID}
+        # Canonical PnP IDs work across localized Windows display names.
+        $direct=$pnp -match '^(SWD\\WIFIDIRECT\\|ROOT\\VWIFIMP\\)'
+        if(!$direct -and $device){$direct=$device.ServiceName -eq 'vwifimp'}
+        if(!$direct -and $adapter.InterfaceType -eq 71 -and !$adapter.HardwareInterface -and $pnp) {
+            try {$service=(Get-PnpDeviceProperty -InstanceId $pnp -KeyName 'DEVPKEY_Device_Service' -ErrorAction Stop).Data;$direct=$service -eq 'vwifimp'} catch {}
+        }
+        @{id=$adapter.InterfaceGuid.ToString();index=[int]$adapter.ifIndex;name=$adapter.Name;description=$adapter.InterfaceDescription;
+            up=($adapter.Status.ToString() -eq 'Up');wifi_direct=[bool]$direct;pnp=$pnp;
+            ipv4=@($addresses | Where-Object {$_.InterfaceIndex -eq $adapter.ifIndex} | ForEach-Object {@{address=$_.IPAddress;prefix=[int]$_.PrefixLength}});
+            neighbors=@($neighbors | Where-Object {$_.InterfaceIndex -eq $adapter.ifIndex} | ForEach-Object {
+                @{address=[string]$_.LinkLayerAddress;ip=[string]$_.IPAddress;state=$_.State.ToString()}
+            })}
+    })
+    return @{private_adapters=$private;adapter_inventory=$inventory;private_adapter_error=$privateError;
+        neighbor_error=$neighborError;address_error=$addressError}
+}
+
+function Hotspot-Status($manager) {
+    $config=$manager.GetCurrentAccessPointConfiguration()
+    $clients=@($manager.GetTetheringClients() | ForEach-Object {
+        @{address=$_.MacAddress;hosts=@($_.HostNames | ForEach-Object {$_.CanonicalName})}
+    })
+    $band=if($config.PSObject.Properties.Name -contains 'Band'){$config.Band.ToString()}else{'SystemManaged'}
+    $result=@{supported=$true;state=$manager.TetheringOperationalState.ToString();name=$config.Ssid;
         band=$band;band_supported=($config.PSObject.Properties.Name -contains 'Band');clients=$clients;
-        client_count=[int]$manager.ClientCount;max_clients=[int]$manager.MaxClientCount;individual_disconnect=$false;
-        private_adapters=$private;private_adapter_error=$privateError}
+        client_count=[int]$manager.ClientCount;max_clients=[int]$manager.MaxClientCount;individual_disconnect=$false}
+    try {$inventory=Hotspot-Inventory;foreach($key in $inventory.Keys){$result[$key]=$inventory[$key]}}
+    catch {$result.private_adapters=@();$result.adapter_inventory=@();$result.private_adapter_error=$_.Exception.Message}
+    return $result
 }
 
 function Bluetooth-Status {
@@ -216,7 +243,9 @@ function Adapter-Status {
 }
 
 try {
-    if($request.area -eq 'hardware') {
+    if($request.area -eq 'hotspot_inventory') {
+        $data=Hotspot-Inventory
+    } elseif($request.area -eq 'hardware') {
         $data=@{devices=@(Get-PnpDevice -PresentOnly -ErrorAction Stop | Where-Object {$_.Class -in @('Net','Bluetooth')} | ForEach-Object {
             @{id=[string]$_.InstanceId;name=[string]$_.FriendlyName;kind=if($_.Class -eq 'Net'){'net'}else{'bluetooth'}}
         })}

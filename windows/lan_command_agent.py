@@ -44,9 +44,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 APP_ID = "LANCMD"
-VERSION = "3.8.0"
-BUILD_VERSION = "3.8.0"
-RELEASE_TAG = "v3.8.0"
+VERSION = "3.8.1"
+BUILD_VERSION = "3.8.1"
+RELEASE_TAG = "v3.8.1"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1252,7 +1252,7 @@ def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures", "cursor_visibility", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"])
-        features.extend(["app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","force_delete","startup_network","network_management","network_device_state","hotspot_client_access","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
+        features.extend(["app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","force_delete","startup_network","network_management","network_device_state","hotspot_client_access","hotspot_adapter_selection","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
