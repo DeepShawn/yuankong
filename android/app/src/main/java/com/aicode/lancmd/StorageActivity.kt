@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
@@ -86,6 +87,8 @@ class StorageActivity : MiuixActivity() {
     private var uploadTarget = ""
     private var loading: Job? = null
     private var listingSequence=0
+    internal val fileListState = LazyListState()
+    private var restoreScroll: Pair<Int, Int>? = null
     private var transfer: Job? = null
     private var remoteJob: String? = null
     private var forceConfirmation by mutableStateOf<JSONObject?>(null)
@@ -171,6 +174,10 @@ class StorageActivity : MiuixActivity() {
         sourceKey
         sourceChanged = savedInstanceState?.getString("sourceKey")?.let { it != sourceKey } ?: false
         if (!sourceChanged) {
+            query = savedInstanceState?.getString("query").orEmpty()
+            if (savedInstanceState != null) restoreScroll =
+                savedInstanceState.getInt("listIndex").coerceAtLeast(0) to
+                    savedInstanceState.getInt("listOffset").coerceAtLeast(0)
             restoreKeys = savedInstanceState?.getStringArrayList("selection").orEmpty().toSet()
             multi = savedInstanceState?.getBoolean("multi") ?: false
             pendingTreeBase = savedInstanceState?.getString("treeBase").orEmpty()
@@ -248,7 +255,7 @@ class StorageActivity : MiuixActivity() {
                 Action("延迟计划", modifier = Modifier.weight(1f)) { showFilePlans() }
                 Action("U盘管理", modifier = Modifier.weight(1f)) { usbActions() }
             }
-            Field(label = "搜索当前目录", value = query, onValueChange = { query = it; filter() })
+            Field(label = "搜索当前目录", value = query, onValueChange = { query = it; search() })
             ActionRow {
                 SelectionAction("磁盘",selected=disksExpanded,modifier=Modifier.weight(1f)){disksExpanded=!disksExpanded}
                 SelectionAction("更多工具",selected=toolsExpanded,modifier=Modifier.weight(1f)){toolsExpanded=!toolsExpanded}
@@ -283,8 +290,8 @@ class StorageActivity : MiuixActivity() {
         }
         if(listingBusy) {Note("目录加载中，返回和其他操作仍可使用…")}
         else if(visible.isEmpty())EmptyNote(listingMessage)
-        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
-            items(visible) { item ->
+        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f), state = fileListState) {
+            items(visible, key = { joinPath(path, it.optString("name")) }) { item ->
                 val name = item.optString("name")
                 val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
                     .format(Date(item.optLong("mtime") * 1000))
@@ -317,6 +324,9 @@ class StorageActivity : MiuixActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("sourceKey", sourceKey)
         outState.putString("path", path)
+        outState.putString("query", query)
+        outState.putInt("listIndex", restoreScroll?.first ?: fileListState.firstVisibleItemIndex)
+        outState.putInt("listOffset", restoreScroll?.second ?: fileListState.firstVisibleItemScrollOffset)
         outState.putString("download", pendingDownload)
         outState.putString("upload", uploadTarget)
         outState.putBoolean("multi", multi)
@@ -386,9 +396,19 @@ class StorageActivity : MiuixActivity() {
             for (id in selection.keys.toList()) selection[id] = current.getValue(id)
             for (id in restoreKeys) current[id]?.let { selection[id] = it }
             restoreKeys = emptySet()
-            query = ""
+            if (changed) {
+                query = ""
+                restoreScroll = null
+                fileListState.requestScrollToItem(0)
+            }
             buildCrumbs()
             filter()
+            restoreScroll?.let { (index, offset) ->
+                // Restore only after the asynchronous directory data is ready;
+                // an initially empty list would otherwise clamp it back to zero.
+                fileListState.requestScrollToItem(index.coerceAtMost((visible.size - 1).coerceAtLeast(0)), offset)
+                restoreScroll = null
+            }
             if (path == highlightFolder && highlightName.isNotBlank()) {
                 val found = visible.any { it.optString("name") == highlightName }
                 if (lastResult == null && notice == null) {
@@ -424,7 +444,11 @@ class StorageActivity : MiuixActivity() {
     }
 
     /** 按 [query] 过滤当前目录；测试改完 query 后调用它。 */
-    internal fun search() = filter()
+    internal fun search() {
+        restoreScroll = null
+        filter()
+        fileListState.requestScrollToItem(0)
+    }
 
     private fun filter() {
         val text = query.trim()
