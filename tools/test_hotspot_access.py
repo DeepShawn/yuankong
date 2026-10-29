@@ -65,6 +65,11 @@ class ClientAccessTest(unittest.TestCase):
         for mac in ('FF:FF:FF:FF:FF:FF','01:00:5E:00:00:01','00:00:00:00:00:00','invalid'):
             with self.assertRaises(ValueError):address(mac)
         self.assertEqual(MAC,address('022132435465'));self.assertEqual(MAC,address('02-21-32-43-54-65'))
+    def test_damaged_configuration_does_not_prevent_receiver_start_or_claim_limits_are_active(self):
+        self.path.write_text('[]')
+        restored=HotspotAccess(self.path,lambda:self.engine)
+        state=restored.sync(snapshot())
+        self.assertIn('无法读取',state['access_error']);self.assertFalse(state['client_access']);self.assertFalse(self.engine.entries)
     def test_wfp_structures_have_the_official_x64_layout(self):
         self.assertEqual([200,40,16,72,72,20],[ctypes.sizeof(t) for t in (Filter,Condition,Value,Session,Sublayer,Action)])
 

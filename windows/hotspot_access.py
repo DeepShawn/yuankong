@@ -105,8 +105,10 @@ class NativeAccess:
         self.check(code)
         try:
             item=result.contents;conditions=[]
+            if item.count>8:raise ValueError('Windows 返回的过滤条件数量无效')
             for i in range(item.count):
                 cond=item.conditions[i]
+                if cond.value.type not in (4,18) or not cond.value.pointer:raise ValueError('Windows 返回的过滤条件类型无效')
                 data=c.c_uint64.from_address(cond.value.pointer).value if cond.value.type==4 else c.string_at(cond.value.pointer,6).hex(':').upper()
                 conditions.append(dict(field=cond.field.text(),type=cond.value.type,value=data))
             return dict(layer=item.layer.text(),action=item.action.type,conditions=conditions)
@@ -120,13 +122,14 @@ class NativeAccess:
 class HotspotAccess:
     def __init__(self,path=None,factory=NativeAccess):
         self.path=Path(path) if path else None;self.factory=factory;self.engine=None;self.lock=threading.RLock()
-        self.blocked=set();self.applied=[];self.error='';self.interface=None
+        self.blocked=set();self.applied=[];self.error='';self.load_error='';self.interface=None
         if self.path and self.path.exists():
             try:
+                if self.path.stat().st_size>65536:raise ValueError('设置文件过大')
                 data=json.loads(self.path.read_text(encoding='utf-8'))
-                if not isinstance(data.get('blocked'),list) or len(data['blocked'])>64:raise ValueError('列表无效')
+                if not isinstance(data,dict) or data.get('format')!=1 or not isinstance(data.get('blocked'),list) or len(data['blocked'])>64:raise ValueError('列表无效')
                 self.blocked={address(mac) for mac in data['blocked']}
-            except (OSError,ValueError,TypeError) as exc:self.error='无法读取热点限制设置：'+str(exc)
+            except (OSError,ValueError,TypeError) as exc:self.load_error=self.error='无法读取热点限制设置：'+str(exc)
 
     @staticmethod
     def private(snapshot):
@@ -154,7 +157,7 @@ class HotspotAccess:
                 self.interface=self.private(snapshot) if self.blocked else None
                 entries=[dict(address=mac,interface=self.interface['id']) for mac in sorted(self.blocked)] if self.interface else []
                 if entries!=self.applied or entries and (self.engine is None or not self.engine.live()):self._replace(entries)
-                self.error=''
+                self.error=self.load_error
             except Exception as exc:
                 self.error=str(exc)
                 # An unknown/changed hotspot must never leave a rule on an old NIC.
@@ -199,5 +202,5 @@ class HotspotAccess:
                     if self.engine:self.engine.close();self.engine=None
                     self.applied=[]
                 raise
-            self.blocked=desired;self.interface=interface;self.error=''
+            self.blocked=desired;self.interface=interface;self.load_error=self.error=''
             return dict(confirmed=True,message='已安装指定客户端的禁止联网规则，Wi-Fi 可能仍显示已连接' if blocked else '已移除指定客户端的联网限制')
