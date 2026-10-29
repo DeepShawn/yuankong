@@ -204,6 +204,11 @@ class HotspotTimerTest(unittest.TestCase):
             with self.assertRaises(ValueError):self.timer.schedule(value)
         self.assertFalse(self.backend.calls)
         self.assertEqual(dict(seconds=86400),validate('hotspot','restart_after',dict(seconds=86400)))
+    def test_cancel_api_requires_the_current_exact_timer_identifier(self):
+        for ident in ('',None,'not-a-timer','D'*32,32):
+            with self.subTest(ident=ident),self.assertRaises(ValueError):validate('hotspot','cancel_restart',dict(timer_id=ident))
+        self.assertEqual(dict(timer_id='d'*32),validate('hotspot','cancel_restart',dict(timer_id='d'*32)))
+
     def test_countdown_starts_only_after_off_confirmation_and_fires_exactly_once(self):
         self.backend.after_stop=lambda:setattr(self,'now',105.)
         self.timer.schedule(10);first=self.timer.status()

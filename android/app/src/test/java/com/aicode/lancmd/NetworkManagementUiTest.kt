@@ -42,6 +42,11 @@ class NetworkManagementUiTest {
         while(System.currentTimeMillis()<end){shadowOf(Looper.getMainLooper()).idleFor(10,java.util.concurrent.TimeUnit.MILLISECONDS);if(check())return;Thread.sleep(10)}
         fail("网络管理界面没有完成预期状态")
     }
+    private fun awaitTimer(check:()->Boolean) {
+        // LaunchedEffect delay uses the Compose test clock, not Robolectric's
+        // Looper clock. Advance frames while the real socket responses arrive.
+        waitFor{compose.mainClock.advanceTimeBy(100);check()}
+    }
     private fun enter(page:NetworkManagementActivity) {
         waitFor{page.supported && !page.busy && page.administrator}
         page.managementPassword="test-only-password";page.unlock()
@@ -302,17 +307,17 @@ class NetworkManagementUiTest {
                 compose.onNodeWithText("关闭并定时开启").performSemanticsAction(SemanticsActions.OnClick){it()}
                 assertFalse(stub.requests.any{it.optString("operation")=="restart_after"})
                 compose.onNodeWithText("执行").performSemanticsAction(SemanticsActions.OnClick){it()}
-                waitFor{!page.busy && page.hotspotTimer?.optString("status")=="waiting"}
+                awaitTimer{!page.busy && page.hotspotTimer?.optString("status")=="waiting"}
                 val q=stub.requests.single{it.optString("operation")=="restart_after"}
                 assertEquals(75,q.getJSONObject("params").getInt("seconds"))
                 stub.timerState=JSONObject(stub.timerState.toString()).put("remaining_seconds",41)
-                waitFor{page.hotspotTimer?.optInt("remaining_seconds")==41}
+                awaitTimer{page.hotspotTimer?.optInt("remaining_seconds")==41}
                 compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("剩余 41 秒"))
                 compose.onNodeWithText("剩余 41 秒").assertExists()
                 compose.onNodeWithText("取消定时开启").performSemanticsAction(SemanticsActions.OnClick){it()}
                 assertFalse(stub.requests.any{it.optString("operation")=="cancel_restart"})
                 compose.onNodeWithText("执行").performSemanticsAction(SemanticsActions.OnClick){it()}
-                waitFor{!page.busy && page.hotspotTimer?.optString("status")=="cancelled"}
+                awaitTimer{!page.busy && page.hotspotTimer?.optString("status")=="cancelled"}
                 assertEquals("d".repeat(32),stub.requests.single{it.optString("operation")=="cancel_restart"}.getJSONObject("params").getString("timer_id"))
                 assertEquals(1,stub.requests.count{it.optString("operation")=="restart_after"})
             } finally{c.pause().stop().destroy()}
@@ -323,14 +328,14 @@ class NetworkManagementUiTest {
             stub.timerState=JSONObject().put("id","d".repeat(32)).put("status","waiting").put("remaining_seconds",22).put("message","Windows 正在计时")
             stub.install();var c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();var page=c.get()
             try {
-                enter(page);waitFor{page.hotspotTimer?.optInt("remaining_seconds")==22}
+                enter(page);awaitTimer{page.hotspotTimer?.optInt("remaining_seconds")==22}
                 page.restartDelay="0"
                 compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("关闭并定时开启"))
                 compose.onNodeWithText("关闭并定时开启").assertIsNotEnabled()
                 val saved=Bundle();c.saveInstanceState(saved);c.pause().stop().destroy()
                 c=Robolectric.buildActivity(NetworkManagementActivity::class.java).create(saved).start().resume().visible();page=c.get()
-                waitFor{page.supported && !page.busy};assertFalse(page.authorized)
-                enter(page);waitFor{page.hotspotTimer?.optInt("remaining_seconds")==22}
+                awaitTimer{page.supported && !page.busy};assertFalse(page.authorized)
+                enter(page);awaitTimer{page.hotspotTimer?.optInt("remaining_seconds")==22}
                 assertFalse(stub.requests.any{it.optString("action")=="submit"})
             } finally{c.pause().stop().destroy()}
         }
@@ -385,6 +390,7 @@ class NetworkManagementUiTest {
                                 r.getJSONObject("snapshot").getJSONArray("clients").put(JSONObject().put("address","02:AA:BB:CC:DD:EE").put("hosts",JSONArray()))
                                 for(index in 1..2)r.getJSONObject("snapshot").getJSONArray("adapters").put(JSONObject().put("id","11111111-2222-3333-4444-55555555555$index").put("name","测试网卡$index").put("status","Up"))
                             }
+                            if(timer)r.put("timer",timerState ?: JSONObject.NULL)
                             if(discovery && area=="hotspot") {
                                 val adapter=JSONObject().put("id","11111111-2222-3333-4444-555555555555").put("name","本地连接* 9")
                                     .put("description","Wi-Fi Direct").put("ipv4",JSONArray().put("10.77.20.1/24"))
