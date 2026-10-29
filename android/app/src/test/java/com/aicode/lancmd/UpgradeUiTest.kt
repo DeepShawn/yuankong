@@ -129,7 +129,7 @@ class UpgradeUiTest {
                         result.put("directory","C:\\LanCmd\\upgrade").put("current",version)
                             .put("items",JSONArray().put(JSONObject().put("name","LanCmd-Windows-3.4.2.zip").put("size",1234).put("sha256","a".repeat(64))))
                             .put("status",JSONObject().put("status",this@Stub.phase).put("version",targetVersion).put("request_id",reportId))
-                        buildVersion?.let{result.put("current_build",it)}
+                        this@Stub.buildVersion?.let{result.put("current_build",it)}
                     }
                     requests.add(q);output.write(result.toString()+"\n");output.flush()
                 }
