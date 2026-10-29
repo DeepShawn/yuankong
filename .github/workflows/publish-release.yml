@@ -129,7 +129,7 @@ jobs:
               for name in ('python/_sqlite3.pyd', 'python/sqlite3.dll'):
                   if not package.read('LanCmd-Windows/' + name):
                       raise SystemExit('Missing SQLite runtime: ' + name)
-              for name in ('storage_reads.py', 'cursor_visibility.py', 'start.bat'):
+              for name in ('storage_reads.py', 'cursor_visibility.py', 'force_delete.py', 'start.bat'):
                   source = subprocess.check_output(['git', 'show', tag + ':windows/' + name])
                   if name == 'start.bat':
                       # Match .gitattributes: Git stores LF, checkout/package uses CRLF.
