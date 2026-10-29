@@ -35,7 +35,7 @@ class NetworkManagementUiTest {
     }
     private fun waitFor(check:()->Boolean) {
         val end=System.currentTimeMillis()+10000
-        while(System.currentTimeMillis()<end){shadowOf(Looper.getMainLooper()).idle();if(check())return;Thread.sleep(10)}
+        while(System.currentTimeMillis()<end){shadowOf(Looper.getMainLooper()).idleFor(10,java.util.concurrent.TimeUnit.MILLISECONDS);if(check())return;Thread.sleep(10)}
         fail("网络管理界面没有完成预期状态")
     }
     @Test fun allFourAreasRefreshWithoutSendingChanges() {

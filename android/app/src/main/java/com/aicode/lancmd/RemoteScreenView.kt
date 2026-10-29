@@ -14,7 +14,7 @@ import androidx.appcompat.widget.AppCompatImageView
 import org.json.JSONObject
 import org.json.JSONArray
 
-/** Touch gestures are translated to ordinary Windows mouse input. */
+/** Forwards native touch lifetimes; mouse gestures remain an explicit compatibility path. */
 class RemoteScreenView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : AppCompatImageView(context, attrs) {
     // Android's mouse/stylus pointer is independent of the Windows cursor and
     // our painted touch circle. Resolve it here, including after Compose moves

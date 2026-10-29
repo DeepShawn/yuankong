@@ -82,6 +82,39 @@ class TouchTest(unittest.TestCase):
         native.cancel();self.assertFalse(native.points)
         self.assertEqual(0x48000, user.InjectTouchInput.call_args.args[1][0].pointerInfo.pointerFlags)
 
+    def test_fast_repeated_taps_always_update_before_up_and_can_reuse_android_id(self):
+        native,user=self.native();frames=[]
+        user.InjectTouchInput.side_effect=lambda count,array:frames.append([p.pointerInfo.pointerFlags for p in array]) or 1
+        for _ in range(4):native.frame([point()]);native.frame([point(state='up')])
+        self.assertEqual([[0x10006],[0x20006],[0x40000]]*4,frames)
+        self.assertFalse(native.points)
+
+    def test_stationary_hold_injects_updates_without_expiring_parent_watchdog(self):
+        native,user=self.native();input_lines=queue.Queue();frames=[]
+        class Stream:
+            def __iter__(self):
+                while True:
+                    line=input_lines.get()
+                    if line is None:return
+                    yield line
+        user.InjectTouchInput.side_effect=lambda count,array:frames.append([p.pointerInfo.pointerFlags for p in array]) or 1
+        output=io.StringIO()
+        thread=threading.Thread(target=recovery_worker,args=(native,Stream(),output,.18),daemon=True)
+        input_lines.put(json.dumps(dict(id=1,action='frame',contacts=[point()]))+'\n');thread.start()
+        thread.join(1)
+        self.assertFalse(thread.is_alive(),'Synthetic stationary updates must not keep abandoned touches alive')
+        self.assertGreaterEqual(sum(p==[0x20006] for p in frames),3)
+        self.assertEqual([0x48000],frames[-1]);self.assertFalse(native.points)
+        input_lines.put(None)
+
+    def test_held_touch_promotion_stays_narrow_and_allows_only_context_click_at_that_point(self):
+        with authorized_promotion([dict(x=777,y=888,state='hold')]):
+            self.assertTrue(authorized_touch_mouse(0x204,1,0xff51578c,777,888))
+            self.assertTrue(authorized_touch_mouse(0x205,1,0xff51578c,777,888))
+            self.assertFalse(authorized_touch_mouse(0x201,1,0xff51578c,777,888))
+            self.assertFalse(authorized_touch_mouse(0x204,0,0xff51578c,777,888))
+            self.assertFalse(authorized_touch_mouse(0x204,1,0xff51578c,500,500))
+
     def test_initialization_failure_does_not_use_a_mouse_fallback(self):
         native, user = self.native()
         user.InitializeTouchInjection.return_value = 0
@@ -115,6 +148,30 @@ class TouchTest(unittest.TestCase):
 
 @unittest.skipUnless(os.name == 'nt', 'Requires Windows official touch injection and app WM_TOUCH')
 class NativeTouchTest(unittest.TestCase):
+    def test_real_worker_supports_double_taps_and_stationary_long_press_then_another_gesture(self):
+        from cursor_window_fixture import CursorWindow
+        with CursorWindow(touch=True) as app:
+            worker=TouchWorker()
+            try:
+                x,y=app.initial['x'],app.initial['y']
+                for _ in range(2):
+                    worker.call('frame',[point(x=x,y=y)])
+                    worker.call('frame',[point(state='up',x=x,y=y)])
+                worker.call('frame',[point(x=x,y=y)])
+                for _ in range(3):time.sleep(.4);self.assertEqual(1,worker.call()['active'])
+                worker.call('frame',[point(state='up',x=x,y=y)])
+                worker.call('frame',[point(x=x,y=y)])
+                worker.call('frame',[point(state='move',x=x+.03,y=y)])
+                worker.call('frame',[point(state='up',x=x+.03,y=y)])
+                self.assertEqual(0,worker.call()['active'])
+                deadline=time.monotonic()+3
+                while True:
+                    events=app.report('probe')['touch_events']
+                    if sum(bool(p['flags']&4) for p in events)>=4:break
+                    if time.monotonic()>=deadline:self.fail('Repeated taps or long press did not finish: '+str(events))
+                    time.sleep(.02)
+                self.assertGreaterEqual(sum(bool(p['flags']&1) for p in events),5)
+            finally:worker.close()
     def test_touch_promotion_reaches_legacy_apps_while_local_mouse_hook_is_active(self):
         from cursor_window_fixture import CursorWindow
         from input_guard import InputGuard, NativeInputGuard

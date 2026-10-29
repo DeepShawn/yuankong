@@ -254,6 +254,26 @@ class DesktopUiTest {
         assertTrue("Native touch must never emit delayed mouse clicks",mouse.isEmpty())
     }
 
+    @Test fun nativeDoubleTapLongHoldAndDragKeepSeparateContactLifetimes() {
+        val view=RemoteScreenView(RuntimeEnvironment.getApplication())
+        view.layout(0,0,400,400);view.showFrame(Bitmap.createBitmap(400,400,Bitmap.Config.ARGB_8888))
+        view.nativeTouchEnabled=true;view.touchEnabled=true
+        val frames=ArrayList<JSONObject>();val mouse=ArrayList<JSONObject>()
+        view.onTouchFrame={frames.add(it)};view.onPointer={mouse.add(it)}
+        fun event(action:Int,x:Float=200f) {
+            val now=SystemClock.uptimeMillis()
+            MotionEvent.obtain(now,now,action,x,200f,0).also{view.onTouchEvent(it);it.recycle()}
+        }
+        repeat(2){event(MotionEvent.ACTION_DOWN);event(MotionEvent.ACTION_UP)}
+        event(MotionEvent.ACTION_DOWN)
+        shadowOf(Looper.getMainLooper()).idleFor(1500,TimeUnit.MILLISECONDS)
+        event(MotionEvent.ACTION_MOVE,260f);event(MotionEvent.ACTION_UP,260f)
+        val states=frames.map{it.getJSONArray("contacts").getJSONObject(0).getString("state")}
+        assertEquals(listOf("down","up","down","up","down","move","up"),states)
+        assertTrue("The native path must not synthesize mouse double_click or right-click",mouse.isEmpty())
+        view.clearFrame()
+    }
+
     @Test fun doubleTapAndLongPressProduceDistinctMouseButtons() {
         val view = RemoteScreenView(RuntimeEnvironment.getApplication())
         view.layout(0, 0, 400, 800)
