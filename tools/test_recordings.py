@@ -123,6 +123,14 @@ class RecordingTest(unittest.TestCase):
         with self.assertRaises(Error):self.call(action='start',mode='audio',system_audio=True)
         with self.assertRaises(Error):self.call(action='start',mode='audio',microphone_gain=50)
         self.assertFalse(self.argv)
+    def test_microphone_guard_releases_panorama_only_when_microphone_is_selected(self):
+        self.call(action='start',mode='panorama')
+        with self.manager.device_guard('microphone') as result:self.assertEqual(1,result['recordings'])
+        settle(lambda:all(j['data']['status']=='completed' for j in self.manager.jobs.values()))
+        self.call(action='start',mode='panorama',audio=False,system_audio=True)
+        with self.manager.device_guard('microphone') as result:self.assertEqual(0,result['recordings'])
+        self.assertTrue(any(j['data']['status']=='recording' for j in self.manager.jobs.values()))
+
     def test_panorama_recovery_keeps_a_managed_mp4_path_and_new_audio_flags(self):
         self.manager._load();rid='b'*32
         (Path(self.temp.name)/(rid+'.json')).write_text(json.dumps(dict(id=rid,mode='panorama',audio=True,system_audio=True,path='outside.mp4',status='recording',owner='phone',created=1)))
