@@ -13,10 +13,37 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
+from contextlib import contextmanager
 
 MAX_CONTACTS = 10
 INPUT_TAG = 0x4C434D44
 DOWN, UPDATE, UP, CANCELED = 0x10000, 0x20000, 0x40000, 0x8000
+_promotion_lock = threading.Lock()
+_promotions = deque(maxlen=64)
+
+
+@contextmanager
+def authorized_promotion(points):
+    """Allow only compatibility messages for the frame we're about to inject."""
+    permit = {'points': points, 'until': time.monotonic() + 1}
+    with _promotion_lock:_promotions.append(permit)
+    try:yield
+    finally:
+        with _promotion_lock:permit['until'] = time.monotonic() + .1
+
+
+def authorized_touch_mouse(message, flags, extra, x, y):
+    if not flags & 1 or extra & 0xffffff00 != 0xff515700 or not extra & 0x80:return False
+    now = time.monotonic()
+    with _promotion_lock:
+        while _promotions and _promotions[0]['until'] < now:_promotions.popleft()
+        for permit in _promotions:
+            if permit['until'] < now:continue
+            for point in permit['points']:
+                messages = {'down': (0x200,0x201), 'move': (0x200,), 'up': (0x200,0x202)}[point['state']]
+                if message in messages and abs(point['x']-x)<=1 and abs(point['y']-y)<=1:return True
+    return False
 
 
 class Point(ctypes.Structure):
@@ -73,6 +100,7 @@ class NativeTouch:
         if not self.user.InitializeTouchInjection(MAX_CONTACTS, 3):  # TOUCH_FEEDBACK_NONE
             raise RuntimeError('Windows 无法初始化官方触控注入接口')
         self.points = {}
+        self.prepared = None
 
     def pixel(self, item):
         width, height = self.user.GetSystemMetrics(78), self.user.GetSystemMetrics(79)
@@ -101,9 +129,16 @@ class NativeTouch:
                 time.sleep(.001)
         finally:self.user.SetMessageExtraInfo(previous)
 
-    def frame(self, contacts):
+    def prepare(self, contacts):
         frame = validate(contacts, self.points)
         pixels = {p['id']: self.pixel(p) for p in frame}
+        self.prepared = frame, pixels
+        return [dict(x=pixels[p['id']][0],y=pixels[p['id']][1],state=p['state']) for p in frame]
+
+    def frame(self, contacts):
+        frame = validate(contacts, self.points)
+        pixels = self.prepared[1] if self.prepared and self.prepared[0] == frame else {p['id']:self.pixel(p) for p in frame}
+        self.prepared = None
         # Windows requires UP coordinates to match the preceding UPDATE.
         if any(p['state'] == 'up' and pixels[p['id']] != self.points[p['id']] for p in frame):
             update = [(p['id'], UPDATE | 6, *pixels[p['id']]) for p in frame if p['id'] in self.points]
@@ -137,10 +172,13 @@ def recovery_worker(native, input_stream, output_stream, watchdog=4):
             except queue.Empty:break
             if message is None:break
             action = message.get('action')
-            if action == 'frame':native.frame(message.get('contacts'))
+            details = {}
+            if action == 'prepare':details['points'] = native.prepare(message.get('contacts'))
+            elif action == 'prepare_cancel':details['points'] = [dict(x=x,y=y,state='up') for x,y in native.points.values()]
+            elif action == 'frame':native.frame(message.get('contacts'))
             elif action == 'cancel':native.cancel()
             elif action != 'ping':raise ValueError('无效的触控工作进程请求')
-            reply(message['id'], active=len(native.points))
+            reply(message['id'], active=len(native.points), **details)
     except Exception as exc:
         try:
             output_stream.write(json.dumps(dict(ok=False, error=str(exc))) + '\n');output_stream.flush()
@@ -162,6 +200,7 @@ class TouchWorker:
         self.lines = queue.Queue()
         self.sequence = 0
         self.closed = False
+        self.failed = False
         def read():
             try:
                 for line in self.process.stdout:self.lines.put(json.loads(line))
@@ -178,10 +217,17 @@ class TouchWorker:
         try:result = self.lines.get(timeout=3)
         except queue.Empty:raise RuntimeError('Windows 官方触控注入响应超时')
         if result is None or not result.get('ok') or result.get('id') != sequence:
+            self.failed = True
             raise RuntimeError((result or {}).get('error', '触控工作进程已结束'))
         return result
 
     def call(self, action='ping', contacts=None):
+        if action in ('frame','cancel'):
+            prepared = self._call('prepare' if action == 'frame' else 'prepare_cancel', contacts)
+            with authorized_promotion(prepared['points']):return self._call(action, contacts)
+        return self._call(action, contacts)
+
+    def _call(self, action, contacts=None):
         self.sequence += 1
         message = dict(id=self.sequence, action=action)
         if contacts is not None:message['contacts'] = contacts
@@ -189,7 +235,11 @@ class TouchWorker:
         return self._receive(self.sequence)
 
     def close(self):
-        if not self.process.stdin.closed:self.process.stdin.close()
+        if not self.process.stdin.closed:
+            try:
+                if not self.failed:self.call('cancel')
+            except Exception:pass
+            finally:self.process.stdin.close()
         try:
             result = self.process.wait(5)
         except subprocess.TimeoutExpired:

@@ -13,7 +13,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'windows'))
-from touch_injection import NativeTouch, TouchInfo, TouchInjection, TouchWorker, validate, recovery_worker
+from touch_injection import NativeTouch, TouchInfo, TouchInjection, TouchWorker, validate, recovery_worker, authorized_promotion, authorized_touch_mouse
 from remote_features import RemoteFeatures
 
 
@@ -21,6 +21,13 @@ def point(ident=0, state='down', x=.25, y=.5):return dict(id=ident, state=state,
 
 
 class TouchTest(unittest.TestCase):
+    def test_touch_promotion_does_not_unlock_unrelated_physical_or_software_input(self):
+        with authorized_promotion([dict(x=100,y=200,state='down')]):
+            self.assertTrue(authorized_touch_mouse(0x201,1,0xff51578c,100,200))
+            self.assertFalse(authorized_touch_mouse(0x201,0,0xff51578c,100,200))
+            self.assertFalse(authorized_touch_mouse(0x201,1,0,100,200))
+            self.assertFalse(authorized_touch_mouse(0x201,1,0xff51578c,300,400))
+            self.assertFalse(authorized_touch_mouse(0x202,1,0xff51578c,100,200))
     def native(self):
         user = SimpleNamespace(**{name: mock.Mock() for name in
             ('SetProcessDPIAware', 'SetMessageExtraInfo', 'InitializeTouchInjection', 'InjectTouchInput', 'GetSystemMetrics')})
@@ -111,7 +118,7 @@ class NativeTouchTest(unittest.TestCase):
                 while True:
                     events = app.report('probe')['mouse_taps']
                     if sum(p['message']==0x202 for p in events)>=140:break
-                    if time.monotonic()>=deadline:self.fail('Native touch promotion was blocked by local-input hook: '+str((events,guard.native.last_touch_source)))
+                    if time.monotonic()>=deadline:self.fail('Native touch promotion was blocked by local-input hook: '+str(events))
                     time.sleep(.02)
             finally:
                 if worker:worker.close()
@@ -125,6 +132,7 @@ class NativeTouchTest(unittest.TestCase):
                 x, y = app.initial['x'], app.initial['y']
                 worker.call('frame', [point(x=x,y=y)])
                 worker.call('frame', [point(state='move',x=x+.02,y=y)])
+                worker.process.stdin.close()  # Abrupt parent EOF, without an explicit cancel command.
                 worker.close();worker = None
                 deadline = time.monotonic() + 3
                 while True:
