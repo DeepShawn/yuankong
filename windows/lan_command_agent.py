@@ -1619,7 +1619,7 @@ def tcp_server(cfg):
     ready=os.environ.pop("LANCMD_UPGRADE_READY",None)
     if ready:
         from local_upgrade import write_json
-        health=dict(version=BUILD_VERSION,display_version=VERSION,pid=os.getpid())
+        health=dict(version=BUILD_VERSION,pid=os.getpid())
         nonce=os.environ.pop("LANCMD_UPGRADE_NONCE",None)
         if nonce:health["nonce"]=nonce
         write_json(ready,health)

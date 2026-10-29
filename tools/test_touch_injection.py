@@ -110,7 +110,7 @@ class NativeTouchTest(unittest.TestCase):
                 while True:
                     events = app.report('probe')['mouse_taps']
                     if any(p['message']==0x202 for p in events):break
-                    if time.monotonic()>=deadline:self.fail('Native touch promotion was blocked by local-input hook: '+str(events))
+                    if time.monotonic()>=deadline:self.fail('Native touch promotion was blocked by local-input hook: '+str((events,guard.native.last_touch_source)))
                     time.sleep(.02)
             finally:
                 if worker:worker.close()

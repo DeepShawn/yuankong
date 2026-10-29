@@ -148,6 +148,11 @@ class NativeInputGuard:
         class Mouse(ctypes.Structure):
             _fields_ = [("point", w.POINT), ("data", w.DWORD), ("flags", w.DWORD),
                         ("time", w.DWORD), ("extra", ctypes.c_size_t)]
+        class MessageSource(ctypes.Structure):
+            _fields_ = [('device', w.DWORD), ('origin', w.DWORD)]
+        self.user.GetCurrentInputMessageSource.argtypes = [ctypes.POINTER(MessageSource)]
+        self.user.GetCurrentInputMessageSource.restype = w.BOOL
+        self.last_touch_source = None
 
         def keyboard(code, message, address):
             if code < 0:
@@ -175,6 +180,14 @@ class NativeInputGuard:
             event = ctypes.cast(address, ctypes.POINTER(Mouse)).contents
             if event.flags & 1 and event.extra == INPUT_TAG:
                 return self.user.CallNextHookEx(None, code, message, address)
+            if event.flags & 1 and event.extra & 0xffffff00 == 0xff515700 and event.extra & 0x80:
+                source = MessageSource()
+                known = self.user.GetCurrentInputMessageSource(ctypes.byref(source))
+                self.last_touch_source = (event.flags,event.extra,bool(known),source.device,source.origin)
+                # Windows touch promotion has its own signature. Only software
+                # injection is allowed; hardware touch remains blocked here.
+                if known and source.device == 4 and source.origin == 2:
+                    return self.user.CallNextHookEx(None, code, message, address)
             return 1
 
         self.keyboard_proc = self.proc_type(keyboard)
