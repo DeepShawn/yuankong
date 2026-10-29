@@ -31,8 +31,9 @@ class PackagedStartupTest(unittest.TestCase):
         with zipfile.ZipFile(PACKAGE) as archive:
             archive.extractall(destination)
         cls.package = destination / "LanCmd-Windows"
-        cls.version = json.loads((cls.package / "release-manifest.json").read_text(
-            encoding="utf-8"))["version"]
+        manifest = json.loads((cls.package / "release-manifest.json").read_text(encoding="utf-8"))
+        cls.version = manifest['version']
+        cls.display_version = manifest.get('display_version', cls.version)
         spec = importlib.util.spec_from_file_location("shipped_upgrade", cls.package / "local_upgrade.py")
         cls.upgrade = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.upgrade)
@@ -47,7 +48,7 @@ class PackagedStartupTest(unittest.TestCase):
                                                         PYTHONIOENCODING="utf-8"),
                                 capture_output=True, timeout=20)
         output = (result.stdout + result.stderr).decode("utf-8", "replace")
-        if result.returncode != 1 or "LanCmd Agent v" + cls.version not in output or "Traceback" in output:
+        if result.returncode != 1 or "LanCmd Agent v" + cls.display_version not in output or "Traceback" in output:
             raise AssertionError("Shipped Python could not load receiver:\n" + output)
 
     @classmethod
@@ -80,16 +81,21 @@ class PackagedStartupTest(unittest.TestCase):
     def assert_connected(self):
         with socket.create_connection(("127.0.0.1", self.port), timeout=5) as connection:
             with connection.makefile("rwb") as stream:
+                request_id = 100
                 def call(cmd, **fields):
-                    stream.write(json.dumps(dict(id=1, cmd=cmd, **fields)).encode() + b"\n")
+                    nonlocal request_id
+                    request_id += 1
+                    stream.write(json.dumps(dict(id=request_id, cmd=cmd, **fields)).encode() + b"\n")
                     stream.flush()
                     response = json.loads(stream.readline())
                     self.assertTrue(response["ok"], response)
+                    self.assertEqual(request_id,response['id'],'Worker IPC IDs must never replace phone RPC IDs')
                     return response
                 call("hello", client_id="shipped-startup", client="Package regression")
                 capabilities = call("capabilities")
-                self.assertEqual(self.version, capabilities["version"])
-                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network", "cursor_visibility_verified", "cursor_visibility_input_queue"):
+                self.assertEqual(self.display_version, capabilities["version"])
+                self.assertEqual(self.version, capabilities['build_version'])
+                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch"):
                     self.assertIn(feature, capabilities["features"])
                 with CursorWindow() as window:
                     self.assertGreaterEqual(window.initial['display_count'], 0)
@@ -107,12 +113,29 @@ class PackagedStartupTest(unittest.TestCase):
                     finally:
                         call("session", action="end", sid=lease)
                     self.assertEqual(window.initial['display_count'], window.report('probe')['display_count'])
+                with CursorWindow(touch=True) as window:
+                    lease = call('session', scope='input')['sid']
+                    ready = call('touch', sid=lease, action='start')
+                    self.assertEqual('InjectTouchInput', ready['api'])
+                    x, y = window.initial['x'], window.initial['y']
+                    def contact(state, x):return dict(id=0,state=state,x=x,y=y)
+                    call('touch', sid=lease, action='frame', contacts=[contact('down',x)])
+                    call('touch', sid=lease, action='frame', contacts=[contact('move',x+.02)])
+                    call('session', action='end', sid=lease)  # Release an in-flight touch.
+                    deadline = time.monotonic() + 3
+                    while True:
+                        events = window.report('probe')['touch_events']
+                        if any(p['flags'] & 4 for p in events):break
+                        if time.monotonic() >= deadline:self.fail('The shipped receiver did not release its native touch: '+str(events))
+                        time.sleep(.02)
+                    self.assertTrue(any(p['flags'] & 2 for p in events))
+                    self.assertEqual(window.initial['display_count'],window.report('probe')['display_count'])
 
     def test_console_launcher_runs_shipped_python_and_all_feature_imports(self):
         result = subprocess.run([str(self.package / "LanCmdCtl.exe"), "--status"],
                                 cwd=self.folder, env=self.env, capture_output=True, timeout=20)
         self.assertEqual(1, result.returncode, result.stderr.decode("utf-8", "replace"))
-        self.assertIn(("LanCmd Agent v" + self.version).encode(), result.stdout)
+        self.assertIn(("LanCmd Agent v" + self.display_version).encode(), result.stdout)
         self.assertNotIn(b"Traceback", result.stderr)
 
     def test_gui_launcher_starts_real_receiver_and_accepts_phone_connection(self):

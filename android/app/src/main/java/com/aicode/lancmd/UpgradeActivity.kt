@@ -16,6 +16,7 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
     private var packages by mutableStateOf<List<JSONObject>>(emptyList())
     private var directory by mutableStateOf("")
     private var current by mutableStateOf("")
+    private var currentBuild = ""
     private var report by mutableStateOf("")
     private var busy by mutableStateOf(false)
     private var selected by mutableStateOf<JSONObject?>(null)
@@ -38,6 +39,7 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
         restarting=state?.getBoolean("restarting") ?: false;resumedUpdate=restarting
         targetVersion=state?.getString("target_version").orEmpty();requestId=state?.getString("request_id").orEmpty()
         current=state?.getString("current").orEmpty();directory=state?.getString("directory").orEmpty()
+        currentBuild=state?.getString("current_build") ?: current
         content {
             ListPage("Windows 本地升级") {
                 item {SectionCard("手动放入升级包") {
@@ -66,6 +68,7 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
 
     private fun showReport(result:JSONObject):String {
         directory=result.optString("directory",directory);current=result.optString("current",current)
+        currentBuild=result.optString("current_build",current)
         val job=result.optJSONObject("status") ?: JSONObject()
         val phase=job.optString("status")
         val label=when(phase) {
@@ -143,7 +146,7 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
                                 delay(1000);continue
                             }
                             val phase=showReport(result)
-                            if(phase=="completed" && targetVersion.isNotBlank() && current!=targetVersion) {
+                            if(phase=="completed" && targetVersion.isNotBlank() && currentBuild!=targetVersion) {
                                 status("原电脑仍在运行 $current，等待目标版本 $targetVersion 启动…")
                                 delay(1000);continue
                             }
@@ -171,6 +174,7 @@ class UpgradeActivity:MiuixActivity(),ConnectionManager.Listener {
         state.putString("peer_id",peerId);state.putString("peer_host",peerHost);state.putInt("peer_port",peerPort)
         state.putBoolean("restarting",restarting);state.putString("target_version",targetVersion);state.putString("request_id",requestId)
         state.putString("current",current);state.putString("directory",directory)
+        state.putString("current_build",currentBuild)
         super.onSaveInstanceState(state)
     }
 }

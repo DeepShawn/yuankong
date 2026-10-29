@@ -53,6 +53,7 @@ class WindowsBackend:
         self.guard = None
         self.guard_lock = threading.Lock()
         self.cursor_visibility = None
+        self.touch_injection = None
 
     def _input(self, callback):
         # Tagged SendInput is accepted from every RPC thread. Long text must not
@@ -86,6 +87,15 @@ class WindowsBackend:
     def release_cursor(self, owner):
         if self.cursor_visibility is not None:
             self.cursor_visibility.set_hidden(owner, False, lambda: False)
+
+    def touch(self, owner, action, contacts, allowed):
+        from touch_injection import TouchInjection
+        with self.guard_lock:
+            if self.touch_injection is None:self.touch_injection = TouchInjection()
+        return self.touch_injection.request(owner, action, contacts, allowed)
+
+    def release_touch(self, owner):
+        if self.touch_injection is not None:self.touch_injection.release(owner)
 
     def request_consent(self, session):
         """不再征求本机同意，直接放行，也不启动任何可见窗口。"""
@@ -247,6 +257,7 @@ class RemoteFeatures:
         self.pending_consents = threading.BoundedSemaphore(3)
         self.pointer_lock = threading.RLock()
         self.pointer_owners = {}
+        self.touch_owner = None
         self.playback_owner = None
         self.camera_lock=threading.RLock()
         self.camera_sessions={}
@@ -368,6 +379,13 @@ class RemoteFeatures:
         if session.scope=="camera":
             with self.camera_lock:self.camera_sessions.pop(session.sid,None)
         self._release_pointer(session)
+        release_touch = getattr(self.backend, 'release_touch', None)
+        if release_touch:
+            try:release_touch(session.sid)
+            except Exception:self.log.exception('触控工作进程继续释放触点')
+            finally:
+                with self.pointer_lock:
+                    if self.touch_owner == session.sid:self.touch_owner = None
         release_cursor = getattr(self.backend, "release_cursor", None)
         if release_cursor:
             try:
@@ -407,6 +425,7 @@ class RemoteFeatures:
                                    delta == 0 or abs(delta) > 10):
             raise self.error("滚动步数需为 -10 到 10 的非零整数")
         with self.pointer_lock:
+            if self.touch_owner is not None:raise self.error('请先抬起原生触摸触点')
             if self.playback_owner is not None and not playback:
                 raise self.error("手势正在等待或回放，请先取消手势")
             if playback and self.playback_owner != session.sid:
@@ -429,6 +448,26 @@ class RemoteFeatures:
             if action == "up":
                 self.pointer_owners.pop(button, None)
         return {"sent": True}
+
+    def touch(self, q, state):
+        session = self.active(q, state, 'input')
+        action = q.get('action', 'frame')
+        if action not in ('start', 'frame', 'cancel'):raise self.error('无效的原生触控操作')
+        with self.pointer_lock:
+            if self.playback_owner is not None or self.pointer_owners:
+                raise self.error('请先结束鼠标拖动或手势回放')
+            if self.touch_owner is not None and self.touch_owner != session.sid:
+                raise self.error('其他连接正在进行触摸操作')
+            try:
+                result = self.backend.touch(session.sid, action, q.get('contacts'),
+                    lambda: session.alive() and time.monotonic() - session.last_active < 12)
+            except Exception:
+                try:self.backend.release_touch(session.sid)
+                finally:
+                    if self.touch_owner == session.sid:self.touch_owner = None
+                raise
+            if action != 'start':self.touch_owner = session.sid if result.get('active') else None
+            return result
 
     def message(self, q, state):
         self._check(state)

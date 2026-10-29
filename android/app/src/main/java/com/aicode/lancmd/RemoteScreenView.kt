@@ -12,6 +12,7 @@ import android.view.MotionEvent
 import android.view.PointerIcon
 import androidx.appcompat.widget.AppCompatImageView
 import org.json.JSONObject
+import org.json.JSONArray
 
 /** Touch gestures are translated to ordinary Windows mouse input. */
 class RemoteScreenView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : AppCompatImageView(context, attrs) {
@@ -20,6 +21,12 @@ class RemoteScreenView @JvmOverloads constructor(context: Context, attrs: Attrib
     // this View between the normal workspace and fullscreen.
     private val hiddenPointer = PointerIcon.getSystemIcon(context, PointerIcon.TYPE_NULL)
     var onPointer: ((JSONObject) -> Unit)? = null
+    var onTouchFrame: ((JSONObject) -> Unit)? = null
+    var nativeTouchEnabled = false
+        set(value) { if (field != value) cancelGesture(); field = value }
+    private val nativePoints = LinkedHashMap<Int, RemotePoint>()
+    private var nativeSequence = false
+    private var lastNativeMove = 0L
     var touchEnabled = false
         set(value) { if (!value) cancelGesture(); field = value }
     private var imageWidth = 0
@@ -102,6 +109,11 @@ class RemoteScreenView @JvmOverloads constructor(context: Context, attrs: Attrib
     }
 
     fun cancelGesture() {
+        if (nativePoints.isNotEmpty()) {
+            nativePoints.clear()
+            onTouchFrame?.invoke(JSONObject().put("action", "cancel"))
+        }
+        nativeSequence = false
         val release = dragging
         dragging = false; accepted = false; multiple = false
         if (release) emit("up", lastPoint)
@@ -118,6 +130,7 @@ class RemoteScreenView @JvmOverloads constructor(context: Context, attrs: Attrib
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!touchEnabled || !isEnabled || imageWidth == 0) return false
+        if (nativeTouchEnabled) return nativeTouch(event)
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             startPoint = point(event.x, event.y) ?: return false
             lastPoint = startPoint; accepted = true; multiple = false; scrollRemainder = 0f
@@ -155,6 +168,55 @@ class RemoteScreenView @JvmOverloads constructor(context: Context, attrs: Attrib
             accepted = false
             parent?.requestDisallowInterceptTouchEvent(false)
         } else if (event.actionMasked == MotionEvent.ACTION_CANCEL) cancelGesture()
+        return true
+    }
+
+    private fun nativeTouch(event: MotionEvent): Boolean {
+        val action = event.actionMasked
+        if (action == MotionEvent.ACTION_DOWN) {
+            val first = point(event.x, event.y) ?: return false
+            cancelGesture()
+            nativeSequence = true
+            nativePoints[event.getPointerId(0)] = first
+            parent?.requestDisallowInterceptTouchEvent(true)
+        }
+        if (!nativeSequence) return false
+        if (action == MotionEvent.ACTION_CANCEL) { cancelGesture(); return true }
+        if (action == MotionEvent.ACTION_POINTER_DOWN && nativePoints.size < 10) {
+            val index = event.actionIndex
+            point(event.getX(index), event.getY(index))?.let { nativePoints[event.getPointerId(index)] = it }
+        }
+        if (action !in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN,
+                MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP)) return true
+        val frame = JSONArray()
+        val released = ArrayList<Int>()
+        for (index in 0 until event.pointerCount) {
+            val id = event.getPointerId(index)
+            if (id !in nativePoints) continue
+            val position = point(event.getX(index), event.getY(index), true) ?: nativePoints.getValue(id)
+            nativePoints[id] = position
+            cursor = position
+            val changed = index == event.actionIndex
+            val state = when {
+                changed && action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN) -> "down"
+                changed && action in listOf(MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP) -> "up"
+                else -> "move"
+            }
+            if (state == "up") released.add(id)
+            frame.put(JSONObject().put("id", id).put("state", state)
+                .put("x", position.x.toDouble()).put("y", position.y.toDouble()))
+        }
+        invalidate()
+        val now = SystemClock.uptimeMillis()
+        if (frame.length() > 0 && (action != MotionEvent.ACTION_MOVE || now - lastNativeMove >= 20)) {
+            onTouchFrame?.invoke(JSONObject().put("action", "frame").put("contacts", frame))
+            lastNativeMove = now
+        }
+        released.forEach { nativePoints.remove(it) }
+        if (action == MotionEvent.ACTION_UP) {
+            nativeSequence = false
+            parent?.requestDisallowInterceptTouchEvent(false)
+        }
         return true
     }
 

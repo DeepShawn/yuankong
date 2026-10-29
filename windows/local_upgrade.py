@@ -19,7 +19,7 @@ import zipfile
 LIMIT=512*1024*1024
 MANIFEST="release-manifest.json"
 REQUIRED={"LanCmdAgent.exe","LanCmdCtl.exe","Start.exe","start.bat","lan_command_agent.py","local_upgrade.py","python/pythonw.exe","python/python311.dll"}
-REMOTE_COMMANDS={"upgrade","capabilities","screen","camera","session","input","pointer","local_input","cursor","gestures"}
+REMOTE_COMMANDS={"upgrade","capabilities","screen","camera","session","input","pointer","touch","local_input","cursor","gestures"}
 
 class RecoveryError(OSError):pass
 
@@ -58,7 +58,7 @@ def write_json(path,data):
     os.replace(temp,path)
 
 
-def build_manifest(root,release,source=""):
+def build_manifest(root,release,source="",display_version=None):
     root=Path(root);version(release)
     files={}
     for path in sorted(root.rglob("*")):
@@ -68,6 +68,8 @@ def build_manifest(root,release,source=""):
         files[name]=dict(size=info.st_size,sha256=digest(path))
     if not REQUIRED.issubset(files):raise ValueError("Windows 包缺少必要运行文件")
     data=dict(product="LanCmd-Windows",format=1,arch="amd64",version=release,source=source,files=files)
+    if display_version is not None:
+        version(display_version);data['display_version']=display_version
     write_json(root/MANIFEST,data);return data
 
 
@@ -177,8 +179,9 @@ def rollback(root,backup,entries):
 
 
 class LocalUpgrade:
-    def __init__(self,root,state,release,busy=lambda:None,stop=lambda:None,prepare=lambda:None):
+    def __init__(self,root,state,release,busy=lambda:None,stop=lambda:None,prepare=lambda:None,display_version=None):
         self.root=Path(root);self.state=Path(state);self.release=release;self.busy=busy;self.stop=stop;self.prepare=prepare
+        self.display_version=display_version or release
         self.lock=threading.RLock();self.active=0;self.draining=False;self.commands={}
 
     @contextmanager
@@ -210,7 +213,7 @@ class LocalUpgrade:
                     report={}
                     try:report=json.loads((self.state/"upgrade-status.json").read_text(encoding="utf-8"))
                     except (OSError,ValueError):pass
-                    return dict(items=items,directory=str(directory),current=self.release,status=report)
+                    return dict(items=items,directory=str(directory),current=self.display_version,current_build=self.release,status=report)
                 if q.get("action")!="apply" or self.draining:raise ValueError("升级已经开始或操作无效")
                 request_id=q.get("request_id",uuid.uuid4().hex)
                 if not isinstance(request_id,str) or not re.fullmatch("[0-9a-f]{32}",request_id):raise ValueError("升级请求编号无效")

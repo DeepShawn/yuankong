@@ -44,7 +44,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 APP_ID = "LANCMD"
-VERSION = "3.5.3"
+VERSION = "3.6.0"
+BUILD_VERSION = "3.6.0"
+RELEASE_TAG = "v3.6.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1238,7 +1240,7 @@ _file_jobs = FileJobs(os.path.join(APP_DIR,"file-jobs.json"),protected=(_capture
 
 
 _file_search = FileSearch(os.path.join(APP_DIR,"file-search"))
-_updates=LocalUpgrade(_capture_dir,os.path.join(APP_DIR,"upgrade"),VERSION,upgrade_busy,upgrade_stop,_app_freeze.prepare_upgrade)
+_updates=LocalUpgrade(_capture_dir,os.path.join(APP_DIR,"upgrade"),BUILD_VERSION,upgrade_busy,upgrade_stop,_app_freeze.prepare_upgrade,display_version=VERSION)
 _startup_network=StartupNetwork(_capture_dir,WindowsStartupNetwork(_capture_dir,is_admin,
     lambda:(load_cfg()["port"],load_cfg()["discovery_port"]),_netsh),log)
 
@@ -1246,14 +1248,14 @@ _startup_network=StartupNetwork(_capture_dir,WindowsStartupNetwork(_capture_dir,
 def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
-        features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures", "cursor_visibility", "cursor_visibility_verified", "cursor_visibility_input_queue"])
+        features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures", "cursor_visibility", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch"])
         features.extend(["app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","force_delete","startup_network","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
             features.extend(["screen", "camera"])
     # session_seconds 为 None 表示共享会话不设时长上限
-    return {"version": VERSION, "features": features, "session_seconds": None}
+    return {"version": VERSION, "build_version": BUILD_VERSION, "release_tag": RELEASE_TAG, "features": features, "session_seconds": None}
 
 
 def cmd_audio(q):
@@ -1270,6 +1272,7 @@ HANDLERS = {
     "camera": lambda q, st: _remote.frame(q, st, "camera"),
     "input": _remote.keyboard,
     "pointer": _remote.pointer,
+    "touch": _remote.touch,
     "cursor": _remote.cursor,
     "local_input": _remote.local_input,
     "audio": lambda q, st: cmd_audio(q),
@@ -1616,7 +1619,7 @@ def tcp_server(cfg):
     ready=os.environ.pop("LANCMD_UPGRADE_READY",None)
     if ready:
         from local_upgrade import write_json
-        health=dict(version=VERSION,pid=os.getpid())
+        health=dict(version=BUILD_VERSION,pid=os.getpid())
         nonce=os.environ.pop("LANCMD_UPGRADE_NONCE",None)
         if nonce:health["nonce"]=nonce
         write_json(ready,health)

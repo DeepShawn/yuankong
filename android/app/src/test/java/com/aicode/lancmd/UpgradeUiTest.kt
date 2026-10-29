@@ -95,8 +95,24 @@ class UpgradeUiTest {
             }finally{controller.pause().stop().destroy()}
         }}
     }
-    private class Stub(val identity:String="same-pc",val version:String="3.4.1",phase:String="",val dropApplyReply:Boolean=false):Closeable {
+    @Test fun completionUsesTheBuildSequenceWhileShowingTheRequestedDisplayVersion() {
+        Stub(version="3.5.3",targetVersion="3.5.4").use {old ->
+            Stub(version="3.5.0",phase="completed",buildVersion="3.5.3",targetVersion="3.5.4").use {fresh ->
+                old.install();val controller=Robolectric.buildActivity(UpgradeActivity::class.java).setup();val page=controller.get()
+                try {
+                    confirm(old,page);fresh.reportId=old.requestId;old.client.close();fresh.install()
+                    waitFor{page.note.contains("等待目标版本 3.5.4")}
+                    assertTrue(page.restarting)
+                    fresh.buildVersion="3.5.4"
+                    waitFor{page.note.contains("升级已完成") && !page.restarting}
+                    compose.onNodeWithText("3.5.0").assertExists()
+                }finally{controller.pause().stop().destroy()}
+            }
+        }
+    }
+    private class Stub(val identity:String="same-pc",val version:String="3.4.1",phase:String="",val dropApplyReply:Boolean=false,buildVersion:String?=null,val targetVersion:String="3.4.2"):Closeable {
         @Volatile var phase=phase
+        @Volatile var buildVersion=buildVersion
         val server=ServerSocket(0);val client=AgentClient("127.0.0.1",server.localPort)
         val requests=CopyOnWriteArrayList<JSONObject>()
         @Volatile var requestId=""
@@ -108,11 +124,12 @@ class UpgradeUiTest {
                     if(q.optString("action")=="apply") {
                         requestId=q.getString("request_id")
                         if(dropApplyReply){requests.add(q);client.close();break}
-                        result.put("restarting",true).put("version","3.4.2").put("request_id",requestId).put("message","准备退出旧接收端")
+                        result.put("restarting",true).put("version",targetVersion).put("request_id",requestId).put("message","准备退出旧接收端")
                     }else {
                         result.put("directory","C:\\LanCmd\\upgrade").put("current",version)
                             .put("items",JSONArray().put(JSONObject().put("name","LanCmd-Windows-3.4.2.zip").put("size",1234).put("sha256","a".repeat(64))))
-                            .put("status",JSONObject().put("status",this@Stub.phase).put("version","3.4.2").put("request_id",reportId))
+                            .put("status",JSONObject().put("status",this@Stub.phase).put("version",targetVersion).put("request_id",reportId))
+                        this@Stub.buildVersion?.let{result.put("current_build",it)}
                     }
                     requests.add(q);output.write(result.toString()+"\n");output.flush()
                 }

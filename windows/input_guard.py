@@ -148,6 +148,7 @@ class NativeInputGuard:
         class Mouse(ctypes.Structure):
             _fields_ = [("point", w.POINT), ("data", w.DWORD), ("flags", w.DWORD),
                         ("time", w.DWORD), ("extra", ctypes.c_size_t)]
+        from touch_injection import authorized_touch_mouse
 
         def keyboard(code, message, address):
             if code < 0:
@@ -174,6 +175,8 @@ class NativeInputGuard:
                 return self.user.CallNextHookEx(None, code, message, address)
             event = ctypes.cast(address, ctypes.POINTER(Mouse)).contents
             if event.flags & 1 and event.extra == INPUT_TAG:
+                return self.user.CallNextHookEx(None, code, message, address)
+            if authorized_touch_mouse(message,event.flags,event.extra,event.point.x,event.point.y):
                 return self.user.CallNextHookEx(None, code, message, address)
             return 1
 

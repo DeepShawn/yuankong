@@ -1,6 +1,9 @@
 name: Publish verified release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -24,10 +27,10 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       ANDROID_RUN: ${{ inputs.android_run }}
       WINDOWS_RUN: ${{ inputs.windows_run }}
     steps:
@@ -41,41 +44,63 @@ jobs:
           import os
           import re
           import subprocess
+          import time
           from pathlib import Path
 
           tag = os.environ['RELEASE_TAG']
-          if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag):
+          if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-touch\.[1-9][0-9]*)?', tag):
               raise SystemExit('Use a semantic version release tag')
           sha = subprocess.check_output(['git', 'rev-parse', tag + '^{commit}'], text=True).strip()
-          for variable, workflow in [('ANDROID_RUN', 'android-release.yml'), ('WINDOWS_RUN', 'windows-features.yml')]:
-              run_id = os.environ[variable]
+          subprocess.run(['git', 'merge-base', '--is-ancestor', sha, 'origin/main'], check=True)
+          present = subprocess.run(['git', 'cat-file', '-e', tag + ':release.json'], capture_output=True).returncode == 0
+          identity = json.loads(subprocess.check_output(['git', 'show', tag + ':release.json'])) if present else dict(tag=tag,display_version=tag[1:],windows_build_version=tag[1:])
+          if identity['tag'] != tag or not all(re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', identity[key]) for key in ('display_version','windows_build_version')):
+              raise SystemExit('Release tag is not bound to the tagged version metadata')
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('EXPECTED_DISPLAY_VERSION=' + identity['display_version'] + '\n')
+              env.write('EXPECTED_WINDOWS_BUILD=' + identity['windows_build_version'] + '\n')
+          selected = {}
+          deadline = time.monotonic() + 900
+          builds = [('ANDROID_RUN', 'android-release.yml'), ('WINDOWS_RUN', 'windows-features.yml')]
+          while any(not os.environ.get(variable) and variable not in selected for variable, _ in builds):
+              endpoint = 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs?head_sha=' + sha + '&per_page=100'
+              runs = json.loads(subprocess.check_output(['gh', 'api', endpoint], text=True))['workflow_runs']
+              for variable, workflow in builds:
+                  matches = [run for run in runs if run['head_sha'] == sha and run['path'] == '.github/workflows/' + workflow and run['conclusion'] == 'success' and run['event'] in ('push','workflow_dispatch')]
+                  if matches:selected[variable] = str(max(matches,key=lambda run:run['id'])['id'])
+              if all(os.environ.get(variable) or variable in selected for variable,_ in builds):break
+              if time.monotonic() >= deadline:raise SystemExit('Timed out waiting for successful builds of the tagged source')
+              time.sleep(15)
+          for variable, workflow in builds:
+              run_id = os.environ.get(variable) or selected[variable]
               if not run_id.isdecimal():
                   raise SystemExit('Invalid workflow run ID')
               endpoint = 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs/' + run_id
               run = json.loads(subprocess.check_output(['gh', 'api', endpoint], text=True))
               if run['conclusion'] != 'success' or run['head_sha'] != sha or run['path'] != '.github/workflows/' + workflow:
                   raise SystemExit('Build must succeed on the exact tagged source: ' + variable)
+              with open(os.environ['GITHUB_ENV'], 'a') as env:env.write(variable + '=' + run_id + '\n')
           if not Path('docs/releases/' + tag + '.md').is_file():
               raise SystemExit('Missing reviewed release notes')
           print('Both successful builds match ' + tag + ' at ' + sha)
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.android_run }}
+          run-id: ${{ env.ANDROID_RUN }}
           pattern: LanCmd-signed-Android-*
           merge-multiple: true
           path: dist
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.windows_run }}
+          run-id: ${{ env.WINDOWS_RUN }}
           pattern: LanCmd-Windows-*
           merge-multiple: true
           path: dist
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.android_run }}
+          run-id: ${{ env.ANDROID_RUN }}
           pattern: Android-test-reports-*
           merge-multiple: true
           path: test-reports
@@ -114,8 +139,10 @@ jobs:
                   raise SystemExit('Damaged Windows archive')
               import json
               manifest = json.loads(package.read('LanCmd-Windows/release-manifest.json'))
-              if manifest.get('product') != 'LanCmd-Windows' or manifest.get('version') != version or manifest.get('arch') != 'amd64':
+              if manifest.get('product') != 'LanCmd-Windows' or manifest.get('version') != os.environ['EXPECTED_WINDOWS_BUILD'] or manifest.get('arch') != 'amd64':
                   raise SystemExit('Invalid local upgrade manifest')
+              if manifest.get('display_version',manifest['version']) != os.environ['EXPECTED_DISPLAY_VERSION']:
+                  raise SystemExit('Windows display version differs from tagged identity')
               for name, item in manifest['files'].items():
                   data = package.read('LanCmd-Windows/' + name)
                   if len(data) != item['size'] or hashlib.sha256(data).hexdigest() != item['sha256']:
@@ -129,7 +156,9 @@ jobs:
               for name in ('python/_sqlite3.pyd', 'python/sqlite3.dll'):
                   if not package.read('LanCmd-Windows/' + name):
                       raise SystemExit('Missing SQLite runtime: ' + name)
-              for name in ('storage_reads.py', 'cursor_visibility.py', 'force_delete.py', 'startup_network.py', 'start.bat'):
+              for name in ('storage_reads.py', 'cursor_visibility.py', 'force_delete.py', 'startup_network.py', 'touch_injection.py', 'start.bat'):
+                  if name == 'touch_injection.py' and subprocess.run(['git', 'cat-file', '-e', tag + ':windows/' + name],capture_output=True).returncode:
+                      continue
                   source = subprocess.check_output(['git', 'show', tag + ':windows/' + name])
                   if name == 'start.bat':
                       # Match .gitattributes: Git stores LF, checkout/package uses CRLF.
@@ -150,12 +179,14 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
+          title="LanCmd $version"
+          if [ "$version" != "$EXPECTED_DISPLAY_VERSION" ]; then title="LanCmd $EXPECTED_DISPLAY_VERSION（原生触控版）"; fi
           notes="docs/releases/$RELEASE_TAG.md"
           assets=("dist/LanCmd-$version.apk" "dist/LanCmd-Windows-$version.zip" "dist/SHA256SUMS-$version.txt")
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
-            gh release edit "$RELEASE_TAG" --draft=false --latest --title "LanCmd $version" --notes-file "$notes"
+            gh release edit "$RELEASE_TAG" --draft=false --latest --title "$title" --notes-file "$notes"
           else
-            gh release create "$RELEASE_TAG" --verify-tag --latest --title "LanCmd $version" --notes-file "$notes" "${assets[@]}"
+            gh release create "$RELEASE_TAG" --verify-tag --latest --title "$title" --notes-file "$notes" "${assets[@]}"
           fi
           gh release view "$RELEASE_TAG" --json url,tagName,isDraft,assets

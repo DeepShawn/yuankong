@@ -228,6 +228,32 @@ class DesktopUiTest {
         assertEquals(-2, events.single().getInt("delta"))
     }
 
+    @Test fun nativeSurfaceForwardsContactLifetimesAndCancellationWithoutMouseEvents() {
+        val view = RemoteScreenView(RuntimeEnvironment.getApplication())
+        view.layout(0,0,400,400)
+        view.showFrame(Bitmap.createBitmap(400,400,Bitmap.Config.ARGB_8888))
+        view.nativeTouchEnabled=true;view.touchEnabled=true
+        val frames=ArrayList<JSONObject>();val mouse=ArrayList<JSONObject>()
+        view.onTouchFrame={frames.add(it)};view.onPointer={mouse.add(it)}
+        val base=SystemClock.uptimeMillis()
+        fun touch(action:Int,count:Int) {
+            val properties=Array(count){i->MotionEvent.PointerProperties().apply{id=i;toolType=MotionEvent.TOOL_TYPE_FINGER}}
+            val coords=Array(count){i->MotionEvent.PointerCoords().apply{x=100f+i*100;y=200f;pressure=1f;size=1f}}
+            MotionEvent.obtain(base,SystemClock.uptimeMillis(),action,count,properties,coords,0,0,1f,1f,0,0,InputDevice.SOURCE_TOUCHSCREEN,0)
+                .also{view.onTouchEvent(it);it.recycle()}
+        }
+        touch(MotionEvent.ACTION_DOWN,1)
+        touch(MotionEvent.ACTION_POINTER_DOWN or (1 shl 8),2)
+        touch(MotionEvent.ACTION_POINTER_UP or (1 shl 8),2)
+        view.touchEnabled=false
+        assertEquals(listOf("down"),frames[0].getJSONArray("contacts").let{a->(0 until a.length()).map{a.getJSONObject(it).getString("state")}})
+        assertEquals(listOf("move","down"),frames[1].getJSONArray("contacts").let{a->(0 until a.length()).map{a.getJSONObject(it).getString("state")}})
+        assertEquals(listOf("move","up"),frames[2].getJSONArray("contacts").let{a->(0 until a.length()).map{a.getJSONObject(it).getString("state")}})
+        assertEquals("cancel",frames.last().getString("action"))
+        shadowOf(Looper.getMainLooper()).idleFor(1000,TimeUnit.MILLISECONDS)
+        assertTrue("Native touch must never emit delayed mouse clicks",mouse.isEmpty())
+    }
+
     @Test fun doubleTapAndLongPressProduceDistinctMouseButtons() {
         val view = RemoteScreenView(RuntimeEnvironment.getApplication())
         view.layout(0, 0, 400, 800)
@@ -291,10 +317,10 @@ class DesktopUiTest {
                     .also { screen.onTouchEvent(it); it.recycle() }
             }
             shadowOf(Looper.getMainLooper()).idleFor(400, TimeUnit.MILLISECONDS)
-            waitUntil { stub.requests.any { it.second.optString("cmd") == "pointer" } }
+            waitUntil { stub.requests.any { it.second.optString("cmd") == "touch" && it.second.optString("action") == "frame" } }
             waitUntil { stub.requests.count { it.second.optString("cmd") == "screen" } > before }
             assertTrue("命令执行中不应允许再次执行", activity.commandBusy)
-            val connections = listOf("screen", "pointer", "exec").map { command -> stub.requests.first { it.second.optString("cmd") == command }.first }
+            val connections = listOf("screen", "touch", "exec").map { command -> stub.requests.first { it.second.optString("cmd") == command }.first }
             assertEquals("Three independent connections are required", 3, connections.toSet().size)
             stub.commandGate.countDown()
             waitUntil { activity.terminalText.contains("terminal-output") }
@@ -313,41 +339,41 @@ class DesktopUiTest {
         }
     }
 
-    @Test fun cursorStaysHiddenAcrossModesAndInternalChildrenUntilSessionEnds() {
-        Stub(cursorSupported=true).use {stub ->
+    @Test fun nativeTouchDoesNotAlterCursorSchemesAcrossModesAndInternalChildren() {
+        Stub().use {stub ->
             stub.install();val controller=Robolectric.buildActivity(DesktopActivity::class.java).setup();val page=controller.get()
             try {
-                page.begin()
-                waitUntil{stub.requests.any{it.second.optString("cmd")=="cursor" && it.second.optBoolean("hidden")}}
-                page.mode=1;page.touchShared=false
+                page.begin();waitUntil{page.sharing && stub.requests.any{it.second.optString("cmd")=="touch"}}
+                for(index in 0..2)page.mode=index
                 controller.pause().stop()
-                assertFalse(stub.requests.any{it.second.optString("cmd")=="cursor" && !it.second.optBoolean("hidden")})
                 controller.start().resume().visible()
-                waitUntil{stub.requests.count{it.second.optString("cmd")=="cursor" && it.second.optBoolean("hidden")}>=2}
-                page.stopSession()
-                waitUntil{!page.sharing}
+                waitUntil{stub.requests.count{it.second.optString("cmd")=="screen"}>=2}
+                assertFalse(stub.requests.any{it.second.optString("cmd")=="cursor"})
+                page.stopSession();waitUntil{!page.sharing}
                 assertTrue(stub.requests.any{it.second.optString("cmd")=="session" && it.second.optString("action")=="end"})
+                assertFalse(stub.requests.any{it.second.optString("cmd")=="cursor"})
             }finally{controller.pause().stop().destroy()}
         }
     }
 
-    @Test fun desktopCannotStartControlWithoutVerifiedCursorSupport() {
-        Stub(cursorSupported=false).use {stub ->
+    @Test fun missingOfficialTouchSupportCannotFallBackToMouseControl() {
+        Stub(nativeTouchSupported=false).use {stub ->
             stub.install();val controller=Robolectric.buildActivity(DesktopActivity::class.java).setup();val page=controller.get()
             try {
-                page.begin();waitUntil{!page.sharing && page.note.contains("光标已隐藏")}
+                page.begin();waitUntil{!page.sharing && page.note.contains("v3.6.0")}
                 assertFalse(stub.requests.any{it.second.optString("cmd")=="session"})
+                assertFalse(stub.requests.any{it.second.optString("cmd")=="pointer"})
             }finally{controller.pause().stop().destroy()}
         }
     }
 
-    @Test fun desktopRejectsOldWindowsCursorImplementationEvenWhenItReportsVerified() {
-        Stub(queueCursorSupported=false).use {stub ->
+    @Test fun touchInitializationFailureDoesNotEnableTheSurfaceOrModifyTheCursor() {
+        Stub(touchReady=false).use {stub ->
             stub.install();val controller=Robolectric.buildActivity(DesktopActivity::class.java).setup();val page=controller.get()
             try {
-                page.begin();waitUntil{!page.sharing && page.note.contains("Windows 3.5.3")}
-                assertTrue(page.note.contains("只更新安卓"))
-                assertFalse(stub.requests.any{it.second.optString("cmd")=="session"})
+                page.begin();waitUntil{!page.sharing && page.note.contains("官方触控接口未就绪")}
+                assertFalse(page.findViewById<RemoteScreenView>(R.id.desktopScreen).touchEnabled)
+                assertFalse(stub.requests.any{it.second.optString("cmd") in listOf("pointer","cursor")})
             }finally{controller.pause().stop().destroy()}
         }
     }
@@ -459,7 +485,7 @@ class DesktopUiTest {
         }
     }
 
-    private class Stub(private val pointerSupported: Boolean = true, private val localSupported: Boolean = false, private val cursorSupported:Boolean=true, private val queueCursorSupported:Boolean=true) : Closeable {
+    private class Stub(private val pointerSupported: Boolean = true, private val localSupported: Boolean = false, private val nativeTouchSupported:Boolean=true, private val touchReady:Boolean=true) : Closeable {
         private val server = ServerSocket(0)
         private val clients = CopyOnWriteArrayList<Socket>()
         private val workers = CopyOnWriteArrayList<Thread>()
@@ -487,8 +513,8 @@ class DesktopUiTest {
                                     val result = JSONObject().put("ok", true).put("id", request.getInt("id"))
                                     when (request.optString("cmd")) {
                                         "hello" -> result.put("agent_id", "desktop-test").put("token", "test-token")
-                                        "capabilities" -> result.put("features", JSONArray(listOf("screen", "input") + (if(cursorSupported)listOf("cursor_visibility","cursor_visibility_verified")else emptyList()) + (if(queueCursorSupported)listOf("cursor_visibility_input_queue")else emptyList()) + (if (pointerSupported) listOf("pointer") else emptyList()) + (if (localSupported) listOf("local_input", "touch_pause") else emptyList())))
-                                        "cursor" -> result.put("hidden",request.optBoolean("hidden")).put("verified",true)
+                                        "capabilities" -> result.put("features", JSONArray(listOf("screen", "input") + (if(nativeTouchSupported)listOf("native_touch")else emptyList()) + (if (pointerSupported) listOf("pointer") else emptyList()) + (if (localSupported) listOf("local_input", "touch_pause") else emptyList())))
+                                        "touch" -> result.put("api",if(touchReady)"InjectTouchInput" else "unavailable").put("max_contacts",10).put("active",0)
                                         "local_input" -> {
                                             if (request.optString("action") == "pause") paused = true
                                             if (request.optString("action") == "release") paused = false

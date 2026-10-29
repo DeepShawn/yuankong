@@ -33,6 +33,12 @@ class UpgradeTest(unittest.TestCase):
         for release in ("3.4.0","3.5.0"):
             with self.assertRaisesRegex(ValueError,"版本"):unpack(self.zip,self.root/"stage",release)
         self.assertFalse((self.root/"stage").exists())
+    def test_display_version_can_return_to_350_without_downgrading_the_upgrade_sequence(self):
+        build_manifest(self.package,'3.5.4',display_version='3.5.0');self.archive()
+        manifest=unpack(self.zip,self.root/'touch-stage','3.5.3')
+        self.assertEqual('3.5.0',manifest['display_version'])
+        self.assertEqual('3.5.4',manifest['version'])
+        with self.assertRaisesRegex(ValueError,'版本'):unpack(self.zip,None,'3.5.4')
     def test_changed_file_does_not_leave_staged_partial_release(self):
         (self.package/"lan_command_agent.py").write_bytes(b"tampered");self.archive()
         with self.assertRaises(ValueError):unpack(self.zip,self.root/"stage","3.3.0")

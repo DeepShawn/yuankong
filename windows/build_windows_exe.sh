@@ -6,12 +6,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 VER=$(python3 -c "import re;print(re.search(r'VERSION = \"([0-9.]+)\"', open('lan_command_agent.py',encoding='utf-8').read()).group(1))")
+BUILD_VER=$(python3 -c "import re;print(re.search(r'BUILD_VERSION = \"([0-9.]+)\"', open('lan_command_agent.py',encoding='utf-8').read()).group(1))")
+ARTIFACT_VER=$(python3 -c "import json;print(json.load(open('../release.json'))['tag'][1:])")
 EMBED_VER="3.11.9"
 EMBED_ZIP="python-${EMBED_VER}-embed-amd64.zip"
 EMBED_URL="https://www.python.org/ftp/python/${EMBED_VER}/${EMBED_ZIP}"
 WORK="$(pwd)/build-win"
 PKG="$WORK/pkg/LanCmd-Windows"
-OUT="$(pwd)/../dist/LanCmd-Windows-${VER}.zip"
+OUT="$(pwd)/../dist/LanCmd-Windows-${ARTIFACT_VER}.zip"
 
 CC=${CC:-x86_64-w64-mingw32-gcc}
 RC=${RC:-x86_64-w64-mingw32-windres}
@@ -61,13 +63,13 @@ rm -f "$PKG/python"/_msi.pyd \
       "$PKG/python"/winsound.pyd "$PKG/python"/_decimal.pyd "$PKG/python"/_elementtree.pyd \
       "$PKG/python"/_asyncio.pyd "$PKG/python"/_zoneinfo.pyd "$PKG/python"/_multiprocessing.pyd
 cp "使用说明.txt" "$PKG/使用说明.txt"
-cp local_upgrade.py "$PKG/"
+cp local_upgrade.py touch_injection.py "$PKG/"
 mkdir -p "$PKG/upgrade"
 cp upgrade/README.txt "$PKG/upgrade/"
-python3 - "$PKG" "$VER" <<'PY'
+python3 - "$PKG" "$BUILD_VER" "$VER" <<'PY'
 import sys
 from local_upgrade import build_manifest
-build_manifest(sys.argv[1],sys.argv[2])
+build_manifest(sys.argv[1],sys.argv[2],display_version=sys.argv[3])
 PY
 
 # 5) 打包
