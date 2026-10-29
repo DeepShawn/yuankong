@@ -39,6 +39,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.stylusHoverIcon
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.Alignment
@@ -473,9 +476,16 @@ fun ActionRow(content: @Composable RowScope.() -> Unit) {
  */
 @Composable
 fun HostedView(view: View, modifier: Modifier = Modifier) {
+    // Compose resolves hover icons before the embedded View on some input
+    // paths. Apply the same empty icon here, scoped to the remote picture.
+    val hostedModifier = if (view is RemoteScreenView) {
+        val hidden = PointerIcon(android.view.PointerIcon.TYPE_NULL)
+        modifier.pointerHoverIcon(hidden, overrideDescendants = true)
+            .stylusHoverIcon(hidden, overrideDescendants = true)
+    } else modifier
     AndroidView(
         factory = { FrameLayout(it) },
-        modifier = modifier,
+        modifier = hostedModifier,
         update = { host ->
             if (view.parent !== host) {
                 (view.parent as? ViewGroup)?.removeView(view)
