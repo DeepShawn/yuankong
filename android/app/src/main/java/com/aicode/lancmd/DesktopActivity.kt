@@ -75,7 +75,6 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
 
     private var touchOptionsExpanded by mutableStateOf(false)
     private var landscape by mutableStateOf(false)
-    private var cursorSupported=false
     private var touchPauseSupported = false
     private var sessionJob: Job? = null
     private var terminalJob: Job? = null
@@ -93,6 +92,13 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
         AppVisibility.observe(this) { if (sessionJob?.isActive == true) stopSession() }
         screen = RemoteScreenView(this).apply {
             id = R.id.desktopScreen
+            nativeTouchEnabled = true
+            onTouchFrame = { params ->
+                params.optJSONArray("contacts")?.optJSONObject(0)?.let {
+                    pointer = RemotePoint(it.getDouble("x").toFloat(), it.getDouble("y").toFloat())
+                }
+                enqueue("touch", params)
+            }
             onPointer = { params ->
                 pointer = RemotePoint(params.getDouble("x").toFloat(), params.getDouble("y").toFloat())
                 enqueue("pointer", params)
@@ -141,7 +147,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                         title,
                         selected = index == mode,
                         modifier = Modifier.weight(1f)
-                    ) { screen.cancelGesture();mode = index;updateCursorVisibility() }
+                    ) { screen.cancelGesture();mode = index }
                 }
                 Action("全屏", modifier = Modifier.weight(1f)) { showFullscreen(true) }
             }
@@ -159,14 +165,8 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
             ActionRow {
                 SelectionAction(if(touchShared)"触控已开启" else "触控已关闭",selected=touchShared,enabled=sharing,modifier=Modifier.weight(1f)) {
                     touchShared=!touchShared;screen.touchEnabled=touchShared && commands!=null
-                    updateCursorVisibility()
                 }
                 SelectionAction(if(touchOptionsExpanded)"收起更多" else "更多操作",selected=touchOptionsExpanded,modifier=Modifier.weight(1f)) {touchOptionsExpanded=!touchOptionsExpanded}
-            }
-            ActionRow {
-                pointerKeys.forEachIndexed { index, text ->
-                    Action(text, enabled = sharing, modifier = Modifier.weight(1f)) { pointerKey(index) }
-                }
             }
             ActionRow {
                 Action("电脑音量", modifier = Modifier.weight(1f)) { AudioDialog(this@DesktopActivity).show() }
@@ -177,6 +177,12 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                 ) { changeLocalInput() }
             }
             if(touchOptionsExpanded) {
+            Note("画面使用 Windows 原生触控。下方鼠标兼容按钮会移动电脑鼠标。")
+            ActionRow {
+                pointerKeys.forEachIndexed { index, text ->
+                    Action(text, enabled = sharing, modifier = Modifier.weight(1f)) { pointerKey(index) }
+                }
+            }
             Action("运行中的桌面程序") {
                 startActivity(Intent(this@DesktopActivity, AppsActivity::class.java))
             }
@@ -252,12 +258,6 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
         }
     }
 
-    private fun updateCursorVisibility() {
-        // One input lease spans touch, keyboard, terminal and internal child
-        // pages. AppVisibility ends that lease when the whole app leaves.
-        if(cursorSupported && sharing)enqueue("cursor",JSONObject().put("hidden",true))
-    }
-
     internal fun pointerKey(index: Int) {
         screen.cancelGesture()
         val params = JSONObject().put("x", pointer.x.toDouble()).put("y", pointer.y.toDouble())
@@ -326,11 +326,8 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                         (0 until capabilities.length()).none { capabilities.optString(it) == required }
                     }
                 ) error("请完整更新 Windows 1.6.0 接收端，新版本支持屏幕触控")
-                if ((0 until capabilities.length()).none { capabilities.optString(it) == "cursor_visibility_verified" }) {
-                    error("远程控制需要确认 Windows 系统光标已隐藏，请完整更新 Windows 3.5.3 接收端后再开始；手机触控圆点仍保留")
-                }
-                if ((0 until capabilities.length()).none { capabilities.optString(it) == "cursor_visibility_input_queue" }) {
-                    error("电脑端仍使用旧光标逻辑，请停止旧接收端并完整更新 Windows 3.5.3 后重新启动；只更新安卓无法修复电脑上的光标")
+                if ((0 until capabilities.length()).none { capabilities.optString(it) == "native_touch" }) {
+                    error("电脑端尚未支持原生触控，请停止旧接收端并完整更新 Windows 触控版 v3.5.0-touch.1；只更新安卓无法改变电脑输入方式")
                 }
                 status("正在连接画面、键鼠与终端…")
                 suspend fun connection(): AgentClient {
@@ -346,14 +343,10 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                 val controls = RemoteLease("input", inputs).also { inputLease = it }
                 preview.open(); controls.open()
                 coroutineContext.ensureActive(); checkOrigin(origin)
-                val cursorState = controls.call("cursor",JSONObject().put("hidden",true))
-                if(!cursorState.optBoolean("hidden") || !cursorState.optBoolean("verified")) {
-                    error("Windows 未确认系统光标隐藏，已停止本次控制；请完整更新接收端后重试")
-                }
+                val touchState = controls.call("touch",JSONObject().put("action","start"))
+                check(touchState.optString("api") == "InjectTouchInput") { "Windows 官方触控接口未就绪，已停止共享" }
                 terminalClient = terminal
                 commands = queue
-                cursorSupported=(0 until capabilities.length()).any {capabilities.optString(it)=="cursor_visibility"}
-                updateCursorVisibility()
                 val hasLocalInput = (0 until capabilities.length())
                     .any { capabilities.optString(it) == "local_input" }
                 touchPauseSupported = (0 until capabilities.length())
@@ -362,15 +355,6 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                 localPauseEnabled = hasLocalInput && touchPauseSupported
                 screen.touchEnabled = touchShared
                 coroutineScope {
-                    launch {
-                        while(isActive) {
-                            val cursorState=controls.call("cursor",JSONObject().put("hidden",true))
-                            if(!cursorState.optBoolean("hidden") || !cursorState.optBoolean("verified")) {
-                                error("Windows 系统光标隐藏失效，已停止本次控制")
-                            }
-                            delay(1000)
-                        }
-                    }
                     launch {
                         while (isActive) {
                             checkOrigin(origin)
@@ -406,7 +390,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                         }
                         coroutineContext.ensureActive(); checkOrigin(origin)
                         screen.showFrame(bitmap)
-                        status("共享中 · ${bitmap.width} × ${bitmap.height} · 触控与终端可同时使用")
+                        status("共享中 · ${bitmap.width} × ${bitmap.height} · Windows 原生触控")
                         delay(350)
                     }
                 }
@@ -418,7 +402,6 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                 terminalJob?.cancel(); terminalClient = null; source = null
                 localRequest?.cancel(); localLease = null; localPaused = false
                 localPauseEnabled = false
-                cursorSupported=false
                 localPauseLabel = "暂停本机输入"
                 localStatusText = "共享已结束，本机输入将恢复"
                 if (!isDestroyed) screen.clearFrame()
