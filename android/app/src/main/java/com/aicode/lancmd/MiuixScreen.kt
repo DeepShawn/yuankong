@@ -524,7 +524,8 @@ fun Field(
     singleLine: Boolean = true,
     maxLines: Int = if (singleLine) 1 else 8,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
-    modifier:Modifier=Modifier
+    modifier:Modifier=Modifier,
+    password:Boolean=false
 ) {
     TextField(
         value = value,
@@ -533,6 +534,7 @@ fun Field(
         singleLine = singleLine,
         maxLines = maxLines,
         keyboardOptions = keyboardOptions,
+        visualTransformation = if(password)androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
         modifier = modifier.fillMaxWidth().padding(vertical = 4.dp)
     )
 }

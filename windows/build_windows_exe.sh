@@ -60,10 +60,11 @@ cp lan_command_agent.py remote_features.py cursor_visibility.py storage_reads.py
 # 精简：接收端用不到这些
 rm -f "$PKG/python"/_msi.pyd \
       "$PKG/python"/_bz2.pyd "$PKG/python"/_lzma.pyd "$PKG/python"/_overlapped.pyd \
-      "$PKG/python"/winsound.pyd "$PKG/python"/_decimal.pyd "$PKG/python"/_elementtree.pyd \
+      "$PKG/python"/winsound.pyd "$PKG/python"/_decimal.pyd \
       "$PKG/python"/_asyncio.pyd "$PKG/python"/_zoneinfo.pyd "$PKG/python"/_multiprocessing.pyd
 cp "使用说明.txt" "$PKG/使用说明.txt"
 cp local_upgrade.py touch_injection.py "$PKG/"
+cp network_management.py native_wifi.py network_winrt.ps1 "$PKG/"
 mkdir -p "$PKG/upgrade"
 cp upgrade/README.txt "$PKG/upgrade/"
 python3 - "$PKG" "$BUILD_VER" "$VER" <<'PY'

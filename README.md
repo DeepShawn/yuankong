@@ -3,6 +3,8 @@
 手机在同一个局域网下直接控制电脑：执行命令、查看屏幕和摄像头、发送消息和按键、管理磁盘文件、锁屏与剪贴板。
 电脑端由本机启动、停止接收服务；手机端开机即自动发现、**不用输连接码**、**掉线自动重连**。
 
+**3.7.0：新增「网络与蓝牙」：移动热点名称、密码、频段和客户端，Wi-Fi 扫描与连接密码，蓝牙搜索与手机确认配对，网卡开关、DNS 和 DHCP 续租。后台任务与原电脑重连跟踪，保留 miuix 主题。**
+
 **3.6.0：远程画面改用微软官方 InjectTouchInput，发送单指／多点触摸，不再用移动鼠标和隐藏图案模拟触控；共享结束只释放触点。保留手机触控圆点，改进锁定本机输入时的触摸兼容和本地升级状态校验。需要双端完整更新。**
 
 **3.5.3：修复应用收到远程鼠标事件后重设自有光标的缺口；Windows 在目标应用输入队列中临时隐藏，发送鼠标事件前准备目标窗口，结束后恢复。必须完整更新并重启电脑接收端；安卓检查新能力，保留手机触控圆圈。**
@@ -51,9 +53,9 @@
 
 1.9.0：触屏输入暂停、桌面程序管理、文件打开/解压/预览、顺序延迟命令列表，以及全屏等比显示和虚拟键盘更新。
 
-- [下载 Android 3.6.0 APK](https://github.com/DeepShawn/yuankong/releases/download/v3.6.0/LanCmd-3.6.0.apk)
-- [下载 Windows 3.6.0 接收端](https://github.com/DeepShawn/yuankong/releases/download/v3.6.0/LanCmd-Windows-3.6.0.zip)
-- 新功能与限制见 [3.6.0 说明](docs/releases/v3.6.0.md)。
+- [下载 Android 3.7.0 APK](https://github.com/DeepShawn/yuankong/releases/download/v3.7.0/LanCmd-3.7.0.apk)
+- [下载 Windows 3.7.0 接收端](https://github.com/DeepShawn/yuankong/releases/download/v3.7.0/LanCmd-Windows-3.7.0.zip)
+- 新功能与限制见 [3.7.0 说明](docs/releases/v3.7.0.md)。
 - 首页「更多」进入录制与手势板，详见 [2.2.0 说明](docs/releases/v2.2.0.md)。录制遵循系统隐私权限和设备指示，不自动更改系统隐私设置。
 - 首页「U盘锁 / 设备」查看 USB 存储和 USB MTP/PTP 手机。可移动磁盘支持锁定、只读和恢复原策略；便携设备支持锁定和恢复。管理员接收端可修改策略或安全弹出设备，标准权限可查看。
 - 新增「远程桌面」卡片，点击画面控制电脑：单击、双击、长按右键、拖动、双指滚动。

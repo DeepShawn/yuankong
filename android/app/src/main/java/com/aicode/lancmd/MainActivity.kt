@@ -133,6 +133,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 Tool("桌面背景") { openFeature(WallpaperActivity::class.java) },
                 Tool("本地升级") { openFeature(UpgradeActivity::class.java) },
                 Tool("启动与网络") { openFeature(StartupNetworkActivity::class.java) }
+                Tool("网络与蓝牙") { openFeature(NetworkManagementActivity::class.java) }
             ),
             "录制与自动化" to listOf(
                 Tool("录音 / 录屏") { openFeature(RecordingsActivity::class.java) },
