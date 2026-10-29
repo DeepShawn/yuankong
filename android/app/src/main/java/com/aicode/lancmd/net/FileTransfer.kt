@@ -52,7 +52,9 @@ object FileTransfer {
         remotePath: String,
         expectedClient: AgentClient?,
         onProgress: (Progress) -> Unit,
-        expectedFileId: String? = null
+        expectedFileId: String? = null,
+        maxBytes: Long = Long.MAX_VALUE,
+        overwrite: Boolean = true
     ): JSONObject = withContext(Dispatchers.IO) {
         val resolver = ctx.contentResolver
         val knownSize = querySize(ctx, uri)
@@ -65,6 +67,7 @@ object FileTransfer {
             return client.call("upload", params, timeout)
         }
         try {
+            if(maxBytes < 0 || knownSize > maxBytes)throw IOException("文件超过允许的大小上限：${humanSize(maxBytes)}")
             val source: () -> InputStream
             val size: Long
             if (knownSize > 0) {
@@ -77,10 +80,13 @@ object FileTransfer {
                 resolver.openInputStream(uri)?.use { input ->
                     FileOutputStream(cached).use { out ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var copied=0L
                         while (true) {
                             coroutineContext.ensureActive()
                             val count = input.read(buffer)
                             if (count < 0) break
+                            copied+=count
+                            if(copied>maxBytes)throw IOException("文件超过允许的大小上限：${humanSize(maxBytes)}")
                             out.write(buffer, 0, count)
                         }
                     }
@@ -95,7 +101,7 @@ object FileTransfer {
                 JSONObject()
                     .put("action", "begin")
                     .put("path", remotePath)
-                    .put("size", size).apply { if(expectedFileId!=null)put("file_id",expectedFileId) },
+                    .put("size", size).put("overwrite",overwrite).apply { if(expectedFileId!=null)put("file_id",expectedFileId) },
                 20_000
             )
             if (!begin.optBoolean("ok")) throw IOException(begin.optString("error", "无法开始上传"))

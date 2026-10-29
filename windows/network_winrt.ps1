@@ -57,9 +57,24 @@ function Hotspot-Status($manager) {
         @{address=$_.MacAddress;hosts=@($_.HostNames | ForEach-Object {$_.CanonicalName})}
     })
     $band=if($config.PSObject.Properties.Name -contains 'Band'){$config.Band.ToString()}else{'SystemManaged'}
+    $private=@();$privateError=''
+    try {
+        $sharing=New-Object -ComObject HNetCfg.HNetShare
+        $adapters=@(Get-NetAdapter -IncludeHidden -ErrorAction Stop)
+        foreach($connection in $sharing.EnumEveryConnection) {
+            $configSharing=$sharing.INetSharingConfigurationForINetConnection($connection)
+            if($configSharing.SharingEnabled -and $configSharing.SharingConnectionType -eq 1) {
+                $props=$sharing.NetConnectionProps($connection)
+                foreach($adapter in $adapters | Where-Object {$_.InterfaceGuid -eq [Guid]$props.Guid}) {
+                    $private+=@{id=$adapter.InterfaceGuid.ToString();name=$adapter.Name;index=$adapter.ifIndex}
+                }
+            }
+        }
+    } catch {$privateError=$_.Exception.Message}
     return @{supported=$true;state=$manager.TetheringOperationalState.ToString();name=$config.Ssid;
         band=$band;band_supported=($config.PSObject.Properties.Name -contains 'Band');clients=$clients;
-        client_count=[int]$manager.ClientCount;max_clients=[int]$manager.MaxClientCount;individual_disconnect=$false}
+        client_count=[int]$manager.ClientCount;max_clients=[int]$manager.MaxClientCount;individual_disconnect=$false;
+        private_adapters=$private;private_adapter_error=$privateError}
 }
 
 function Bluetooth-Status {
@@ -201,7 +216,11 @@ function Adapter-Status {
 }
 
 try {
-    if($request.area -eq 'adapters') {
+    if($request.area -eq 'hardware') {
+        $data=@{devices=@(Get-PnpDevice -PresentOnly -ErrorAction Stop | Where-Object {$_.Class -in @('Net','Bluetooth')} | ForEach-Object {
+            @{id=[string]$_.InstanceId;name=[string]$_.FriendlyName;kind=if($_.Class -eq 'Net'){'net'}else{'bluetooth'}}
+        })}
+    } elseif($request.area -eq 'adapters') {
         if($request.operation -ne 'status') {
             $adapter=@(Get-NetAdapter | Where-Object {$_.InterfaceGuid.ToString() -eq $request.adapter})
             if($adapter.Count -ne 1){throw '网卡已变化，请刷新并重新选择'}

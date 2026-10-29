@@ -73,12 +73,12 @@ def build_manifest(root,release,source="",display_version=None):
     write_json(root/MANIFEST,data);return data
 
 
-def unpack(package,destination,current):
+def unpack(package,destination,current,stream=None):
     """Validate all entries and hashes before touching the installed directory."""
     package=Path(package);info=ordinary(package)
     if info.st_size>LIMIT:raise ValueError("升级 ZIP 不得超过 512 MiB")
     destination=Path(destination) if destination is not None else None
-    with zipfile.ZipFile(package) as archive:
+    with zipfile.ZipFile(stream if stream is not None else package) as archive:
         members=archive.infolist()
         if len(members)>2000 or sum(m.file_size for m in members)>LIMIT:raise ValueError("升级包展开后过大或文件过多")
         by_name={}
@@ -135,6 +135,63 @@ def unpack(package,destination,current):
     return manifest
 
 
+@contextmanager
+def cleanup_archive(path):
+    """Validate and delete the same file, denying concurrent replacement on Windows."""
+    path=Path(path);before=ordinary(path)
+    if os.name!='nt':
+        with path.open('rb') as stream:
+            def remove():
+                after=ordinary(path)
+                if (before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns)!=(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns):
+                    raise ValueError('升级 ZIP 已变化，未清理')
+                path.unlink()
+            yield stream,remove
+        return
+    import msvcrt
+    from ctypes import wintypes as w
+    kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+    kernel.CreateFileW.argtypes=[w.LPCWSTR,w.DWORD,w.DWORD,ctypes.c_void_p,w.DWORD,w.DWORD,w.HANDLE]
+    kernel.CreateFileW.restype=w.HANDLE
+    kernel.CloseHandle.argtypes=[w.HANDLE]
+    kernel.SetFileInformationByHandle.argtypes=[w.HANDLE,ctypes.c_int,ctypes.c_void_p,w.DWORD]
+    # GENERIC_READ | DELETE, share READ only, OPEN_REPARSE_POINT. A file being
+    # uploaded or replaced is skipped; never force a writer or another app off it.
+    handle=kernel.CreateFileW(str(path),0x80010000,1,None,3,0x00200000,None)
+    if handle==ctypes.c_void_p(-1).value:raise ctypes.WinError(ctypes.get_last_error())
+    try:descriptor=msvcrt.open_osfhandle(handle,os.O_RDONLY|os.O_BINARY)
+    except Exception:kernel.CloseHandle(handle);raise
+    with os.fdopen(descriptor,'rb') as stream:
+        current=ordinary(path);opened=os.fstat(stream.fileno())
+        if (current.st_dev,current.st_ino)!=(opened.st_dev,opened.st_ino):raise ValueError('升级 ZIP 已变化，未清理')
+        def remove():
+            disposition=ctypes.c_ubyte(1)
+            if not kernel.SetFileInformationByHandle(handle,4,ctypes.byref(disposition),1):raise ctypes.WinError(ctypes.get_last_error())
+        yield stream,remove
+
+
+def cleanup_packages(root,work,current,allowed=lambda:True):
+    """Only complete compatible archives <= the healthy build; preserve backups."""
+    root,work=Path(root),Path(work);ordinary(root,True);ordinary(work,True)
+    directory=root/'upgrade';ordinary(directory,True)
+    result=dict(status='completed',deleted=0,failed=0,skipped=0)
+    candidates=[p for p in list(directory.iterdir())[:200] if p.suffix.lower()=='.zip']
+    candidates.append(work/'package.zip')
+    for path in candidates:
+        if not allowed():break
+        try:
+            with cleanup_archive(path) as (stream,remove):
+                manifest=unpack(path,None,'0.0.0',stream=stream)
+                if version(manifest['version'])>version(current):result['skipped']+=1;continue
+                if not allowed():break
+                remove()
+            result['deleted']+=1
+        except FileNotFoundError:continue
+        except (ValueError,TypeError,KeyError,zipfile.BadZipFile):result['skipped']+=1
+        except OSError:result['failed']+=1
+    return result
+
+
 def safe_target(root,name):
     target=Path(root)
     ordinary(target,True)
@@ -183,6 +240,46 @@ class LocalUpgrade:
         self.root=Path(root);self.state=Path(state);self.release=release;self.busy=busy;self.stop=stop;self.prepare=prepare
         self.display_version=display_version or release
         self.lock=threading.RLock();self.active=0;self.draining=False;self.commands={}
+        self.cleaning=False
+
+    def cleanup_after_start(self,ready,timeout=60):
+        # This runs in the NEW receiver, so upgrading from an old helper that
+        # does not know cleanup also works on the first upgrade to this version.
+        work=Path(ready).parent
+        if work.parent.resolve()!=(self.root/'.upgrade').resolve():return
+        def run():
+            try:
+                ordinary(self.root/'.upgrade',True);ordinary(work,True)
+                path=self.state/'upgrade-status.json';deadline=time.monotonic()+timeout
+                while time.monotonic()<deadline:
+                    try:report=json.loads(path.read_text(encoding='utf-8'))
+                    except (OSError,ValueError):time.sleep(.25);continue
+                    if report.get('backup')!=str(work/'backup'):time.sleep(.25);continue
+                    if report.get('status') in ('failed','rolled_back','cancelled'):return
+                    if report.get('status')=='completed' and report.get('version')==self.release and report.get('pid')==os.getpid():break
+                    time.sleep(.25)
+                else:return
+                request=report.get('request_id')
+                def allowed():
+                    try:
+                        now=json.loads(path.read_text(encoding='utf-8'))
+                        return now.get('status')=='completed' and now.get('request_id')==request and now.get('pid')==os.getpid() and not self.draining
+                    except (OSError,ValueError):return False
+                with self.lock:
+                    if not allowed():return
+                    self.cleaning=True
+                    report['cleanup']=dict(status='running',deleted=0,failed=0)
+                    write_json(path,report)
+                result=cleanup_packages(self.root,work,self.release,allowed)
+                with self.lock:
+                    if allowed():report['cleanup']=result;write_json(path,report)
+            except Exception:
+                # A cleanup failure must never roll back or stop a healthy build.
+                pass
+            finally:
+                with self.lock:self.cleaning=False
+        thread=threading.Thread(target=run,daemon=True,name='lancmd-upgrade-cleanup');thread.start()
+        return thread
 
     @contextmanager
     def operation(self,command):
@@ -203,7 +300,12 @@ class LocalUpgrade:
                 directory=self.root/"upgrade";directory.mkdir(exist_ok=True);ordinary(directory,True)
                 if q.get("action","list")=="list":
                     items=[]
-                    for path in (list(directory.iterdir())[:200] if q.get("include_packages",True) else []):
+                    candidates=[]
+                    for path in (list(directory.iterdir())[:200] if q.get('include_packages',True) else []):
+                        if path.suffix.lower()!='.zip':continue
+                        try:candidates.append((ordinary(path).st_mtime_ns,path))
+                        except (OSError,ValueError):continue
+                    for _,path in sorted(candidates,key=lambda entry:entry[0],reverse=True):
                         if len(items)>=5:break
                         if path.suffix.lower()!=".zip":continue
                         try:
@@ -215,6 +317,7 @@ class LocalUpgrade:
                     except (OSError,ValueError):pass
                     return dict(items=items,directory=str(directory),current=self.display_version,current_build=self.release,status=report)
                 if q.get("action")!="apply" or self.draining:raise ValueError("升级已经开始或操作无效")
+                if self.cleaning:raise ValueError("正在清理旧升级包，请稍后再升级")
                 request_id=q.get("request_id",uuid.uuid4().hex)
                 if not isinstance(request_id,str) or not re.fullmatch("[0-9a-f]{32}",request_id):raise ValueError("升级请求编号无效")
                 name=q.get("name")

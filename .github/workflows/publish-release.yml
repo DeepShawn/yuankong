@@ -156,8 +156,8 @@ jobs:
               for name in ('python/_sqlite3.pyd', 'python/sqlite3.dll'):
                   if not package.read('LanCmd-Windows/' + name):
                       raise SystemExit('Missing SQLite runtime: ' + name)
-              for name in ('storage_reads.py', 'cursor_visibility.py', 'force_delete.py', 'startup_network.py', 'touch_injection.py', 'network_management.py', 'native_wifi.py', 'network_winrt.ps1', 'start.bat'):
-                  if name in ('touch_injection.py', 'network_management.py', 'native_wifi.py', 'network_winrt.ps1') and subprocess.run(['git', 'cat-file', '-e', tag + ':windows/' + name],capture_output=True).returncode:
+              for name in ('storage_reads.py', 'cursor_visibility.py', 'force_delete.py', 'startup_network.py', 'touch_injection.py', 'network_management.py', 'native_wifi.py', 'hotspot_access.py', 'network_winrt.ps1', 'start.bat'):
+                  if name in ('touch_injection.py', 'network_management.py', 'native_wifi.py', 'hotspot_access.py', 'network_winrt.ps1') and subprocess.run(['git', 'cat-file', '-e', tag + ':windows/' + name],capture_output=True).returncode:
                       continue
                   source = subprocess.check_output(['git', 'show', tag + ':windows/' + name])
                   if name == 'start.bat':

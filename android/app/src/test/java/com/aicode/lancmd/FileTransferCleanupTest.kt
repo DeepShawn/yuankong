@@ -99,6 +99,13 @@ class FileTransferCleanupTest {
         assertNoCache()
     }
 
+    @Test fun boundedUpgradeUploadRejectsAnUnknownSizeProviderBeforeGrowingTheCachePastLimit() {
+        val error=assertThrows(IOException::class.java) {
+            runBlocking {FileTransfer.uploadRevision(app,uri,"upgrade/test.zip",null,{},maxBytes=1024)}
+        }
+        assertTrue(error.message.orEmpty().contains("大小上限"));assertNoCache()
+    }
+
     @Test
     fun localReadFailureRemovesUnknownSizeCache() {
         provider.failOpen = true

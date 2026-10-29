@@ -4,6 +4,9 @@ import android.app.Application
 import android.content.Context
 import android.os.Bundle
 import android.os.Looper
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
 import kotlinx.coroutines.*
@@ -26,6 +29,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 @ConscryptMode(ConscryptMode.Mode.OFF)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class NetworkManagementUiTest {
+    @get:Rule val compose=createEmptyComposeRule()
     @Before fun before(){disconnect();RuntimeEnvironment.getApplication().getSharedPreferences("network-pending",Context.MODE_PRIVATE).edit().clear().commit()}
     @After fun after()=disconnect()
     private fun disconnect() {
@@ -110,6 +114,41 @@ class NetworkManagementUiTest {
         }
     }
 
+    @Test fun deviceDisableIsConfirmedAndSentAsAnExactBluetoothInstance() {
+        Stub().use {stub ->
+            stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
+            try {
+                waitFor{page.supported && !page.busy && page.snapshots.isNotEmpty()}
+                page.selectArea("bluetooth");waitFor{!page.busy && page.snapshots.containsKey("bluetooth")}
+                compose.onNodeWithText("展开设备级启停").performSemanticsAction(SemanticsActions.OnClick){it()}
+                compose.onNodeWithText("停用设备").performSemanticsAction(SemanticsActions.OnClick){it()}
+                assertFalse(stub.requests.any{it.optString("operation")=="device"})
+                compose.onNodeWithText("执行").performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{!page.busy && stub.requests.any{it.optString("operation")=="device"}}
+                val q=stub.requests.single{it.optString("operation")=="device"}
+                assertEquals("bluetooth",q.getString("area"));assertEquals("bt-device",q.getJSONObject("params").getString("instance"))
+                assertFalse(q.getJSONObject("params").getBoolean("enabled"))
+            }finally{c.pause().stop().destroy()}
+        }
+    }
+
+    @Test fun hotspotClientAccessNeedsPhoneConfirmationAndTargetsOnlyTheSelectedMac() {
+        Stub().use {stub ->
+            stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
+            try {
+                waitFor{page.supported && !page.busy && page.snapshots.isNotEmpty()}
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("禁止联网"))
+                compose.onNodeWithText("禁止联网").performSemanticsAction(SemanticsActions.OnClick){it()}
+                assertFalse(stub.requests.any{it.optString("operation")=="client_access"})
+                compose.onNodeWithText("执行").performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{!page.busy && stub.requests.any{it.optString("operation")=="client_access"}}
+                val q=stub.requests.single{it.optString("operation")=="client_access"}
+                assertEquals("hotspot",q.getString("area"));assertEquals("02:21:32:43:54:65",q.getJSONObject("params").getString("address"))
+                assertTrue(q.getJSONObject("params").getBoolean("blocked"))
+            }finally{c.pause().stop().destroy()}
+        }
+    }
+
     private class Stub(val supported:Boolean=true,val fail:Boolean=false,val pair:Boolean=false,val dropReply:Boolean=false):Closeable {
         val requests=CopyOnWriteArrayList<JSONObject>()
         private val server=ServerSocket(0)
@@ -124,13 +163,16 @@ class NetworkManagementUiTest {
                     while(true) {
                         val q=JSONObject(input.readLine()?:break);requests.add(q)
                         val r=JSONObject().put("id",q.getInt("id")).put("ok",true)
-                        if(q.optString("cmd")=="capabilities")r.put("features",JSONArray().apply{if(supported)put("network_management")})
+                        if(q.optString("cmd")=="capabilities")r.put("features",JSONArray().apply{if(supported){put("network_management");put("network_device_state");put("hotspot_client_access")}})
                         else {
                             if(q.optString("action")=="submit"){submitted=q;if(dropReply)break}
                             if(q.optString("action")=="answer")answered=true
                             val area=q.optString("area","hotspot")
                             r.put("area",area).put("snapshot",JSONObject().put("supported",true).put("state","Off").put("name","office")
-                                .put("clients",JSONArray()).put("interfaces",JSONArray()).put("devices",JSONArray()).put("adapters",JSONArray()).put("radios",JSONArray()))
+                                .put("clients",JSONArray().apply{if(area=="hotspot")put(JSONObject().put("address","02:21:32:43:54:65").put("hosts",JSONArray()))})
+                                .put("interfaces",JSONArray()).put("devices",JSONArray()).put("adapters",JSONArray()).put("radios",JSONArray())
+                                .put("hardware",JSONArray().put(JSONObject().put("id",if(area=="bluetooth")"bt-device" else "net-device")
+                                    .put("name","测试设备").put("enabled",true).put("problem",0))))
                             if(submitted!=null && q.optString("action")!="refresh") {
                                 val job=JSONObject().put("id","a".repeat(32)).put("area",submitted!!.optString("area"))
                                     .put("request_id",submitted!!.optString("request_id")).put("status",if(pair && !answered)"awaiting_input" else if(fail)"failed" else "completed")

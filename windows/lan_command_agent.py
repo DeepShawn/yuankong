@@ -44,9 +44,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 APP_ID = "LANCMD"
-VERSION = "3.7.0"
-BUILD_VERSION = "3.7.0"
-RELEASE_TAG = "v3.7.0"
+VERSION = "3.8.0"
+BUILD_VERSION = "3.8.0"
+RELEASE_TAG = "v3.8.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1148,7 +1148,7 @@ from file_schedule import FileSchedule
 from file_search import FileSearch
 from local_upgrade import LocalUpgrade
 from startup_network import StartupNetwork, WindowsStartupNetwork
-from network_management import NetworkManagement
+from network_management import NetworkManagement, WindowsNetwork
 import weakref
 _connections=weakref.WeakSet()
 _connections_lock=threading.RLock()
@@ -1245,14 +1245,14 @@ _file_search = FileSearch(os.path.join(APP_DIR,"file-search"))
 _updates=LocalUpgrade(_capture_dir,os.path.join(APP_DIR,"upgrade"),BUILD_VERSION,upgrade_busy,upgrade_stop,_app_freeze.prepare_upgrade,display_version=VERSION)
 _startup_network=StartupNetwork(_capture_dir,WindowsStartupNetwork(_capture_dir,is_admin,
     lambda:(load_cfg()["port"],load_cfg()["discovery_port"]),_netsh),log)
-_network_management=NetworkManagement()
+_network_management=NetworkManagement(WindowsNetwork(os.path.join(APP_DIR,'hotspot-blocks.json')))
 
 
 def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures", "cursor_visibility", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"])
-        features.extend(["app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","force_delete","startup_network","network_management","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
+        features.extend(["app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","force_delete","startup_network","network_management","network_device_state","hotspot_client_access","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1627,6 +1627,7 @@ def tcp_server(cfg):
         nonce=os.environ.pop("LANCMD_UPGRADE_NONCE",None)
         if nonce:health["nonce"]=nonce
         write_json(ready,health)
+        _updates.cleanup_after_start(ready)
     enable_keepalive(srv)
     log.info("TCP 监听 %s:%s", cfg["bind"], cfg["port"])
     while not STOP.is_set():
