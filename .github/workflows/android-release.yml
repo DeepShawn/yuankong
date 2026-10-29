@@ -3,6 +3,8 @@ name: Android signed APK
 on:
   workflow_dispatch:
   push:
+    branches:
+      - 'codex/**'
     tags:
       - 'v*'
 

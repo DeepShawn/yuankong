@@ -1,6 +1,9 @@
 name: Publish verified release
 
 on:
+  push:
+    tags:
+      - 'v*-touch.*'
   workflow_dispatch:
     inputs:
       tag:
@@ -24,10 +27,10 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       ANDROID_RUN: ${{ inputs.android_run }}
       WINDOWS_RUN: ${{ inputs.windows_run }}
     steps:
@@ -41,12 +44,14 @@ jobs:
           import os
           import re
           import subprocess
+          import time
           from pathlib import Path
 
           tag = os.environ['RELEASE_TAG']
           if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-touch\.[1-9][0-9]*)?', tag):
               raise SystemExit('Use a semantic version release tag')
           sha = subprocess.check_output(['git', 'rev-parse', tag + '^{commit}'], text=True).strip()
+          subprocess.run(['git', 'merge-base', '--is-ancestor', sha, 'origin/main'], check=True)
           present = subprocess.run(['git', 'cat-file', '-e', tag + ':release.json'], capture_output=True).returncode == 0
           identity = json.loads(subprocess.check_output(['git', 'show', tag + ':release.json'])) if present else dict(tag=tag,display_version=tag[1:],windows_build_version=tag[1:])
           if identity['tag'] != tag or not all(re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', identity[key]) for key in ('display_version','windows_build_version')):
@@ -54,35 +59,48 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as env:
               env.write('EXPECTED_DISPLAY_VERSION=' + identity['display_version'] + '\n')
               env.write('EXPECTED_WINDOWS_BUILD=' + identity['windows_build_version'] + '\n')
-          for variable, workflow in [('ANDROID_RUN', 'android-release.yml'), ('WINDOWS_RUN', 'windows-features.yml')]:
-              run_id = os.environ[variable]
+          selected = {}
+          deadline = time.monotonic() + 900
+          builds = [('ANDROID_RUN', 'android-release.yml'), ('WINDOWS_RUN', 'windows-features.yml')]
+          while any(not os.environ.get(variable) and variable not in selected for variable, _ in builds):
+              endpoint = 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs?head_sha=' + sha + '&per_page=100'
+              runs = json.loads(subprocess.check_output(['gh', 'api', endpoint], text=True))['workflow_runs']
+              for variable, workflow in builds:
+                  matches = [run for run in runs if run['head_sha'] == sha and run['path'] == '.github/workflows/' + workflow and run['conclusion'] == 'success' and run['event'] in ('push','workflow_dispatch')]
+                  if matches:selected[variable] = str(max(matches,key=lambda run:run['id'])['id'])
+              if all(os.environ.get(variable) or variable in selected for variable,_ in builds):break
+              if time.monotonic() >= deadline:raise SystemExit('Timed out waiting for successful builds of the tagged source')
+              time.sleep(15)
+          for variable, workflow in builds:
+              run_id = os.environ.get(variable) or selected[variable]
               if not run_id.isdecimal():
                   raise SystemExit('Invalid workflow run ID')
               endpoint = 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs/' + run_id
               run = json.loads(subprocess.check_output(['gh', 'api', endpoint], text=True))
               if run['conclusion'] != 'success' or run['head_sha'] != sha or run['path'] != '.github/workflows/' + workflow:
                   raise SystemExit('Build must succeed on the exact tagged source: ' + variable)
+              with open(os.environ['GITHUB_ENV'], 'a') as env:env.write(variable + '=' + run_id + '\n')
           if not Path('docs/releases/' + tag + '.md').is_file():
               raise SystemExit('Missing reviewed release notes')
           print('Both successful builds match ' + tag + ' at ' + sha)
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.android_run }}
+          run-id: ${{ env.ANDROID_RUN }}
           pattern: LanCmd-signed-Android-*
           merge-multiple: true
           path: dist
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.windows_run }}
+          run-id: ${{ env.WINDOWS_RUN }}
           pattern: LanCmd-Windows-*
           merge-multiple: true
           path: dist
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.android_run }}
+          run-id: ${{ env.ANDROID_RUN }}
           pattern: Android-test-reports-*
           merge-multiple: true
           path: test-reports
