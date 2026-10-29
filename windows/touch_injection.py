@@ -43,7 +43,7 @@ def authorized_touch_mouse(message, flags, extra, x, y):
         for permit in _promotions:
             if permit['until'] < now:continue
             for point in permit['points']:
-                messages = {'down': (0x200,0x201), 'move': (0x200,), 'up': (0x200,0x202)}[point['state']]
+                messages = {'down': (0x200,0x201,0x204), 'move': (0x200,), 'up': (0x200,0x202,0x205)}[point['state']]
                 if message in messages and abs(point['x']-x)<=1 and abs(point['y']-y)<=1:
                     if message != 0x200:
                         if message in point['delivered']:continue
