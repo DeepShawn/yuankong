@@ -9,11 +9,16 @@ import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.PointerIcon
 import androidx.appcompat.widget.AppCompatImageView
 import org.json.JSONObject
 
 /** Touch gestures are translated to ordinary Windows mouse input. */
 class RemoteScreenView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : AppCompatImageView(context, attrs) {
+    // Android's mouse/stylus pointer is independent of the Windows cursor and
+    // our painted touch circle. Resolve it here, including after Compose moves
+    // this View between the normal workspace and fullscreen.
+    private val hiddenPointer = PointerIcon.getSystemIcon(context, PointerIcon.TYPE_NULL)
     var onPointer: ((JSONObject) -> Unit)? = null
     var touchEnabled = false
         set(value) { if (!value) cancelGesture(); field = value }
@@ -58,11 +63,14 @@ class RemoteScreenView @JvmOverloads constructor(context: Context, attrs: Attrib
     })
 
     init {
+        pointerIcon = hiddenPointer
         scaleType = ScaleType.FIT_CENTER
         setBackgroundColor(0xff05080c.toInt())
         contentDescription = "电脑屏幕；轻点单击、双击、长按右键、单指拖动、双指滚动"
         isClickable = true
     }
+
+    override fun onResolvePointerIcon(event: MotionEvent, pointerIndex: Int): PointerIcon = hiddenPointer
 
     fun showFrame(bitmap: Bitmap) {
         if (imageWidth != bitmap.width || imageHeight != bitmap.height) cancelGesture()
@@ -113,6 +121,8 @@ class RemoteScreenView @JvmOverloads constructor(context: Context, attrs: Attrib
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             startPoint = point(event.x, event.y) ?: return false
             lastPoint = startPoint; accepted = true; multiple = false; scrollRemainder = 0f
+            cursor = startPoint
+            invalidate()
             parent?.requestDisallowInterceptTouchEvent(true)
         }
         if (!accepted) return false

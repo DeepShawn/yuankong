@@ -8,6 +8,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
+import android.view.PointerIcon
 import android.view.View
 import androidx.appcompat.app.AlertDialog
 import com.aicode.lancmd.net.AgentClient
@@ -97,10 +98,12 @@ class DesktopUiTest {
         for (index in 0..2) {
             activity.mode = index
             render(activity, "desktop-idle-$index")
+            assertEquals(PointerIcon.TYPE_NULL, activity.findViewById<RemoteScreenView>(R.id.desktopScreen).pointerIcon.type)
         }
         activity.showFullscreen(true)
         render(activity, "desktop-fullscreen-portrait")
         assertTrue(activity.fullscreen)
+        assertEquals(PointerIcon.TYPE_NULL, activity.findViewById<RemoteScreenView>(R.id.desktopScreen).pointerIcon.type)
         assertTrue("Fullscreen image must use the full body height", activity.findViewById<RemoteScreenView>(R.id.desktopScreen).height > 750)
         activity.onBackPressedDispatcher.onBackPressed()
         assertFalse(activity.isFinishing)
@@ -157,6 +160,50 @@ class DesktopUiTest {
             output.recycle()
         }
         view.clearFrame(); source.recycle()
+    }
+
+    @Test fun remoteSurfaceSuppressesAndroidMouseAndStylusPointersInEveryInputState() {
+        val view = RemoteScreenView(RuntimeEnvironment.getApplication())
+        view.layout(0, 0, 400, 400)
+        view.showFrame(Bitmap.createBitmap(400, 400, Bitmap.Config.ARGB_8888))
+        for (source in listOf(InputDevice.SOURCE_MOUSE, InputDevice.SOURCE_STYLUS, InputDevice.SOURCE_TOUCHSCREEN)) {
+            val event = MotionEvent.obtain(0, 0, MotionEvent.ACTION_HOVER_MOVE, 200f, 200f, 0)
+            event.source = source
+            try {
+                for (enabled in listOf(false, true)) {
+                    view.touchEnabled = enabled
+                    assertEquals(PointerIcon.TYPE_NULL, view.onResolvePointerIcon(event, 0).type)
+                    assertEquals(PointerIcon.TYPE_NULL, view.pointerIcon.type)
+                }
+                view.clearFrame()
+                assertEquals("An empty preview must not restore Android's arrow", PointerIcon.TYPE_NULL,
+                    view.onResolvePointerIcon(event, 0).type)
+            } finally { event.recycle() }
+        }
+    }
+
+    @Test fun hidingSystemPointerPreservesImmediatePhoneTouchCircle() {
+        val view = RemoteScreenView(RuntimeEnvironment.getApplication())
+        view.layout(0, 0, 400, 400)
+        val source = Bitmap.createBitmap(400, 400, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(android.graphics.Color.WHITE)
+        }
+        view.showFrame(source); view.touchEnabled = true
+        val events = ArrayList<JSONObject>()
+        view.onPointer = { events.add(it) }
+        val time = SystemClock.uptimeMillis()
+        MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 200f, 200f, 0).also {
+            view.onTouchEvent(it); it.recycle()
+        }
+        val output = Bitmap.createBitmap(400, 400, Bitmap.Config.ARGB_8888)
+        view.draw(Canvas(output))
+        assertTrue("Finger down must show the ring before a confirmed tap sends a click", events.isEmpty())
+        val ring = output.getPixel(208, 200)
+        assertTrue("The phone's green touch ring must remain visible",
+            android.graphics.Color.green(ring) > android.graphics.Color.red(ring) + 50)
+        assertEquals(android.graphics.Color.WHITE, output.getPixel(200, 200))
+        assertEquals(android.graphics.Color.WHITE, output.getPixel(220, 200))
+        view.clearFrame(); source.recycle(); output.recycle()
     }
 
     @Test fun twoFingerScrollDoesNotGenerateClicksOrLeaveDrag() {
