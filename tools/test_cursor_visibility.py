@@ -162,6 +162,25 @@ class CursorTest(unittest.TestCase):
 
 @unittest.skipUnless(os.name=='nt','Requires Windows cursor bitmap and recovery APIs')
 class NativeCursorTest(unittest.TestCase):
+    def test_cross_window_pointer_handoff_restores_each_application_and_eof_restores_the_current_one(self):
+        from cursor_window_fixture import CursorWindow
+        from remote_features import WindowsBackend
+        backend = WindowsBackend('unused')
+        with CursorWindow(100) as first, CursorWindow(500) as second:
+            try:
+                backend.cursor('handoff', True, lambda: True)
+                for active, inactive in ((first, second), (second, first), (first, second)):
+                    backend.pointer('click', active.initial['x'], active.initial['y'], 'left', 0, lambda: True)
+                    current = active.report('probe')
+                    self.assertEqual(current['custom'], current['selected'])
+                    self.assertLess(current['display_count'], 0, current)
+                    self.assertEqual(inactive.initial['display_count'], inactive.report('probe')['display_count'])
+            finally:
+                backend.release_cursor('handoff')  # EOF to the actual recovery worker.
+                if backend.guard:backend.guard.close()
+            for window in (first, second):
+                self.assertEqual(window.initial['display_count'], window.report('probe')['display_count'])
+
     def test_real_foreground_app_cannot_redisplay_its_own_cursor_after_remote_mouse_input(self):
         from cursor_window_fixture import CursorWindow
         from remote_features import WindowsBackend
