@@ -179,10 +179,10 @@ struct Camera {
     std::vector<BYTE> frame() { std::lock_guard<std::mutex> hold(lock); check(error); return latest; }
     ~Camera() { done = true; if (source.p) source->Shutdown(); if (worker.joinable()) worker.join(); }
 };
-struct Microphone {
+struct MicrophoneCapture {
     HWAVEIN input = nullptr; WAVEFORMATEX format = {}; WAVEHDR headers[6] = {};
     std::vector<BYTE> buffers[6]; UINT64 samples = 0;
-    explicit Microphone(int device) {
+    explicit MicrophoneCapture(int device) {
         format.wFormatTag = WAVE_FORMAT_PCM; format.nChannels = 1; format.nSamplesPerSec = 48000;
         format.wBitsPerSample = 16; format.nBlockAlign = 2; format.nAvgBytesPerSec = 96000;
         if (waveInOpen(&input, device < 0 ? WAVE_MAPPER : UINT(device), &format, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR)
@@ -200,7 +200,7 @@ struct Microphone {
         for (auto& header : headers) if (header.dwFlags & WHDR_PREPARED) waveInUnprepareHeader(input, &header, sizeof(WAVEHDR));
         waveInClose(input); input = nullptr;
     }
-    ~Microphone() { cleanup(); }
+    ~MicrophoneCapture() { cleanup(); }
     template<class F> void drain(F consume, bool recycle) {
         // Headers complete in queue order. Always consume from the oldest one.
         for (int attempts = 0; attempts < 6; ++attempts) {
@@ -465,7 +465,7 @@ static void record(const wchar_t* mode, const wchar_t* path, int micIndex, int c
     if (!audioOnly && !desktop && std::wcscmp(mode, L"camera") != 0) throw E_INVALIDARG;
     if (audioOnly && micIndex == -2) throw E_INVALIDARG;
     if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) throw HRESULT_FROM_WIN32(ERROR_FILE_EXISTS);
-    std::unique_ptr<Microphone> mic; if (micIndex != -2) mic.reset(new Microphone(micIndex));
+    std::unique_ptr<MicrophoneCapture> mic; if (micIndex != -2) mic.reset(new MicrophoneCapture(micIndex));
     std::unique_ptr<Screen> screen; std::unique_ptr<Camera> camera; std::unique_ptr<Video> video; std::unique_ptr<Wav> wav;
     UINT w = 0, h = 0;
     if (audioOnly) wav.reset(new Wav(path));
@@ -514,7 +514,7 @@ static void recordCombined(const wchar_t* mode, const wchar_t* path, int micInde
     if (!desktop && std::wcscmp(mode,L"camera") != 0) throw E_INVALIDARG;
     if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) throw HRESULT_FROM_WIN32(ERROR_FILE_EXISTS);
     recordingSource = "microphone";
-    std::unique_ptr<Microphone> mic; if (micIndex != -2) mic.reset(new Microphone(micIndex));
+    std::unique_ptr<MicrophoneCapture> mic; if (micIndex != -2) mic.reset(new MicrophoneCapture(micIndex));
     recordingSource = "system_audio";
     std::unique_ptr<Loopback> loopback; if (systemAudio) loopback.reset(new Loopback());
     recordingSource = "screen";
@@ -606,7 +606,7 @@ int wmain(int argc, wchar_t** argv) {
         else if (argc == 3 && std::wcscmp(argv[1], L"self-test") == 0) selfTest(argv[2]);
         else if (argc == 2 && std::wcscmp(argv[1],L"loopback-probe") == 0) {
             recordingSource="system_audio";Loopback endpoint;
-            std::printf("{\"loopback_probe\":true,\"capture_started\":false,\"rate\":%u,\"channels\":%u}\n",endpoint.format->nSamplesPerSec,endpoint.format->nChannels);
+            std::printf("{\"loopback_probe\":true,\"capture_started\":false,\"rate\":%u,\"channels\":%u}\n",unsigned(endpoint.format->nSamplesPerSec),unsigned(endpoint.format->nChannels));
         }
         else if ((argc == 8 || argc == 12) && std::wcscmp(argv[1], L"record") == 0) {
             int mic = number(argv[4], -2, 1023), camera = number(argv[5], 0, 31), seconds = number(argv[6], 1, 3600);
