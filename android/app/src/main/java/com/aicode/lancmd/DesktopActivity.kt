@@ -253,7 +253,9 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
     }
 
     private fun updateCursorVisibility() {
-        if(cursorSupported)enqueue("cursor",JSONObject().put("hidden",touchShared && mode==0 && pageVisible))
+        // One input lease spans touch, keyboard, terminal and internal child
+        // pages. AppVisibility ends that lease when the whole app leaves.
+        if(cursorSupported && sharing)enqueue("cursor",JSONObject().put("hidden",true))
     }
 
     internal fun pointerKey(index: Int) {
@@ -324,6 +326,9 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                         (0 until capabilities.length()).none { capabilities.optString(it) == required }
                     }
                 ) error("请完整更新 Windows 1.6.0 接收端，新版本支持屏幕触控")
+                if ((0 until capabilities.length()).none { capabilities.optString(it) == "cursor_visibility_verified" }) {
+                    error("远程控制需要确认 Windows 系统光标已隐藏，请完整更新 Windows 3.5.0 接收端后再开始；手机触控圆点仍保留")
+                }
                 status("正在连接画面、键鼠与终端…")
                 suspend fun connection(): AgentClient {
                     val client = AgentClient(origin.host, origin.port)
@@ -338,6 +343,10 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                 val controls = RemoteLease("input", inputs).also { inputLease = it }
                 preview.open(); controls.open()
                 coroutineContext.ensureActive(); checkOrigin(origin)
+                val cursorState = controls.call("cursor",JSONObject().put("hidden",true))
+                if(!cursorState.optBoolean("hidden") || !cursorState.optBoolean("verified")) {
+                    error("Windows 未确认系统光标隐藏，已停止本次控制；请完整更新接收端后重试")
+                }
                 terminalClient = terminal
                 commands = queue
                 cursorSupported=(0 until capabilities.length()).any {capabilities.optString(it)=="cursor_visibility"}
@@ -350,6 +359,15 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                 localPauseEnabled = hasLocalInput && touchPauseSupported
                 screen.touchEnabled = touchShared
                 coroutineScope {
+                    launch {
+                        while(isActive) {
+                            val cursorState=controls.call("cursor",JSONObject().put("hidden",true))
+                            if(!cursorState.optBoolean("hidden") || !cursorState.optBoolean("verified")) {
+                                error("Windows 系统光标隐藏失效，已停止本次控制")
+                            }
+                            delay(1000)
+                        }
+                    }
                     launch {
                         while (isActive) {
                             checkOrigin(origin)

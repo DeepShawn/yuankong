@@ -1,6 +1,7 @@
-"""Cursor ownership and restoration; never change the test machine's cursors."""
+"""Scoped cursor ownership; native tests restore the current scheme in finally."""
 import io
 import logging
+import os
 from pathlib import Path
 import queue
 import sys
@@ -11,7 +12,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'windows'))
-from cursor_visibility import CursorVisibility, NativeCursors, recovery_worker
+from cursor_visibility import CursorVisibility, CursorWorker, NativeCursors, recovery_worker
 from remote_features import RemoteFeatures
 
 
@@ -91,7 +92,8 @@ class CursorTest(unittest.TestCase):
         remote.close(state)
 
     def test_native_handles_are_not_truncated_and_partial_changes_reload_current_scheme(self):
-        user=SimpleNamespace(**{name:mock.Mock() for name in ('CreateCursor','SetSystemCursor','DestroyCursor','SystemParametersInfoW')})
+        user=SimpleNamespace(**{name:mock.Mock() for name in ('CreateCursor','SetSystemCursor','DestroyCursor','SystemParametersInfoW',
+            'SetCursor','LoadCursorW','GetCursorInfo','GetIconInfo')})
         user.CreateCursor.return_value=0x1234567887654321
         user.SetSystemCursor.side_effect=[True,False]
         user.SystemParametersInfoW.return_value=True
@@ -102,6 +104,48 @@ class CursorTest(unittest.TestCase):
         native.restore();self.assertEqual(1,user.SystemParametersInfoW.call_count)
         import ctypes
         self.assertEqual(ctypes.c_void_p,user.CreateCursor.restype)
+
+    def test_refresh_failure_restores_instead_of_acknowledging_a_visible_cursor(self):
+        stream=Stream();native=Native();output=io.StringIO()
+        native.refresh=mock.Mock(side_effect=RuntimeError('cursor became visible'))
+        self.assertEqual(0,recovery_worker(native,stream,output))
+        self.assertTrue(native.restored.is_set())
+        self.assertIn('cursor became visible',output.getvalue())
+        stream.lines.put(None)
+
+    def test_failed_verification_is_not_returned_as_hidden(self):
+        worker=FakeWorker();worker.ping=mock.Mock(side_effect=RuntimeError('not verified'))
+        control=CursorVisibility(lambda:worker)
+        with self.assertRaisesRegex(RuntimeError,'not verified'):control.set_hidden('phone',True,lambda:True)
+        self.assertTrue(worker.closed);self.assertIsNone(control.worker);self.assertFalse(control.owners)
+
+
+@unittest.skipUnless(os.name=='nt','Requires Windows cursor bitmap and recovery APIs')
+class NativeCursorTest(unittest.TestCase):
+    def test_actual_cursor_bitmaps_are_transparent_and_a_scheme_reload_is_repaired(self):
+        native=NativeCursors()
+        before=native.transparent(native._load(32512))
+        try:
+            native.hide()
+            self.assertTrue(native.transparent(native._load(32512)))
+            current=native._current()
+            if current.flags & 1:self.assertTrue(native.transparent(current.cursor))
+            self.assertTrue(native.user.SystemParametersInfoW(0x57,0,None,0))
+            native.reapply_at=0
+            self.assertTrue(native.refresh())
+            self.assertTrue(native.transparent(native._load(32512)))
+        finally:native.restore()
+        self.assertEqual(before,native.transparent(native._load(32512)))
+
+    def test_real_worker_verifies_heartbeat_and_eof_restores_current_scheme(self):
+        native=NativeCursors()
+        before=native.transparent(native._load(32512))
+        worker=CursorWorker()
+        try:
+            worker.ping()
+            self.assertTrue(native.transparent(native._load(32512)))
+        finally:worker.close()
+        self.assertEqual(before,native.transparent(native._load(32512)))
 
 
 if __name__=='__main__':unittest.main()
