@@ -153,6 +153,13 @@ class NetworkAuthorizationTest(unittest.TestCase):
         with self.assertRaisesRegex(Error,'尝试过多'):self.unlock()
         self.now+=31;token=self.unlock();self.assertEqual(64,len(token))
         self.assertNotIn(TEST_PASSWORD,str(self.auth.__dict__))
+    def test_unlock_removes_credentials_even_when_validation_fails(self):
+        for password in ('incorrect','',None,{'bad':'value'}):
+            q=dict(action='unlock',password=password)
+            with self.assertRaisesRegex(Error,'密码错误'):self.manager.request(q,'phone',Error)
+            self.assertNotIn('password',q)
+        self.assertFalse(self.auth.sessions);self.assertFalse(self.manager.jobs)
+
     def test_global_throttle_cannot_be_bypassed_by_random_phone_ids(self):
         for index in range(30):
             with self.assertRaisesRegex(Error,'密码错误'):self.call(owner='phone-'+str(index),action='unlock',password='incorrect')

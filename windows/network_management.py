@@ -306,8 +306,8 @@ class NetworkAuthorization:
             now=self.clock();self._prune(now)
             if not self.admin():raise ValueError('NETWORK_ADMIN_REQUIRED: 请在电脑以管理员身份启动接收端；未自动提权')
             failed=self.failures.get(owner,dict(count=0,time=0))
-            if len(self.attempts)>=30 or failed['count']>=5 and now<failed['time']+30:
-                raise ValueError('密码尝试过多，请 30 秒后重试')
+            if len(self.attempts)>=30:raise ValueError('密码尝试过多，请一分钟后重试')
+            if failed['count']>=5 and now<failed['time']+30:raise ValueError('密码尝试过多，请 30 秒后重试')
             self.attempts.append(now)
             valid=isinstance(password,str) and 1<=len(password)<=256 and '\0' not in password
             digest=hashlib.pbkdf2_hmac('sha256',password.encode('utf-8'),self.salt,self.ITERATIONS) if valid else b''

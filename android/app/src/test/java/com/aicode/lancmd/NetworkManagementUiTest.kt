@@ -209,13 +209,13 @@ class NetworkManagementUiTest {
                 compose.onNodeWithText("网络管理密码").assertExists()
                 page.managementPassword="wrong";page.unlock();waitFor{!page.busy && page.note.contains("密码错误")}
                 assertFalse(page.authorized);assertEquals("",page.managementPassword)
-                val saved=Bundle();c.saveInstanceState(saved)
-                assertFalse(saved.keySet().any{it.contains("password",true) || it.contains("token",true)})
                 enter(page)
                 assertTrue(stub.requests.filter{it.optString("action")=="refresh"}.all{it.optString("network_token").length==64})
                 compose.onNodeWithText("锁定网络管理").performSemanticsAction(SemanticsActions.OnClick){it()}
                 assertFalse(page.authorized);assertTrue(page.snapshots.isEmpty())
                 compose.onNodeWithText("网络管理密码").assertExists()
+                val saved=Bundle();c.saveInstanceState(saved)
+                assertFalse(saved.keySet().any{it.contains("password",true) || it.contains("token",true)})
             } finally{c.pause().stop().destroy()}
         }
     }
