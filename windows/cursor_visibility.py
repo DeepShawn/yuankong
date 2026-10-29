@@ -41,6 +41,12 @@ class InputCursorMask:
         self.user.GetWindowThreadProcessId.argtypes = [w.HWND, ctypes.POINTER(w.DWORD)]
         self.user.GetWindowThreadProcessId.restype = w.DWORD
         self.user.GetForegroundWindow.restype = w.HWND
+        class GuiThreadInfo(ctypes.Structure):
+            _fields_ = [('size', w.DWORD), ('flags', w.DWORD),
+                        ('active', w.HWND), ('focus', w.HWND), ('capture', w.HWND),
+                        ('menu', w.HWND), ('move', w.HWND), ('caret', w.HWND), ('rect', w.RECT)]
+        self.GuiThreadInfo = GuiThreadInfo
+        self.user.GetGUIThreadInfo.argtypes = [w.DWORD, ctypes.POINTER(GuiThreadInfo)]
         self.thread = self.kernel.GetCurrentThreadId()
         self.target, self.handle, self.calls = None, None, 0
         # AttachThreadInput requires a message queue on the recovery thread.
@@ -48,14 +54,20 @@ class InputCursorMask:
         self.user.PeekMessageW(ctypes.byref(message), None, 0, 0, 0)
 
     def suppress(self, point):
-        window = self.user.WindowFromPoint(point) or self.user.GetForegroundWindow()
+        info = self.GuiThreadInfo()
+        info.size = ctypes.sizeof(info)
+        capture = info.capture if self.user.GetGUIThreadInfo(0, ctypes.byref(info)) else None
+        window = capture or self.user.WindowFromPoint(point) or self.user.GetForegroundWindow()
         target = self.user.GetWindowThreadProcessId(window, None) if window else 0
         if not target:
-            if not self.native._current().flags & 1:
-                self.release()
-                return
             raise RuntimeError('Windows 无法确认光标所属窗口，已停止本次控制')
         if target != self.target:
+            if self.target is not None:
+                # Keep the old location transparent during the short interval
+                # between preparing a destination queue and SendInput moving
+                # there. Otherwise balancing its count would expose its last
+                # custom cursor before the move has happened.
+                self.user.SetCursor(self.native.blank)
             self.release()
             handle = self.kernel.OpenThread(0x100000, False, target)  # SYNCHRONIZE; no injection.
             if not handle:
@@ -64,13 +76,21 @@ class InputCursorMask:
                 self.kernel.CloseHandle(handle)
                 raise RuntimeError('Windows 拒绝连接光标输入队列，已停止本次控制')
             self.target, self.handle = target, handle
-        if not self.calls or self.native._current().flags & 1:
-            for _ in range(64):
-                count = self.user.ShowCursor(False)
-                self.calls += 1
-                if count < 0:break
-            else:
-                raise RuntimeError('应用反复显示系统光标，Windows 未确认隐藏，已停止本次控制')
+        owned = self.calls
+        count = self.user.ShowCursor(False)
+        self.calls += 1
+        if owned and count < -1:
+            # Query the effective queue count without ever increasing it past
+            # its previous value. Do not trust an already-hidden CI desktop's
+            # CURSOR_SHOWING flag as proof that this queue is suppressed.
+            count = self.user.ShowCursor(True)
+            self.calls -= 1
+        for _ in range(64):
+            if count < 0:break
+            count = self.user.ShowCursor(False)
+            self.calls += 1
+        else:
+            raise RuntimeError('应用反复显示系统光标，Windows 未确认隐藏，已停止本次控制')
 
     def release(self):
         while self.calls:
@@ -125,6 +145,7 @@ class NativeCursors:
         self.reference = None
         self.input_mask = None
         self.prepared = None
+        self.refreshing = False
         if self.real:
             # Calibrate bitmap row ordering from a known transparent cursor,
             # without selecting it or changing any system cursor.
@@ -236,11 +257,17 @@ class NativeCursors:
     def prepare(self, x, y):
         from ctypes import wintypes as w
         # The frame and SendInput both cover the physical virtual desktop.
-        self.prepared = (w.POINT(self.user.GetSystemMetrics(76) + round(x * (self.user.GetSystemMetrics(78) - 1)),
-                                 self.user.GetSystemMetrics(77) + round(y * (self.user.GetSystemMetrics(79) - 1))),
+        self.prepared = (w.POINT(self.user.GetSystemMetrics(76) + round(x * 65535) * self.user.GetSystemMetrics(78) // 65536,
+                                 self.user.GetSystemMetrics(77) + round(y * 65535) * self.user.GetSystemMetrics(79) // 65536),
                          time.monotonic() + .25)
 
     def refresh(self):
+        if self.refreshing:return True
+        self.refreshing = True
+        try:return self._refresh()
+        finally:self.refreshing = False
+
+    def _refresh(self):
         if self.native_error:
             raise self.native_error
         if time.monotonic() >= self.reapply_at:

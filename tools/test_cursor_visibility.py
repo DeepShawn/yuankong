@@ -13,7 +13,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'windows'))
-from cursor_visibility import CursorVisibility, CursorWorker, NativeCursors, recovery_worker
+from cursor_visibility import CursorVisibility, CursorWorker, NativeCursors, InputCursorMask, recovery_worker
 from remote_features import RemoteFeatures
 
 
@@ -41,6 +41,31 @@ class FakeWorker:
 
 
 class CursorTest(unittest.TestCase):
+    def test_input_queue_release_balances_only_our_calls_and_retries_detach_without_incrementing_again(self):
+        mask = InputCursorMask.__new__(InputCursorMask)
+        mask.user = SimpleNamespace(ShowCursor=mock.Mock(), AttachThreadInput=mock.Mock(side_effect=[False, True]))
+        mask.kernel = SimpleNamespace(WaitForSingleObject=mock.Mock(return_value=258), CloseHandle=mock.Mock())
+        mask.calls, mask.thread, mask.target, mask.handle = 3, 11, 22, 333
+        with self.assertRaisesRegex(RuntimeError, '尚未恢复'):mask.release()
+        self.assertEqual(3, mask.user.ShowCursor.call_count)
+        self.assertTrue(all(call.args == (True,) for call in mask.user.ShowCursor.call_args_list))
+        mask.kernel.CloseHandle.assert_not_called()
+        mask.release();mask.release()
+        self.assertEqual(3, mask.user.ShowCursor.call_count)
+        mask.kernel.CloseHandle.assert_called_once_with(333)
+        self.assertIsNone(mask.target)
+
+    def test_pointer_preparation_failure_releases_the_hidden_lease_and_is_reported(self):
+        worker = FakeWorker()
+        worker.ping = mock.Mock()
+        control = CursorVisibility(lambda: worker)
+        control.set_hidden('phone', True, lambda: True)
+        worker.ping.side_effect = RuntimeError('target cannot be hidden')
+        with self.assertRaisesRegex(RuntimeError, 'target cannot be hidden'):control.prepare(.25, .75)
+        self.assertFalse(control.owners)
+        self.assertTrue(worker.closed)
+        self.assertIsNone(control.worker)
+
     def wait(self, check):
         end=time.monotonic()+2
         while time.monotonic()<end:
@@ -123,7 +148,7 @@ class CursorTest(unittest.TestCase):
     def test_custom_white_cursor_is_not_mistaken_for_transparency_and_must_be_replaced(self):
         native=NativeCursors.__new__(NativeCursors)
         native.blank=101;native.native_error=None;native.reapply_at=time.monotonic()+100
-        native.input_mask=None;native.prepared=None
+        native.input_mask=None;native.prepared=None;native.refreshing=False
         native.reference=(32,64,4,b'\xff'*128+b'\0'*128)
         # Swapping AND and XOR makes a solid white cursor, not a hidden one.
         native._mask=mock.Mock(return_value=(32,64,4,b'\0'*128+b'\xff'*128))
@@ -138,44 +163,28 @@ class CursorTest(unittest.TestCase):
 @unittest.skipUnless(os.name=='nt','Requires Windows cursor bitmap and recovery APIs')
 class NativeCursorTest(unittest.TestCase):
     def test_real_foreground_app_cannot_redisplay_its_own_cursor_after_remote_mouse_input(self):
-        import subprocess
+        from cursor_window_fixture import CursorWindow
         from remote_features import WindowsBackend
-        app = subprocess.Popen([sys.executable, str(Path(__file__).with_name('cursor_window_fixture.py'))],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8')
-        def report(command=None):
-            if command:
-                app.stdin.write(command + '\n');app.stdin.flush()
-            line = app.stdout.readline()
-            if not line:raise AssertionError(app.stderr.read())
-            return json.loads(line)
-        worker = None
         backend = WindowsBackend('unused')
-        try:
-            before = report()
+        with CursorWindow() as app:
+            before = app.initial
             self.assertTrue(before['foreground'], before)
             self.assertGreaterEqual(before['display_count'], 0, before)
-            worker = CursorWorker();worker.ping()
-            user = NativeCursors().user
-            # Fixture client area, mapped the same way as phone coordinates.
-            left, top = user.GetSystemMetrics(76), user.GetSystemMetrics(77)
-            width, height = user.GetSystemMetrics(78), user.GetSystemMetrics(79)
-            for i in range(8):
-                backend.pointer('move', (175 + i - left) / width, (175 - top) / height,
-                                'left', 0, lambda: True)
-                state = report('probe')
-                self.assertLess(state['display_count'], 0, 'The actual app input queue must suppress its own cursor: ' + str(state))
-                self.assertFalse(state['visible'], 'Foreground WM_SETCURSOR must not reveal the app cursor: ' + str(state))
-            self.assertGreater(state['moves'], before['moves'], 'The foreground window must actually receive SendInput movement')
-            worker.close();worker = None
-            self.assertEqual(before['display_count'], report('probe')['display_count'],
-                             'Closing the worker must restore the exact application display count')
-        finally:
-            if worker:worker.close()
-            if backend.guard:backend.guard.close()
-            app.stdin.close()
-            try:app.wait(8)
-            except subprocess.TimeoutExpired:app.kill();app.wait(5)
-            app.stdout.close();app.stderr.close()
+            self.assertEqual(before['custom'], before['selected'])
+            try:
+                backend.cursor('fixture', True, lambda: True)
+                for i in range(8):
+                    backend.pointer('move', before['x'] + i / 10000, before['y'], 'left', 0, lambda: True)
+                    state = app.report('probe')
+                    self.assertEqual(state['custom'], state['selected'])
+                    self.assertLess(state['display_count'], 0, 'The actual app queue must suppress its own cursor: ' + str(state))
+                    self.assertFalse(state['visible'], 'Foreground WM_SETCURSOR must not reveal the app cursor: ' + str(state))
+                self.assertGreater(state['moves'], before['moves'], 'The window must actually receive SendInput movement')
+            finally:
+                backend.release_cursor('fixture')
+                if backend.guard:backend.guard.close()
+            self.assertEqual(before['display_count'], app.report('probe')['display_count'],
+                             'Closing the lease must restore the exact application display count')
 
     def test_actual_cursor_bitmaps_are_transparent_and_a_scheme_reload_is_repaired(self):
         native=NativeCursors()

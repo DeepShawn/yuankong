@@ -341,6 +341,17 @@ class DesktopUiTest {
         }
     }
 
+    @Test fun desktopRejectsOldWindowsCursorImplementationEvenWhenItReportsVerified() {
+        Stub(queueCursorSupported=false).use {stub ->
+            stub.install();val controller=Robolectric.buildActivity(DesktopActivity::class.java).setup();val page=controller.get()
+            try {
+                page.begin();waitUntil{!page.sharing && page.note.contains("Windows 3.5.3")}
+                assertTrue(page.note.contains("只更新安卓"))
+                assertFalse(stub.requests.any{it.second.optString("cmd")=="session"})
+            }finally{controller.pause().stop().destroy()}
+        }
+    }
+
     @Test fun oldReceiverShowsUpgradeMessageWithoutOpeningControlSessions() {
         Stub(pointerSupported = false).use { stub ->
             stub.install()
@@ -448,7 +459,7 @@ class DesktopUiTest {
         }
     }
 
-    private class Stub(private val pointerSupported: Boolean = true, private val localSupported: Boolean = false, private val cursorSupported:Boolean=true) : Closeable {
+    private class Stub(private val pointerSupported: Boolean = true, private val localSupported: Boolean = false, private val cursorSupported:Boolean=true, private val queueCursorSupported:Boolean=true) : Closeable {
         private val server = ServerSocket(0)
         private val clients = CopyOnWriteArrayList<Socket>()
         private val workers = CopyOnWriteArrayList<Thread>()
@@ -476,7 +487,7 @@ class DesktopUiTest {
                                     val result = JSONObject().put("ok", true).put("id", request.getInt("id"))
                                     when (request.optString("cmd")) {
                                         "hello" -> result.put("agent_id", "desktop-test").put("token", "test-token")
-                                        "capabilities" -> result.put("features", JSONArray(listOf("screen", "input") + (if(cursorSupported)listOf("cursor_visibility","cursor_visibility_verified")else emptyList()) + (if (pointerSupported) listOf("pointer") else emptyList()) + (if (localSupported) listOf("local_input", "touch_pause") else emptyList())))
+                                        "capabilities" -> result.put("features", JSONArray(listOf("screen", "input") + (if(cursorSupported)listOf("cursor_visibility","cursor_visibility_verified")else emptyList()) + (if(queueCursorSupported)listOf("cursor_visibility_input_queue")else emptyList()) + (if (pointerSupported) listOf("pointer") else emptyList()) + (if (localSupported) listOf("local_input", "touch_pause") else emptyList())))
                                         "cursor" -> result.put("hidden",request.optBoolean("hidden")).put("verified",true)
                                         "local_input" -> {
                                             if (request.optString("action") == "pause") paused = true

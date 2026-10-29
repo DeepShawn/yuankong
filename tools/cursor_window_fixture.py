@@ -6,14 +6,56 @@ import os
 import queue
 import sys
 import threading
+import subprocess
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'windows'))
 from cursor_visibility import NativeCursors
 
 
+class CursorWindow:
+    def __init__(self, left=100):
+        self.process = subprocess.Popen([sys.executable, os.path.abspath(__file__), str(left)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8')
+        self.lines = queue.Queue()
+        def read():
+            try:
+                for line in self.process.stdout:self.lines.put(line)
+            finally:self.lines.put(None)
+        self.reader = threading.Thread(target=read, daemon=True)
+        self.reader.start()
+        try:self.initial = self.report()
+        except Exception:
+            self.close()
+            raise
+
+    def report(self, command=None):
+        if command:
+            self.process.stdin.write(command + '\n');self.process.stdin.flush()
+        try:line = self.lines.get(timeout=5)
+        except queue.Empty:raise AssertionError('Cursor fixture did not answer within 5 seconds')
+        if line is None:raise AssertionError(self.process.stderr.read())
+        return json.loads(line)
+
+    def close(self):
+        if not self.process.stdin.closed:self.process.stdin.close()
+        try:self.process.wait(8)
+        except subprocess.TimeoutExpired:
+            self.process.kill();self.process.wait(5)
+            raise AssertionError('The cursor test window stopped responding')
+        finally:
+            self.reader.join(1)
+            self.process.stdout.close();self.process.stderr.close()
+
+    def __enter__(self):return self
+    def __exit__(self, *args):self.close()
+
+
 def main():
     native = NativeCursors()
     user = native.user
+    user.SetProcessDPIAware()
+    user.GetCursor.restype = w.HANDLE
     kernel = ctypes.WinDLL('kernel32', use_last_error=True)
     kernel.GetModuleHandleW.argtypes = [w.LPCWSTR]
     kernel.GetModuleHandleW.restype = w.HMODULE
@@ -45,6 +87,7 @@ def main():
     if not custom:raise ctypes.WinError(ctypes.get_last_error())
     requests = queue.SimpleQueue()
     moves = [0]
+    left = int(sys.argv[1]) if len(sys.argv) > 1 else 100
     def report():
         # Query the owning queue without ever increasing its existing count.
         # Headless runners may suppress hardware display even when this count
@@ -55,7 +98,9 @@ def main():
         return {'visible': bool(current.flags & 1), 'flags': current.flags,
                 'foreground': user.GetForegroundWindow() == window,
                 'moves': moves[0], 'cursor': current.cursor, 'custom': custom,
-                'display_count': display_count}
+                'selected': user.GetCursor(), 'display_count': display_count,
+                'x': (left + 75 - user.GetSystemMetrics(76)) / user.GetSystemMetrics(78),
+                'y': (175 - user.GetSystemMetrics(77)) / user.GetSystemMetrics(79)}
     def proc(hwnd, message, word, long):
         if message in (0x20, 0x200):  # Real WM_SETCURSOR / WM_MOUSEMOVE path.
             user.SetCursor(custom)
@@ -65,7 +110,7 @@ def main():
             command = requests.get()
             if command == 'focus':
                 user.SetForegroundWindow(hwnd)
-                user.SetCursorPos(170, 170)
+                user.SetCursorPos(left + 70, 170)
             # An app-owned cursor must stay hidden even when its UI sets it.
             user.SetCursor(custom)
             print(json.dumps(report()), flush=True)
@@ -80,7 +125,7 @@ def main():
     klass = WindowClass(0, callback, 0, 0, instance, None, custom, None, None, name)
     if not user.RegisterClassW(ctypes.byref(klass)):raise ctypes.WinError(ctypes.get_last_error())
     window = user.CreateWindowExW(0, name, 'Cursor regression fixture', 0x00CF0000,
-                                  100, 100, 400, 300, None, None, instance, None)
+                                  left, 100, 300, 300, None, None, instance, None)
     if not window:raise ctypes.WinError(ctypes.get_last_error())
     shown = 0
     try:
@@ -91,7 +136,7 @@ def main():
         for _ in range(32):
             shown += 1
             if user.ShowCursor(True) >= 0:break
-        user.SetCursorPos(170, 170)
+        user.SetCursorPos(left + 70, 170)
         user.SetCursor(custom)
         print(json.dumps(dict(report(), pid=os.getpid())), flush=True)
         def read():
