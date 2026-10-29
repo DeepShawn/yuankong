@@ -1,6 +1,6 @@
 {
-  "tag": "v3.5.0-touch.1",
-  "display_version": "3.5.0",
-  "windows_build_version": "3.5.4",
-  "android_version_code": 48
+  "tag": "v3.6.0",
+  "display_version": "3.6.0",
+  "windows_build_version": "3.6.0",
+  "android_version_code": 49
 }

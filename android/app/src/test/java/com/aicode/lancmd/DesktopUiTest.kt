@@ -360,7 +360,7 @@ class DesktopUiTest {
         Stub(nativeTouchSupported=false).use {stub ->
             stub.install();val controller=Robolectric.buildActivity(DesktopActivity::class.java).setup();val page=controller.get()
             try {
-                page.begin();waitUntil{!page.sharing && page.note.contains("v3.5.0-touch.1")}
+                page.begin();waitUntil{!page.sharing && page.note.contains("v3.6.0")}
                 assertFalse(stub.requests.any{it.second.optString("cmd")=="session"})
                 assertFalse(stub.requests.any{it.second.optString("cmd")=="pointer"})
             }finally{controller.pause().stop().destroy()}

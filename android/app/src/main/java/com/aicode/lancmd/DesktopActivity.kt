@@ -327,7 +327,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
                     }
                 ) error("请完整更新 Windows 1.6.0 接收端，新版本支持屏幕触控")
                 if ((0 until capabilities.length()).none { capabilities.optString(it) == "native_touch" }) {
-                    error("电脑端尚未支持原生触控，请停止旧接收端并完整更新 Windows 触控版 v3.5.0-touch.1；只更新安卓无法改变电脑输入方式")
+                    error("电脑端尚未支持原生触控，请停止旧接收端并完整更新 Windows 触控版 v3.6.0；只更新安卓无法改变电脑输入方式")
                 }
                 status("正在连接画面、键鼠与终端…")
                 suspend fun connection(): AgentClient {

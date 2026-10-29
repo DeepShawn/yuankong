@@ -3,7 +3,7 @@ name: Publish verified release
 on:
   push:
     tags:
-      - 'v*-touch.*'
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
