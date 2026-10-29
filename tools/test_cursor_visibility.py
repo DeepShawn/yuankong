@@ -171,6 +171,19 @@ class NativeCursorTest(unittest.TestCase):
         try:
             worker.ping()
             self.assertTrue(native.transparent(native._load(32512)))
+            import ctypes
+            mask=(ctypes.c_ubyte*128)()
+            white=(ctypes.c_ubyte*128)(*([255]*128))
+            custom=native.user.CreateCursor(None,0,0,32,32,mask,white)
+            self.assertTrue(custom)
+            try:
+                native.user.SetCursor(custom)  # Another process changes the system cursor.
+                worker.ping()  # ACK must follow rechecking/repairing that change.
+                current=native._current()
+                if current.flags & 1:self.assertTrue(native.transparent(current.cursor))
+            finally:
+                native.user.SetCursor(native._load(32512))
+                native.user.DestroyCursor(custom)
         finally:worker.close()
         self.assertEqual(before,native.transparent(native._load(32512)))
 

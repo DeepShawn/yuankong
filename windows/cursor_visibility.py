@@ -54,6 +54,12 @@ class NativeCursors:
         self.reapply_at = 0
         self.replacing = False
         self.reference = None
+        if self.real:
+            # Calibrate bitmap row ordering from a known transparent cursor,
+            # without selecting it or changing any system cursor.
+            probe = self._blank()
+            try:self.reference = self._mask(probe)
+            finally:self.user.DestroyCursor(probe)
 
     def _blank(self):
         and_mask = (ctypes.c_ubyte * 128)(*([255] * 128))
