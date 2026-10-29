@@ -17,6 +17,15 @@ import uuid
 ACTIVE = {"starting", "recording", "stopping"}
 
 
+def resources(data):
+    result=set()
+    if data.get('mode') in ('screen','panorama'):result.add('screen')
+    if data.get('mode') in ('camera','panorama'):result.add('camera')
+    if data.get('audio'):result.add('microphone')
+    if data.get('system_audio'):result.add('system_audio')
+    return result
+
+
 class Recordings:
     def __init__(self, root, executable, popen=None):
         self.root = Path(root)
@@ -36,7 +45,7 @@ class Recordings:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 rid = data["id"]
-                if uuid.UUID(rid).hex != rid or path.stem != rid or data["mode"] not in ("audio", "screen", "camera"):
+                if uuid.UUID(rid).hex != rid or path.stem != rid or data["mode"] not in ("audio", "screen", "camera", "panorama"):
                     continue
                 # Never trust a path persisted in JSON for download/delete.
                 data["path"] = str(self.root / (rid + (".wav" if data["mode"] == "audio" else ".mp4")))
@@ -114,30 +123,35 @@ class Recordings:
     def _start(self, q, owner):
         mode = q.get("mode")
         seconds, microphone, camera = q.get("seconds", 300), q.get("microphone", -1), q.get("camera", 0)
-        audio = q.get("audio", mode == "audio")
-        if mode not in ("audio", "screen", "camera") or not isinstance(audio, bool) or (mode == "audio" and not audio):
-            raise ValueError("请选择录音、屏幕或摄像头模式")
-        for name, value, low, high in (("时长", seconds, 1, 3600), ("麦克风", microphone, -1, 1023), ("摄像头", camera, 0, 31)):
+        audio = q.get("audio", mode in ("audio","panorama"))
+        system_audio = q.get("system_audio", mode == "panorama")
+        system_gain, microphone_gain, corner = q.get("system_gain",100), q.get("microphone_gain",100), q.get("corner",0)
+        if mode not in ("audio", "screen", "camera", "panorama") or not isinstance(audio, bool) or not isinstance(system_audio,bool) or (mode == "audio" and (not audio or system_audio)):
+            raise ValueError("请选择环境录音、屏幕、摄像头或全景模式；系统声音用于视频录制")
+        if mode=="audio" and microphone_gain!=100:raise ValueError("环境 WAV 录音使用原始设备音量，视频模式可调录制音量")
+        for name, value, low, high in (("时长", seconds, 1, 3600), ("麦克风", microphone, -1, 1023), ("摄像头", camera, 0, 31), ("系统录制音量",system_gain,0,200), ("麦克风录制音量",microphone_gain,0,200), ("小窗位置",corner,0,3)):
             if type(value) is not int or not low <= value <= high:
                 raise ValueError(name + "参数无效；录制时长为 1–3600 秒")
-        if mode=="camera" and "camera" in self.blocked_resources or audio and "microphone" in self.blocked_resources:
+        if resources(dict(mode=mode,audio=audio,system_audio=system_audio)) & self.blocked_resources:
             raise ValueError("设备正在启停，请稍后重新开始录制")
         active = [j["data"] for j in self.jobs.values() if j["data"]["status"] in ACTIVE]
-        if len(active) >= 3 or any(d["mode"] == mode or (d["audio"] and audio) for d in active):
-            raise ValueError("录制资源正在使用，请先停止使用相同画面或麦克风的录制")
+        if len(active) >= 3 or any(resources(d) & resources(dict(mode=mode,audio=audio,system_audio=system_audio)) for d in active):
+            raise ValueError("录制资源正在使用，请先停止占用相同桌面、摄像头或音频输入的录制")
         if sum(d["owner"] == owner for d in (j["data"] for j in self.jobs.values())) >= 200:
             raise ValueError("最多保留 200 条录制，请先删除旧录制")
         if shutil.disk_usage(self.root).free < 200 * 1024 * 1024:
             raise ValueError("录制磁盘至少需要 200 MB 可用空间")
         rid = uuid.uuid4().hex
         path = self.root / (rid + (".wav" if mode == "audio" else ".mp4"))
-        data = dict(id=rid, mode=mode, audio=audio, microphone=microphone, camera=camera, seconds=seconds,
+        data = dict(id=rid, mode=mode, audio=audio, system_audio=system_audio,system_gain=system_gain,microphone_gain=microphone_gain,corner=corner, microphone=microphone, camera=camera, seconds=seconds,
                     path=str(path), owner=owner, created=time.time(), status="starting")
         job = {"data": data, "ready": threading.Event(), "process": None, "stop_requested": False}
         self._save(job)  # A recording cannot start if its recovery metadata cannot be saved.
         try:
-            job["process"] = self.popen([self.executable, "record", mode, str(path),
-                str(microphone if audio else -2), str(camera), str(seconds), "1"],
+            combined = mode == "panorama" or system_audio or (mode != "audio" and microphone_gain != 100)
+            args=[self.executable,"record",mode,str(path),str(microphone if audio else -2),str(camera),str(seconds),"2" if combined else "1"]
+            if combined:args += ["1" if system_audio else "0",str(system_gain),str(microphone_gain),str(corner)]
+            job["process"] = self.popen(args,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
                 creationflags=0x08000000 if os.name == "nt" else 0, close_fds=True)
@@ -165,7 +179,8 @@ class Recordings:
                         self._save(job)
                         job["ready"].set()
                     if event.get("error"):
-                        data["error"] = str(event["error"])[:1000]
+                        source={"system_audio":"系统声音采集","microphone":"麦克风采集","camera":"摄像头采集","screen":"桌面采集","encoder":"视频文件编码"}.get(event.get("source"),"录制")
+                        data["error"] = (source+"失败："+str(event["error"]))[:1000]
                     if event.get("finished"):
                         data["reason"] = str(event.get("reason", "stopped"))
                         job["finished_event"] = True
@@ -222,7 +237,7 @@ class Recordings:
         with self.lock:
             self.blocked_resources.add(kind)
             jobs=[j for j in self.jobs.values() if j["data"]["status"] in ACTIVE and
-                (j["data"]["mode"]=="camera" if kind=="camera" else j["data"].get("audio",False))]
+                kind in resources(j["data"])]
             for job in jobs:self._stop(job)
         try:
             deadline=time.monotonic()+18

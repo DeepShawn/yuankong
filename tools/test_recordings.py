@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -102,6 +103,47 @@ class RecordingTest(unittest.TestCase):
         self.assertEqual("failed",self.call()["recordings"][0]["status"])
 
 
+    def test_panorama_combines_sources_and_reserves_camera_desktop_and_audio(self):
+        item=self.call(action='start',mode='panorama',seconds=30,system_gain=70,microphone_gain=120,corner=3)['recording']
+        self.assertTrue(item['audio']);self.assertTrue(item['system_audio']);self.assertEqual('panorama',item['mode'])
+        self.assertEqual(['2','1','70','120','3'],self.argv[0][-5:])
+        for mode,fields in [('camera',dict(audio=False)),('screen',dict(audio=False)),('audio',{}),('screen',dict(system_audio=True,audio=False))]:
+            with self.subTest(mode=mode),self.assertRaises(Error):self.call(action='start',mode=mode,**fields)
+        with self.manager.device_guard('camera') as result:self.assertEqual(1,result['recordings'])
+        settle(lambda:self.call()['recordings'][0]['status']=='completed')
+    def test_system_audio_does_not_reserve_or_disable_the_microphone(self):
+        item=self.call(action='start',mode='screen',system_audio=True,audio=False)['recording']
+        self.assertFalse(item['audio']);self.assertTrue(item['system_audio']);self.assertEqual('-2',self.argv[0][4])
+        with self.manager.device_guard('microphone') as result:self.assertEqual(0,result['recordings'])
+        self.assertEqual('recording',self.call()['recordings'][0]['status'])
+        self.call(action='start',mode='audio')
+    def test_new_source_and_gain_parameters_are_strict_and_do_not_launch_on_failure(self):
+        for fields in [dict(system_audio=1),dict(system_gain=True),dict(system_gain=201),dict(microphone_gain=-1),dict(corner=4),dict(corner=True)]:
+            with self.subTest(fields=fields),self.assertRaises(Error):self.call(action='start',mode='panorama',**fields)
+        with self.assertRaises(Error):self.call(action='start',mode='audio',system_audio=True)
+        with self.assertRaises(Error):self.call(action='start',mode='audio',microphone_gain=50)
+        self.assertFalse(self.argv)
+    def test_panorama_recovery_keeps_a_managed_mp4_path_and_new_audio_flags(self):
+        self.manager._load();rid='b'*32
+        (Path(self.temp.name)/(rid+'.json')).write_text(json.dumps(dict(id=rid,mode='panorama',audio=True,system_audio=True,path='outside.mp4',status='recording',owner='phone',created=1)))
+        recovered=Recordings(self.temp.name,'unused.exe',self.spawn)
+        self.addCleanup(recovered.close)
+        item=recovered.request({},self.owner,Error)['recordings'][0]
+        self.assertEqual('interrupted',item['status']);self.assertTrue(item['system_audio']);self.assertEqual(str(Path(self.temp.name)/(rid+'.mp4')),item['path'])
+
+class PortableMixerTest(unittest.TestCase):
+    def test_source_mixing_rate_conversion_silence_and_composition(self):
+        compiler=shutil.which('cl' if os.name=='nt' else 'g++')
+        if not compiler:self.skipTest('C++ compiler is required for the native mixer harness')
+        with tempfile.TemporaryDirectory() as folder:
+            output=Path(folder)/('mix.exe' if os.name=='nt' else 'mix')
+            command=[compiler,'/nologo','/EHsc','/std:c++17','/Fe:'+str(output),str(ROOT/'tools/record_mix_test.cpp')] if os.name=='nt' else [compiler,'-std=c++17','-O2','-o',str(output),str(ROOT/'tools/record_mix_test.cpp')]
+            result=subprocess.run(command,cwd=folder,capture_output=True,timeout=40)
+            self.assertEqual(0,result.returncode,(result.stdout+result.stderr).decode('utf-8','replace'))
+            result=subprocess.run([str(output)],capture_output=True,timeout=10)
+            self.assertEqual(0,result.returncode,(result.stdout+result.stderr).decode('utf-8','replace'))
+
+
 class PointerBackend:
     def __init__(self): self.events = []; self.released = []
     def pointer(self, action, x, y, button, delta, allowed):
@@ -166,15 +208,26 @@ class NativeEncoderTest(unittest.TestCase):
             result = subprocess.run([str(ROOT / "windows" / "LanCmdRecord.exe"), "self-test", path], capture_output=True, timeout=30)
             self.assertEqual(0, result.returncode, result.stdout.decode("utf-8", "replace") + result.stderr.decode("utf-8", "replace"))
             self.assertTrue(json.loads(result.stdout)["self_test"])
+            self.assertTrue(json.loads(result.stdout)["panorama_decode"]);self.assertTrue(json.loads(result.stdout)["stereo_mix"])
+            panorama=(Path(path)/"panorama.mp4").read_bytes();self.assertIn(b"avc1",panorama);self.assertIn(b"mp4a",panorama)
             with wave.open(str(Path(path) / "test.wav")) as wav:
                 self.assertEqual((1,2,48000,96000), (wav.getnchannels(),wav.getsampwidth(),wav.getframerate(),wav.getnframes()))
             data = (Path(path) / "test.mp4").read_bytes()
             self.assertIn(b"ftyp", data[:64]); self.assertIn(b"moov", data); self.assertIn(b"avc1", data); self.assertIn(b"mp4a", data)
+    def test_real_wasapi_loopback_interface_initializes_or_reports_device_unavailability(self):
+        result=subprocess.run([str(ROOT/'windows/LanCmdRecord.exe'),'loopback-probe'],capture_output=True,timeout=20)
+        data=json.loads(result.stdout)
+        if result.returncode:
+            self.assertEqual('system_audio',data['source']);self.assertIn('0x',data['error'])
+        else:
+            self.assertTrue(data['loopback_probe']);self.assertFalse(data['capture_started']);self.assertGreaterEqual(data['rate'],8000)
+
     def test_device_enumeration_does_not_start_capture(self):
         result = subprocess.run([str(ROOT / "windows" / "LanCmdRecord.exe"), "devices"], capture_output=True, timeout=15)
         self.assertEqual(0,result.returncode,result.stdout.decode("utf-8","replace"))
         devices = json.loads(result.stdout)
         self.assertIsInstance(devices["microphones"],list); self.assertIsInstance(devices["cameras"],list)
+        self.assertEqual(2,devices["protocol"]);self.assertIn("panorama",devices["features"])
 
 
 if __name__ == "__main__": unittest.main()

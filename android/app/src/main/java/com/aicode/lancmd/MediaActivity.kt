@@ -205,7 +205,7 @@ class MediaActivity : MiuixActivity() {
                         val records = current.call("recordings").optJSONArray("recordings")
                         if (records != null && (0 until records.length()).any {
                                 val item = records.getJSONObject(it)
-                                item.optString("mode") == "camera" &&
+                                item.optString("mode") in listOf("camera","panorama") &&
                                     item.optString("status") in listOf("starting", "recording", "stopping")
                             }
                         ) {

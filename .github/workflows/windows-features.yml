@@ -6,6 +6,7 @@ on:
       - tools/test_*.py
       - tools/check_windows_package.py
       - tools/start_panel_harness.c
+      - tools/record_mix_test.cpp
       - .github/workflows/windows-features.yml
       - .github/workflows/publish-release.yml
       - release.json
@@ -15,6 +16,7 @@ on:
       - tools/test_*.py
       - tools/check_windows_package.py
       - tools/start_panel_harness.c
+      - tools/record_mix_test.cpp
       - .github/workflows/windows-features.yml
       - .github/workflows/publish-release.yml
       - release.json

@@ -7,6 +7,10 @@
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
+#include <mmdeviceapi.h>
+#include <audioclient.h>
+#include <mmreg.h>
+#include "record_mix.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -27,6 +31,8 @@ template<class T> struct Ref {
 };
 static void check(HRESULT hr) { if (FAILED(hr)) throw hr; }
 static std::atomic<bool> stopping{false};
+static const char* recordingSource = "initialization";
+static LONGLONG qpcTime() { LARGE_INTEGER value,frequency; QueryPerformanceCounter(&value); QueryPerformanceFrequency(&frequency); return LONGLONG((long double)value.QuadPart * 10000000 / frequency.QuadPart); }
 static std::string quoted(const wchar_t* text) {
     int n = WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
     std::vector<char> data(std::max(n, 1));
@@ -65,7 +71,7 @@ static void devices() {
             std::printf("%s{\"id\":%u,\"name\":%s}", i ? "," : "", i, quoted(name).c_str()); CoTaskMemFree(name);
         }
     } catch (HRESULT) { /* A machine without a camera can still record audio. */ }
-    std::printf("]}\n");
+    std::printf("],\"protocol\":2,\"features\":[\"system_audio\",\"panorama\"]}\n");
 }
 static void fit(UINT sourceW, UINT sourceH, UINT& w, UINT& h) {
     if (!sourceW || !sourceH || sourceW > 32768 || sourceH > 32768) throw E_INVALIDARG;
@@ -206,6 +212,83 @@ struct Microphone {
     }
     int next = 0;
 };
+struct Loopback {
+    Ref<IMMDeviceEnumerator> enumerator; Ref<IMMDevice> device;
+    Ref<IAudioClient> client; Ref<IAudioCaptureClient> capture;
+    WAVEFORMATEX* format = nullptr; bool floating = false, started = false;
+    std::wstring selectedDevice; ULONGLONG nextDeviceCheck = 0;
+    Loopback() {
+        try {
+            check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)enumerator.put()));
+            check(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, device.put()));
+            LPWSTR endpoint=nullptr;check(device->GetId(&endpoint));selectedDevice=endpoint;CoTaskMemFree(endpoint);
+            check(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)client.put()));
+            check(client->GetMixFormat(&format));
+            if (format->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
+                if (format->cbSize < sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)) throw E_INVALIDARG;
+                auto* ext = reinterpret_cast<WAVEFORMATEXTENSIBLE*>(format);
+                const GUID pcm = {1,0,0x10,{0x80,0,0,0xaa,0,0x38,0x9b,0x71}};
+                const GUID ieee = {3,0,0x10,{0x80,0,0,0xaa,0,0x38,0x9b,0x71}};
+                if (IsEqualGUID(ext->SubFormat, ieee)) floating = true;
+                else if (!IsEqualGUID(ext->SubFormat, pcm)) throw AUDCLNT_E_UNSUPPORTED_FORMAT;
+            } else if (format->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) floating = true;
+            else if (format->wFormatTag != WAVE_FORMAT_PCM) throw AUDCLNT_E_UNSUPPORTED_FORMAT;
+            if (!format->nChannels || format->nChannels > 32 || format->nSamplesPerSec < 8000 || format->nSamplesPerSec > 384000 ||
+                (floating ? format->wBitsPerSample != 32 : (format->wBitsPerSample != 8 && format->wBitsPerSample != 16 && format->wBitsPerSample != 24 && format->wBitsPerSample != 32)) ||
+                format->nBlockAlign < format->nChannels * (format->wBitsPerSample / 8)) throw AUDCLNT_E_UNSUPPORTED_FORMAT;
+            check(client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 2000000, 0, format, nullptr));
+            check(client->GetService(__uuidof(IAudioCaptureClient), (void**)capture.put()));
+        } catch (...) { cleanup(); throw; }
+    }
+    void start() { check(client->Start()); started = true; }
+    void cleanup() {
+        if (started) { client->Stop(); started = false; }
+        if (format) { CoTaskMemFree(format); format = nullptr; }
+    }
+    ~Loopback() { cleanup(); }
+    float value(const BYTE* p) const {
+        if (floating) { float x; std::memcpy(&x,p,4); return std::isfinite(x) ? x : 0.f; }
+        if (format->wBitsPerSample == 8) return (int(*p) - 128) / 128.f;
+        if (format->wBitsPerSample == 16) { int16_t x; std::memcpy(&x,p,2); return x / 32768.f; }
+        if (format->wBitsPerSample == 24) { int32_t x = int32_t(p[0]) | (int32_t(p[1])<<8) | (int32_t(p[2])<<16); if (x & 0x800000) x |= ~0xffffff; return x / 8388608.f; }
+        int32_t x; std::memcpy(&x,p,4); return float(x / 2147483648.);
+    }
+    void drain(recording::Mixer& mixer, LONGLONG start) {
+        if (GetTickCount64()>=nextDeviceCheck) {
+            Ref<IMMDevice> current;check(enumerator->GetDefaultAudioEndpoint(eRender,eConsole,current.put()));
+            LPWSTR endpoint=nullptr;check(current->GetId(&endpoint));bool same=selectedDevice==endpoint;CoTaskMemFree(endpoint);
+            if (!same)throw AUDCLNT_E_DEVICE_INVALIDATED;
+            nextDeviceCheck=GetTickCount64()+1000;
+        }
+        UINT32 available = 0; check(capture->GetNextPacketSize(&available));
+        for (int packets = 0; available && packets < 128; ++packets) {
+            BYTE* data = nullptr; UINT32 frames = 0; DWORD flags = 0; UINT64 deviceFrame = 0, timestamp = 0;
+            check(capture->GetBuffer(&data,&frames,&flags,&deviceFrame,&timestamp));
+            try {
+                if (frames > format->nSamplesPerSec * 4u) throw E_FAIL;
+                std::vector<float> stereo(size_t(frames) * 2,0.f);
+                if (!(flags & AUDCLNT_BUFFERFLAGS_SILENT)) {
+                    if (!data && frames) throw E_POINTER;
+                    unsigned bytes = format->wBitsPerSample / 8;
+                    for (UINT32 i = 0; i < frames; ++i) {
+                        const BYTE* frame = data + size_t(i) * format->nBlockAlign;
+                        float left = value(frame), right = format->nChannels > 1 ? value(frame + bytes) : left;
+                        for (unsigned c = 2; c < format->nChannels; ++c) { float extra = value(frame + c * bytes) * .5f; left += extra; right += extra; }
+                        float scale = 1.f + .5f * std::max(0,int(format->nChannels)-2);
+                        stereo[size_t(i)*2] = left / scale; stereo[size_t(i)*2+1] = right / scale;
+                    }
+                }
+                auto converted = recording::resample(stereo,deviceFrame,format->nSamplesPerSec);
+                if ((flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR) || !timestamp) timestamp = UINT64(qpcTime() - LONGLONG(frames) * 10000000 / format->nSamplesPerSec);
+                double phase = std::ceil(double(deviceFrame) * 48000 / format->nSamplesPerSec) - double(deviceFrame) * 48000 / format->nSamplesPerSec;
+                int64_t first = int64_t(std::llround(double(LONGLONG(timestamp)-start) * 48000 / 10000000 + phase));
+                mixer.system.put(first,converted.data(),converted.size()/2,mixer.cursor);
+            } catch (...) { capture->ReleaseBuffer(frames); throw; }
+            check(capture->ReleaseBuffer(frames)); check(capture->GetNextPacketSize(&available));
+        }
+    }
+};
+
 static BYTE clip(int v) { return BYTE(std::max(0, std::min(255, v))); }
 static std::vector<BYTE> nv12(const std::vector<BYTE>& rgb, UINT w, UINT h) {
     std::vector<BYTE> out(size_t(w) * h * 3 / 2); BYTE* uv = out.data() + size_t(w) * h;
@@ -232,7 +315,7 @@ static void writeSample(IMFSinkWriter* writer, DWORD stream, const BYTE* data, D
 }
 struct Video {
     Ref<IMFSinkWriter> writer; DWORD video = 0, audio = 0;
-    Video(const wchar_t* path, UINT w, UINT h, bool mic) {
+    Video(const wchar_t* path, UINT w, UINT h, bool mic, UINT channels = 1) {
         Ref<IMFAttributes> a; check(MFCreateAttributes(a.put(), 1)); check(a->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE));
         check(MFCreateSinkWriterFromURL(path, nullptr, a.p, writer.put()));
         Ref<IMFMediaType> output; check(MFCreateMediaType(output.put()));
@@ -245,14 +328,14 @@ struct Video {
         check(writer->SetInputMediaType(video, input.p, nullptr));
         if (mic) {
             check(MFCreateMediaType(output.put())); check(output->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio));
-            check(output->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC)); check(output->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 1));
+            check(output->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC)); check(output->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, channels));
             check(output->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, 48000)); check(output->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16));
-            check(output->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 12000)); check(output->SetUINT32(MF_MT_AAC_PAYLOAD_TYPE, 0));
+            check(output->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, channels == 2 ? 24000 : 12000)); check(output->SetUINT32(MF_MT_AAC_PAYLOAD_TYPE, 0));
             check(writer->AddStream(output.p, &audio));
             check(MFCreateMediaType(input.put())); check(input->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio));
-            check(input->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM)); check(input->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 1));
+            check(input->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM)); check(input->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, channels));
             check(input->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, 48000)); check(input->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16));
-            check(input->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, 2)); check(input->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 96000));
+            check(input->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, channels * 2)); check(input->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 48000 * channels * 2));
             check(writer->SetInputMediaType(audio, input.p, nullptr));
         }
         check(writer->BeginWriting());
@@ -274,6 +357,71 @@ struct Wav {
     ~Wav() { if (file) std::fclose(file); }
 };
 static int number(const wchar_t* s, int low, int high) { wchar_t* end = nullptr; long v = std::wcstol(s, &end, 10); if (!*s || *end || v < low || v > high) throw E_INVALIDARG; return int(v); }
+static void panoramaSelfTest(const wchar_t* directory) {
+    std::wstring path=std::wstring(directory)+L"\\panorama.mp4";
+    {
+        Video video(path.c_str(),640,360,true,2);recording::Mixer mixer(100,100);
+        std::vector<BYTE> desktop(640*360*4),camera(320*240*4);
+        for(size_t i=0;i<desktop.size();i+=4){desktop[i]=30;desktop[i+1]=80;desktop[i+2]=20;desktop[i+3]=255;}
+        for(size_t i=0;i<camera.size();i+=4){camera[i]=20;camera[i+1]=30;camera[i+2]=220;camera[i+3]=255;}
+        for(int frame=0;frame<24;++frame) {
+            auto picture=desktop;recording::overlay(picture,640,360,camera,320,240,0);auto image=nv12(picture,640,360);
+            writeSample(video.writer.p,video.video,image.data(),DWORD(image.size()),frame*10000000LL/12,10000000/12);
+            std::vector<float> system(8000),mic(8000);
+            for(int i=0;i<4000;++i) {
+                int64_t at=int64_t(frame)*4000+i;
+                system[i*2]=(at/48)%2?.18f:-.18f;system[i*2+1]=(at/24)%2?.15f:-.15f;
+                mic[i*2]=mic[i*2+1]=(at/96)%2?.12f:-.12f;
+            }
+            mixer.system.put(int64_t(frame)*4000,system.data(),4000,mixer.cursor);
+            mixer.microphone.put(int64_t(frame)*4000,mic.data(),4000,mixer.cursor);
+            auto pcm=mixer.render(4000);
+            writeSample(video.writer.p,video.audio,reinterpret_cast<const BYTE*>(pcm.data()),DWORD(pcm.size()*2),frame*10000000LL/12,10000000/12);
+        }
+        check(video.writer->Finalize());
+    }
+    // Decode the actual H.264 picture and AAC samples, checking the camera inset,
+    // background, stereo channels, two independent frequencies and duration.
+    Ref<IMFSourceReader> reader;check(MFCreateSourceReaderFromURL(path.c_str(),nullptr,reader.put()));
+    check(reader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS,FALSE));
+    check(reader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM,TRUE));
+    Ref<IMFMediaType> type;check(MFCreateMediaType(type.put()));
+    check(type->SetGUID(MF_MT_MAJOR_TYPE,MFMediaType_Video));check(type->SetGUID(MF_MT_SUBTYPE,MFVideoFormat_NV12));
+    check(reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM,nullptr,type.p));
+    Ref<IMFSample> sample;DWORD actual=0,flags=0;LONGLONG pts=0;
+    for(int i=0;i<50 && !sample.p;++i)check(reader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM,0,&actual,&flags,&pts,sample.put()));
+    if(!sample.p)throw E_FAIL;
+    Ref<IMFMediaBuffer> buffer;check(sample->ConvertToContiguousBuffer(buffer.put()));BYTE* bytes=nullptr;DWORD size=0;
+    check(buffer->Lock(&bytes,nullptr,&size));
+    bool composed=size>=640*360*3/2 && bytes[180*640+320]>45 && bytes[180*640+320]<80 && bytes[290*640+550]>75;
+    buffer->Unlock();if(!composed)throw E_FAIL;
+    reader.p->Release();reader.p=nullptr;
+    check(MFCreateSourceReaderFromURL(path.c_str(),nullptr,reader.put()));
+    check(reader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS,FALSE));check(reader->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM,TRUE));
+    check(MFCreateMediaType(type.put()));check(type->SetGUID(MF_MT_MAJOR_TYPE,MFMediaType_Audio));check(type->SetGUID(MF_MT_SUBTYPE,MFAudioFormat_PCM));
+    check(type->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE,16));check(type->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS,2));check(type->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND,48000));
+    check(reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM,nullptr,type.p));
+    UINT64 count=0;long double leftEnergy=0,rightEnergy=0,difference=0;double mr=0,mi=0,lr=0,li=0,rr=0,ri=0;LONGLONG previous=std::numeric_limits<LONGLONG>::min(),end=0;
+    for(int i=0;i<400;++i) {
+        check(reader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM,0,&actual,&flags,&pts,sample.put()));
+        if(flags & MF_SOURCE_READERF_ERROR)throw E_FAIL;
+        if(sample.p) {
+            if(pts<previous)throw E_FAIL;previous=pts;LONGLONG duration=0;check(sample->GetSampleDuration(&duration));end=pts+duration;
+            check(sample->ConvertToContiguousBuffer(buffer.put()));check(buffer->Lock(&bytes,nullptr,&size));
+            for(DWORD n=0;n+3<size;n+=4) {
+                int16_t l,r;std::memcpy(&l,bytes+n,2);std::memcpy(&r,bytes+n+2,2);
+                leftEnergy+=double(l)*l;rightEnergy+=double(r)*r;difference+=double(l-r)*(l-r);
+                double angle=6.283185307179586*double(count)/48000;
+                mr+=(l+r)*.5*std::cos(angle*250);mi+=(l+r)*.5*std::sin(angle*250);
+                lr+=l*std::cos(angle*500);li+=l*std::sin(angle*500);rr+=r*std::cos(angle*1000);ri+=r*std::sin(angle*1000);++count;
+            }
+            buffer->Unlock();
+        }
+        if(flags & MF_SOURCE_READERF_ENDOFSTREAM)break;
+    }
+    if(count<90000 || count>100000 || end<19000000 || end>21500000 || leftEnergy/count<1000000 || rightEnergy/count<1000000 || difference/count<1000000 || (mr*mr+mi*mi)/(count*count)<1000000 || (lr*lr+li*li)/(count*count)<2000000 || (rr*rr+ri*ri)/(count*count)<2000000)throw E_FAIL;
+}
+
 // Exercises the real Windows encoders and decoder without accessing hardware.
 static void selfTest(const wchar_t* directory) {
     std::wstring base(directory), mp4 = base + L"\\test.mp4", wave = base + L"\\test.wav";
@@ -309,7 +457,8 @@ static void selfTest(const wchar_t* directory) {
         }
         if (!found) throw E_FAIL;
     }
-    std::printf("{\"self_test\":true}\n");
+    panoramaSelfTest(directory);
+    std::printf("{\"self_test\":true,\"panorama_decode\":true,\"stereo_mix\":true}\n");
 }
 static void record(const wchar_t* mode, const wchar_t* path, int micIndex, int cameraIndex, int seconds) {
     bool audioOnly = std::wcscmp(mode, L"audio") == 0, desktop = std::wcscmp(mode, L"screen") == 0;
@@ -358,6 +507,95 @@ static void record(const wchar_t* mode, const wchar_t* path, int micIndex, int c
     if (wav) wav->finish(); if (video) check(video->writer->Finalize());
     std::printf("{\"finished\":true,\"reason\":\"%s\"}\n", reason); std::fflush(stdout);
 }
+static void recordCombined(const wchar_t* mode, const wchar_t* path, int micIndex, int cameraIndex, int seconds,
+                           bool systemAudio, int systemGain, int microphoneGain, int corner) {
+    bool panorama = std::wcscmp(mode,L"panorama") == 0;
+    bool desktop = panorama || std::wcscmp(mode,L"screen") == 0;
+    if (!desktop && std::wcscmp(mode,L"camera") != 0) throw E_INVALIDARG;
+    if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) throw HRESULT_FROM_WIN32(ERROR_FILE_EXISTS);
+    recordingSource = "microphone";
+    std::unique_ptr<Microphone> mic; if (micIndex != -2) mic.reset(new Microphone(micIndex));
+    recordingSource = "system_audio";
+    std::unique_ptr<Loopback> loopback; if (systemAudio) loopback.reset(new Loopback());
+    recordingSource = "screen";
+    std::unique_ptr<Screen> screen; if (desktop) screen.reset(new Screen());
+    recordingSource = "camera";
+    std::unique_ptr<Camera> camera;
+    if (panorama || !desktop) {
+        camera.reset(new Camera(UINT(cameraIndex)));
+        ULONGLONG deadline = GetTickCount64() + 10000;
+        while (camera->frame().empty()) { if (stopping || GetTickCount64() > deadline) throw HRESULT_FROM_WIN32(ERROR_TIMEOUT); Sleep(10); }
+    }
+    UINT w = desktop ? screen->w : camera->w, h = desktop ? screen->h : camera->h;
+    bool hasAudio = mic != nullptr || systemAudio;
+    recordingSource = "encoder";
+    Video video(path,w,h,hasAudio,2);
+    recording::Mixer mixer(systemGain,microphoneGain);
+    auto picture = [&] {
+        recordingSource = desktop ? "screen" : "camera";
+        auto rgb = desktop ? screen->frame() : camera->frame();
+        if (panorama) { recordingSource = "camera"; auto frame = camera->frame(); recording::overlay(rgb,w,h,frame,camera->w,camera->h,corner); }
+        return nv12(rgb,w,h);
+    };
+    auto frame = picture();
+    recordingSource = "encoder";
+    writeSample(video.writer.p,video.video,frame.data(),DWORD(frame.size()),0,10000000/12);
+    LONGLONG start = qpcTime(), lastVideo = 0, nextVideo = 10000000/12, nextCheck = 0;
+    const char* reason = "duration"; HRESULT failure = S_OK; const char* failedSource = nullptr;
+    auto writeAudio = [&](size_t frames) {
+        int64_t first = mixer.cursor; auto pcm = mixer.render(frames);
+        recordingSource = "encoder";
+        writeSample(video.writer.p,video.audio,reinterpret_cast<const BYTE*>(pcm.data()),DWORD(pcm.size()*2),
+                    first*10000000/48000,LONGLONG(frames)*10000000/48000);
+    };
+    auto drainMic = [&](bool recycle) {
+        if (!mic) return;
+        recordingSource = "microphone";
+        mic->drain([&](const BYTE* data,DWORD n,UINT64 samples) {
+            auto pcm = recording::mono16(data,n); mixer.microphone.put(int64_t(samples),pcm.data(),pcm.size()/2,mixer.cursor);
+        },recycle);
+    };
+    try {
+        recordingSource = "microphone"; if (mic) mic->start();
+        recordingSource = "system_audio"; if (loopback) loopback->start();
+        std::printf("{\"ready\":true,\"width\":%u,\"height\":%u,\"system_audio\":%s,\"channels\":%d}\n",w,h,systemAudio?"true":"false",hasAudio?2:0); std::fflush(stdout);
+        while (!stopping && qpcTime()-start < LONGLONG(seconds)*10000000) {
+            LONGLONG elapsed = qpcTime()-start;
+            drainMic(true);
+            recordingSource = "system_audio"; if (loopback) loopback->drain(mixer,start);
+            // Let capture buffers arrive before committing silence for a missing
+            // source; output remains on the same QPC timeline as the video.
+            int64_t available = std::max<int64_t>(0,elapsed*48000/10000000-9600);
+            while (hasAudio && mixer.cursor+960<=available) writeAudio(960);
+            if (elapsed >= nextVideo) {
+                auto rgb = picture(); recordingSource = "encoder";
+                writeSample(video.writer.p,video.video,rgb.data(),DWORD(rgb.size()),elapsed,10000000/12);
+                lastVideo=elapsed;nextVideo=elapsed+10000000/12;
+            }
+            if (elapsed >= nextCheck) {
+                WIN32_FILE_ATTRIBUTE_DATA info = {};
+                if (GetFileAttributesExW(path,GetFileExInfoStandard,&info) && (info.nFileSizeHigh || info.nFileSizeLow>=1024u*1024*1024)) { reason="size_limit";break; }
+                std::wstring parent(path); auto slash=parent.find_last_of(L"\\/"); ULARGE_INTEGER free={};
+                if (slash!=std::wstring::npos && GetDiskFreeSpaceExW(parent.substr(0,slash+1).c_str(),&free,nullptr,nullptr) && free.QuadPart<100*1024*1024) { reason="disk_space";break; }
+                nextCheck=elapsed+10000000;
+            }
+            Sleep(5);
+        }
+        if (stopping) reason="stopped";
+    } catch (HRESULT hr) { failure=hr; failedSource=recordingSource; reason="source_error"; }
+      catch (...) { failure=E_FAIL;failedSource=recordingSource;reason="source_error"; }
+    try {
+        if (mic) { waveInReset(mic->input);drainMic(false); }
+        recordingSource="system_audio"; if (loopback) { if (SUCCEEDED(failure))loopback->drain(mixer,start);loopback->cleanup(); }
+        int64_t target=std::max<int64_t>(4000,std::min<int64_t>(LONGLONG(seconds)*48000,(lastVideo+10000000/12)*48000/10000000));
+        while (hasAudio && mixer.cursor<target) writeAudio(size_t(std::min<int64_t>(960,target-mixer.cursor)));
+        recordingSource="encoder"; check(video.writer->Finalize());
+    } catch (HRESULT hr) { if (SUCCEEDED(failure)) {failure=hr;failedSource=recordingSource;} }
+      catch (...) { if (SUCCEEDED(failure)) {failure=E_FAIL;failedSource=recordingSource;} }
+    if (FAILED(failure)) { recordingSource=failedSource;throw failure; }
+    std::printf("{\"finished\":true,\"reason\":\"%s\"}\n",reason);std::fflush(stdout);
+}
+
 int wmain(int argc, wchar_t** argv) {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED); if (FAILED(hr)) return 1;
@@ -366,14 +604,19 @@ int wmain(int argc, wchar_t** argv) {
         check(MFStartup(MF_VERSION, MFSTARTUP_FULL)); media = true;
         if (argc == 2 && std::wcscmp(argv[1], L"devices") == 0) devices();
         else if (argc == 3 && std::wcscmp(argv[1], L"self-test") == 0) selfTest(argv[2]);
-        else if (argc == 8 && std::wcscmp(argv[1], L"record") == 0) {
+        else if (argc == 2 && std::wcscmp(argv[1],L"loopback-probe") == 0) {
+            recordingSource="system_audio";Loopback endpoint;
+            std::printf("{\"loopback_probe\":true,\"capture_started\":false,\"rate\":%u,\"channels\":%u}\n",endpoint.format->nSamplesPerSec,endpoint.format->nChannels);
+        }
+        else if ((argc == 8 || argc == 12) && std::wcscmp(argv[1], L"record") == 0) {
             int mic = number(argv[4], -2, 1023), camera = number(argv[5], 0, 31), seconds = number(argv[6], 1, 3600);
             // The final token is a protocol version, not a shell command.
-            if (std::wcscmp(argv[7], L"1")) throw E_INVALIDARG;
+            if ((argc==8 && std::wcscmp(argv[7],L"1")) || (argc==12 && std::wcscmp(argv[7],L"2"))) throw E_INVALIDARG;
             std::thread([] { HANDLE pipe = GetStdHandle(STD_INPUT_HANDLE); char c; DWORD n; while (ReadFile(pipe, &c, 1, &n, nullptr) && n) { if (c == '\n') break; } stopping = true; }).detach();
-            record(argv[2], argv[3], mic, camera, seconds);
+            if (argc==8)record(argv[2],argv[3],mic,camera,seconds);
+            else recordCombined(argv[2],argv[3],mic,camera,seconds,number(argv[8],0,1)!=0,number(argv[9],0,200),number(argv[10],0,200),number(argv[11],0,3));
         } else throw E_INVALIDARG;
-    } catch (HRESULT e) { std::printf("{\"error\":\"Recording failed (0x%08lx). Check Windows privacy permissions, device availability and Media Feature Pack.\"}\n", (unsigned long)e); std::fflush(stdout); code = 1; }
+    } catch (HRESULT e) { std::printf("{\"source\":\"%s\",\"error\":\"Recording failed (0x%08lx). Check Windows privacy permissions, device availability and Media Feature Pack.\"}\n",recordingSource,(unsigned long)e); std::fflush(stdout); code = 1; }
       catch (...) { std::printf("{\"error\":\"Recording failed: insufficient resources.\"}\n"); std::fflush(stdout); code = 1; }
     if (media) MFShutdown(); CoUninitialize(); return code;
 }
