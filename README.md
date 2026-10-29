@@ -3,6 +3,8 @@
 手机在同一个局域网下直接控制电脑：执行命令、查看屏幕和摄像头、发送消息和按键、管理磁盘文件、锁屏与剪贴板。
 电脑端由本机启动、停止接收服务；手机端开机即自动发现、**不用输连接码**、**掉线自动重连**。
 
+**3.9.0：网络管控新增独立密码与管理员权限验证；支持网卡、蓝牙硬件多选批量启停，以及热点客户端批量禁止／恢复联网，显示逐项结果。**
+
 **3.8.1：修复热点已开启但无法识别专用网卡：增加客户端 MAC／网段与 Wi-Fi Direct 虚拟网卡交叉识别，支持安卓选择热点网卡并保存；修正误导及重复提示。**
 
 **3.8.0：本地升级页可直接选择手机 ZIP 并上传，显示进度、支持取消，同名另存；新版确认启动后自动清理已用及旧版完整升级包，保留失败包与回退备份。新增网卡与蓝牙设备级停用／启用，热点客户端按 MAC 禁止／恢复联网。**
@@ -57,9 +59,9 @@
 
 1.9.0：触屏输入暂停、桌面程序管理、文件打开/解压/预览、顺序延迟命令列表，以及全屏等比显示和虚拟键盘更新。
 
-- [下载 Android 3.8.1 APK](https://github.com/DeepShawn/yuankong/releases/download/v3.8.1/LanCmd-3.8.1.apk)
-- [下载 Windows 3.8.1 接收端](https://github.com/DeepShawn/yuankong/releases/download/v3.8.1/LanCmd-Windows-3.8.1.zip)
-- 新功能与限制见 [3.8.1 说明](docs/releases/v3.8.1.md)。
+- [下载 Android 3.9.0 APK](https://github.com/DeepShawn/yuankong/releases/download/v3.9.0/LanCmd-3.9.0.apk)
+- [下载 Windows 3.9.0 接收端](https://github.com/DeepShawn/yuankong/releases/download/v3.9.0/LanCmd-Windows-3.9.0.zip)
+- 新功能与限制见 [3.9.0 说明](docs/releases/v3.9.0.md)。
 - 首页「更多」进入录制与手势板，详见 [2.2.0 说明](docs/releases/v2.2.0.md)。录制遵循系统隐私权限和设备指示，不自动更改系统隐私设置。
 - 首页「U盘锁 / 设备」查看 USB 存储和 USB MTP/PTP 手机。可移动磁盘支持锁定、只读和恢复原策略；便携设备支持锁定和恢复。管理员接收端可修改策略或安全弹出设备，标准权限可查看。
 - 新增「远程桌面」卡片，点击画面控制电脑：单击、双击、长按右键、拖动、双指滚动。

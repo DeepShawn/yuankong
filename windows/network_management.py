@@ -2,6 +2,9 @@
 import copy
 from contextlib import contextmanager
 import hashlib
+import hmac
+import secrets
+from collections import deque
 import ipaddress
 import json
 import os
@@ -26,12 +29,12 @@ class NetworkHardware(PrivacyHardware):
 NETWORK_CHANGE_LOCK=threading.RLock()
 AREAS=('hotspot','wifi','bluetooth','adapters')
 OPERATIONS={
-    'hotspot':{'start','stop','restart','configure','device','client_access','hotspot_interface'},
-    'wifi':{'connect','disconnect','forget','radio','device'},
-    'bluetooth':{'pair','unpair','radio','device'},
-    'adapters':{'enable','disable','dns','renew','device'},
+    'hotspot':{'start','stop','restart','configure','device','client_access','hotspot_interface','device_batch','client_access_batch'},
+    'wifi':{'connect','disconnect','forget','radio','device','device_batch'},
+    'bluetooth':{'pair','unpair','radio','device','device_batch'},
+    'adapters':{'enable','disable','dns','renew','device','device_batch','adapter_batch'},
 }
-SECRET_KEYS={'password','passphrase','pin','keymaterial','key_material'}
+SECRET_KEYS={'password','passphrase','pin','keymaterial','key_material','network_token'}
 
 
 @contextmanager
@@ -58,7 +61,17 @@ def text(value,name,limit=256,empty=False):
 def validate(area,operation,params):
     if area not in AREAS or operation not in OPERATIONS[area] or not isinstance(params,dict):raise ValueError('无效的网络操作')
     p={}
-    if operation=='hotspot_interface':
+    if operation in ('device_batch','adapter_batch','client_access_batch'):
+        field='addresses' if operation=='client_access_batch' else 'adapters' if operation=='adapter_batch' else 'instances'
+        values=params.get(field)
+        if not isinstance(values,list) or not 1<=len(values)<=32:raise ValueError('每批请选择 1–32 台设备')
+        convert=client_address if field=='addresses' else (lambda value:str(uuid.UUID(text(value,'网卡编号')))) if field=='adapters' else (lambda value:text(value,'设备实例编号',512))
+        values=[convert(value) for value in values]
+        if len(set(values))!=len(values):raise ValueError('批量设备不能重复')
+        flag='blocked' if field=='addresses' else 'enabled'
+        if type(params.get(flag)) is not bool:raise ValueError('请明确选择启用或停用')
+        p={field:values,flag:params[flag]}
+    elif operation=='hotspot_interface':
         selected=text(params.get('interface',''),'热点网卡',40,True)
         p=dict(interface=str(uuid.UUID(selected)) if selected else '')
     elif operation=='client_access':
@@ -179,7 +192,35 @@ class WindowsNetwork:
         return result
 
     def perform(self,area,operation,params,challenge):
-        if operation=='hotspot_interface':
+        if operation in ('device_batch','adapter_batch'):
+            if not ctypes_admin():raise ValueError('批量启停需要管理员接收端；未自动提权')
+            devices=self.hardware() if operation=='device_batch' else self.run(dict(area='adapters',operation='status')).get('adapters',[])
+            by_id={d['id']:d for d in devices if operation=='adapter_batch' or d['kind']==('bluetooth' if area=='bluetooth' else 'net')}
+            results=[]
+            for ident in params['instances' if operation=='device_batch' else 'adapters']:
+                item=by_id.get(ident);name=item.get('name',ident) if item else ident
+                try:
+                    if not item:raise ValueError('设备已变化或不属于当前分类，请刷新')
+                    if operation=='device_batch':result=self._set_device(item,params['enabled'])
+                    else:
+                        self.run(dict(area='adapters',operation='enable' if params['enabled'] else 'disable',adapter=ident))
+                        current=next((d for d in self.run(dict(area='adapters',operation='status')).get('adapters',[]) if d['id']==ident),None)
+                        confirmed=current is not None and (current.get('status') in ('Up','Disconnected','Dormant','LowerLayerDown') if params['enabled'] else current.get('status')=='Disabled')
+                        result=dict(confirmed=confirmed,message='设备状态已确认' if confirmed else 'Windows 尚未确认网卡状态，请刷新')
+                    results.append(dict(id=ident,name=name,**result))
+                except Exception as exc:results.append(dict(id=ident,name=name,confirmed=False,message=str(exc)))
+            count=sum(row['confirmed'] for row in results)
+            return dict(confirmed=count==len(results),items=results,message=f'批量操作完成：已确认 {count}/{len(results)} 台；逐项结果见下方')
+        elif operation in ('client_access','client_access_batch'):
+            if not ctypes_admin():raise ValueError('热点客户端限制需要管理员接收端；未自动提权')
+            try:snapshot=self.run(dict(area='hotspot',operation='status'))
+            except OSError:
+                if params['blocked']:raise
+                snapshot=dict(state='Unavailable')
+            result=self.access.change_many(params['addresses'] if operation=='client_access_batch' else [params['address']],params['blocked'],snapshot)
+            if self.access.blocked:self.watch_access()
+            return result
+        elif operation=='hotspot_interface':
             if self.access.blocked and not ctypes_admin():raise ValueError('重新应用联网限制需要管理员接收端；未自动提权')
             try:snapshot=self.run(dict(area='hotspot',operation='status'))
             except OSError:
@@ -188,29 +229,10 @@ class WindowsNetwork:
             result=self.access.choose_interface(params['interface'],snapshot)
             if self.access.blocked:self.watch_access()
             return result
-        elif operation=='client_access':
-            if not ctypes_admin():raise ValueError('热点客户端限制需要管理员接收端；未自动提权')
-            try:snapshot=self.run(dict(area='hotspot',operation='status'))
-            except OSError:
-                if params['blocked']:raise
-                snapshot=dict(state='Unavailable')
-            result=self.access.change(params['address'],params['blocked'],snapshot)
-            if self.access.blocked:self.watch_access()
-            return result
         elif operation=='device':
             item=next((d for d in self.hardware() if d['id']==params['instance'] and d['kind']==('bluetooth' if area=='bluetooth' else 'net')),None)
             if not item:raise ValueError('设备已变化或不属于当前分类，请刷新后重新选择')
-            if item.get('problem') not in (0,22) or item.get('error'):raise ValueError('设备状态异常，未执行启停，请检查驱动')
-            if not ctypes_admin():raise ValueError('设备级启停需要管理员接收端；未自动提权')
-            metadata=self.hw.set_enabled(item['id'],params['enabled'])
-            deadline=time.monotonic()+4
-            while True:
-                state=self.hw.status(item['id'])
-                if state.get('enabled') is params['enabled'] and state.get('problem')==(0 if params['enabled'] else 22):
-                    return dict(confirmed=True,message='已确认设备'+('启用' if params['enabled'] else '停用'),**state)
-                if time.monotonic()>=deadline:
-                    return dict(confirmed=False,message='Windows 尚未确认设备状态，请刷新'+('；驱动要求重启' if metadata.get('reboot_required') else ''),**state)
-                time.sleep(.1)
+            return self._set_device(item,params['enabled'])
         elif operation=='radio':
             self.run(dict(area='radios',operation='set',kind='WiFi' if area=='wifi' else 'Bluetooth',**params))
         elif area=='wifi':
@@ -228,15 +250,84 @@ class WindowsNetwork:
             return self.run(dict(area=area,operation=operation,**params),challenge)
         return dict(confirmed=True,message='Windows 已执行请求')
 
+    def _set_device(self,item,enabled):
+        if item.get('problem') not in (0,22) or item.get('error'):raise ValueError('设备状态异常，未执行启停，请检查驱动')
+        if not ctypes_admin():raise ValueError('设备级启停需要管理员接收端；未自动提权')
+        if item.get('enabled') is enabled and item.get('problem')==(0 if enabled else 22):
+            return dict(confirmed=True,message='设备已处于目标状态')
+        metadata=self.hw.set_enabled(item['id'],enabled)
+        deadline=time.monotonic()+4
+        while True:
+            state=self.hw.status(item['id'])
+            if state.get('enabled') is enabled and state.get('problem')==(0 if enabled else 22):
+                return dict(confirmed=True,message='已确认设备'+('启用' if enabled else '停用'),**state)
+            if time.monotonic()>=deadline:
+                return dict(confirmed=False,message='Windows 尚未确认设备状态，请刷新'+('；驱动要求重启' if metadata.get('reboot_required') else ''),**state)
+            time.sleep(.1)
+
 
 def ctypes_admin():
     import ctypes
     return bool(ctypes.windll.shell32.IsUserAnAdmin())
 
 
+class NetworkAuthorization:
+    """Feature password gate, independent of the existing LAN connection identity.
+
+    Tokens live only in memory, are bound to a phone and expire after 30 minutes.
+    Existing jobs continue after a token expires; querying them requires a new login.
+    The transport is the existing LAN TCP protocol, not a new encrypted channel.
+    """
+    SALT=bytes.fromhex('ae86b360428848b09c9205ea01b3d99e')
+    VERIFIER=bytes.fromhex('9f05ec41589a8ba6449f87cdbb3cf3ef960b6badf8e70eea83db7a1489d50129')
+    ITERATIONS=210000
+
+    def __init__(self,admin=None,salt=None,verifier=None,clock=time.monotonic):
+        self.admin=admin or ctypes_admin;self.clock=clock
+        self.salt=self.SALT if salt is None else salt;self.verifier=self.VERIFIER if verifier is None else verifier
+        self.lock=threading.RLock();self.sessions={};self.failures={};self.attempts=deque()
+
+    def _prune(self,now):
+        self.sessions={k:v for k,v in self.sessions.items() if v['expires']>now}
+        self.failures={k:v for k,v in self.failures.items() if v['time']>now-300}
+        while self.attempts and self.attempts[0]<=now-60:self.attempts.popleft()
+
+    def require(self,owner,token):
+        with self.lock:
+            self._prune(self.clock())
+            session=self.sessions.get(token) if isinstance(token,str) else None
+            if not self.admin():raise ValueError('NETWORK_ADMIN_REQUIRED: 请在电脑以管理员身份启动接收端；输入功能密码不会提升 Windows 权限')
+            if not session or session['owner']!=owner:raise ValueError('NETWORK_AUTH_REQUIRED: 请先输入网络管理密码')
+
+    def status(self):return dict(admin=bool(self.admin()),requires_password=True)
+
+    def unlock(self,owner,password):
+        with self.lock:
+            now=self.clock();self._prune(now)
+            if not self.admin():raise ValueError('NETWORK_ADMIN_REQUIRED: 请在电脑以管理员身份启动接收端；未自动提权')
+            failed=self.failures.get(owner,dict(count=0,time=0))
+            if len(self.attempts)>=30 or failed['count']>=5 and now<failed['time']+30:
+                raise ValueError('密码尝试过多，请 30 秒后重试')
+            self.attempts.append(now)
+            valid=isinstance(password,str) and 1<=len(password)<=256 and '\0' not in password
+            digest=hashlib.pbkdf2_hmac('sha256',password.encode('utf-8'),self.salt,self.ITERATIONS) if valid else b''
+            if not hmac.compare_digest(digest,self.verifier):
+                self.failures[owner]=dict(count=failed['count']+1,time=now)
+                raise ValueError('网络管理密码错误')
+            self.failures.pop(owner,None)
+            if len(self.sessions)>=128:raise ValueError('网络管理会话过多，请稍后重试')
+            token=secrets.token_hex(32)
+            self.sessions[token]=dict(owner=owner,expires=now+1800)
+            return dict(network_token=token,expires_in=1800,admin=True)
+
+    def revoke(self,owner,token):
+        with self.lock:
+            if isinstance(token,str) and self.sessions.get(token,{}).get('owner')==owner:self.sessions.pop(token,None)
+
+
 class NetworkManagement:
-    def __init__(self,backend=None,grace=.6):
-        self.backend=backend or WindowsNetwork();self.grace=grace
+    def __init__(self,backend=None,grace=.6,authorization=None):
+        self.backend=backend or WindowsNetwork();self.grace=grace;self.authorization=authorization or NetworkAuthorization()
         self.lock=threading.RLock();self.jobs={};self.reading={};self.snapshots={};self.mutation=None
 
     def busy(self):
@@ -293,6 +384,11 @@ class NetworkManagement:
         try:
             if not owner:raise ValueError('请先连接电脑')
             action=q.get('action','status');area=q.get('area','hotspot')
+            if action=='auth_status':return self.authorization.status()
+            if action=='unlock':return self.authorization.unlock(owner,q.pop('password',None))
+            if action=='lock':
+                self.authorization.revoke(owner,q.get('network_token'));return dict(locked=True)
+            self.authorization.require(owner,q.get('network_token'))
             if area not in AREAS:raise ValueError('网络分类无效')
             with self.lock:
                 if action in ('refresh','scan','submit'):

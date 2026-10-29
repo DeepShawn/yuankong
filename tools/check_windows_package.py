@@ -82,29 +82,35 @@ class PackagedStartupTest(unittest.TestCase):
         with socket.create_connection(("127.0.0.1", self.port), timeout=5) as connection:
             with connection.makefile("rwb") as stream:
                 request_id = 100
-                def call(cmd, **fields):
+                def call(cmd, _expect_ok=True, **fields):
                     nonlocal request_id
                     request_id += 1
                     stream.write(json.dumps(dict(id=request_id, cmd=cmd, **fields)).encode() + b"\n")
                     stream.flush()
                     response = json.loads(stream.readline())
-                    self.assertTrue(response["ok"], response)
+                    self.assertEqual(_expect_ok,response["ok"],response)
                     self.assertEqual(request_id,response['id'],'Worker IPC IDs must never replace phone RPC IDs')
                     return response
                 call("hello", client_id="shipped-startup", client="Package regression")
                 capabilities = call("capabilities")
                 self.assertEqual(self.display_version, capabilities["version"])
                 self.assertEqual(self.version, capabilities['build_version'])
-                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network", "network_management", "network_device_state", "hotspot_client_access", "hotspot_adapter_selection", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"):
+                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network", "network_management", "network_device_state", "hotspot_client_access", "hotspot_adapter_selection", "network_password", "network_batch", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"):
                     self.assertIn(feature, capabilities["features"])
-                network=call('network',action='refresh',area='adapters')
-                job_id=network['job']['id'];deadline=time.monotonic()+30
-                while not network['job'].get('finished'):
-                    if time.monotonic()>=deadline:self.fail('Packaged network helper did not return its job result')
-                    time.sleep(.2)
-                    network=call('network',action='status',area='adapters',job=job_id)
-                self.assertEqual('completed',network['job']['status'],network['job'])
-                self.assertIsInstance(network['snapshot']['adapters'],list)
+                gate=call('network',action='auth_status')
+                self.assertTrue(gate['requires_password']);self.assertIsInstance(gate['admin'],bool)
+                locked=call('network',_expect_ok=False,action='refresh',area='adapters')
+                self.assertIn('NETWORK_',locked['error'])
+                denied=call('network',_expect_ok=False,action='unlock',password='invalid-package-test-password')
+                self.assertNotIn('invalid-package-test-password',denied['error'])
+                self.assertNotIn('network_token',denied)
+                # Exercise the same helper using the archive's isolated Python,
+                # without embedding a real user password in a public CI test.
+                probe=subprocess.run([str(self.package/'python/python.exe'),'-X','utf8','-c',
+                    "import sys,json;sys.path.insert(0,sys.argv[1]);from network_management import WindowsNetwork;print(json.dumps(WindowsNetwork().read('adapters')))",str(self.package)],
+                    cwd=self.folder,env=self.env,capture_output=True,timeout=60)
+                self.assertEqual(0,probe.returncode,probe.stderr.decode('utf-8','replace'))
+                self.assertIsInstance(json.loads(probe.stdout)['adapters'],list)
                 with CursorWindow() as window:
                     self.assertGreaterEqual(window.initial['display_count'], 0)
                     lease = call("session", scope="input")["sid"]

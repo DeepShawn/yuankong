@@ -42,6 +42,23 @@ class ClientAccessTest(unittest.TestCase):
         self.assertEqual([MAC],json.loads(self.path.read_text())['blocked'])
         state=self.access.sync(snapshot());self.assertTrue(state['clients'][0]['access_active'])
         self.assertIn('仍显示已连接',result['message'])
+    def test_batch_replaces_once_and_rejects_all_if_any_selected_client_disappeared(self):
+        other='02:AA:BB:CC:DD:EE';state=snapshot();state['clients'].append(dict(address=other))
+        original=self.engine.replace
+        with mock.patch.object(self.engine,'replace',side_effect=original) as replace:
+            result=self.access.change_many([MAC,other],True,state)
+            replace.assert_called_once()
+        self.assertTrue(result['confirmed']);self.assertEqual({MAC,other},self.access.blocked)
+        self.assertEqual(2,len(result['items']))
+        with self.assertRaisesRegex(ValueError,'当前未连接'):self.access.change_many([MAC,'02:12:34:56:78:90'],True,state)
+        self.assertEqual({MAC,other},self.access.blocked)
+        self.access.change_many([MAC,other],False,dict(state='Off'));self.assertFalse(self.access.blocked)
+    def test_batch_persistence_failure_rolls_back_every_filter(self):
+        state=snapshot();other='02:AA:BB:CC:DD:EE';state['clients'].append(dict(address=other))
+        self.access.change(MAC,True,state)
+        with mock.patch.object(self.access,'_save',side_effect=OSError('disk full')):
+            with self.assertRaisesRegex(OSError,'disk full'):self.access.change_many([MAC,other],True,state)
+        self.assertEqual({MAC},self.access.blocked);self.assertEqual([dict(address=MAC,interface=GUID)],self.engine.entries)
     def test_missing_ambiguous_or_stopped_hotspot_never_creates_global_filters(self):
         for state in [dict(state='Off'),dict(state='On',private_adapters=[]),dict(state='On',private_adapters=[{},{}])]:
             with self.subTest(state=state),self.assertRaises(ValueError):self.access.change(MAC,True,state)
