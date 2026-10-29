@@ -1,5 +1,6 @@
 """Scoped cursor ownership; native tests restore the current scheme in finally."""
 import io
+import json
 import logging
 import os
 from pathlib import Path
@@ -135,6 +136,44 @@ class CursorTest(unittest.TestCase):
 
 @unittest.skipUnless(os.name=='nt','Requires Windows cursor bitmap and recovery APIs')
 class NativeCursorTest(unittest.TestCase):
+    def test_real_foreground_app_cannot_redisplay_its_own_cursor_after_remote_mouse_input(self):
+        import subprocess
+        from remote_features import WindowsBackend
+        app = subprocess.Popen([sys.executable, str(Path(__file__).with_name('cursor_window_fixture.py'))],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8')
+        def report(command=None):
+            if command:
+                app.stdin.write(command + '\n');app.stdin.flush()
+            line = app.stdout.readline()
+            if not line:raise AssertionError(app.stderr.read())
+            return json.loads(line)
+        worker = None
+        backend = WindowsBackend('unused')
+        try:
+            before = report()
+            self.assertTrue(before['foreground'], before)
+            self.assertTrue(before['visible'], 'The fixture must prove a visible native cursor before hiding')
+            worker = CursorWorker();worker.ping()
+            user = NativeCursors().user
+            # Fixture client area, mapped the same way as phone coordinates.
+            left, top = user.GetSystemMetrics(76), user.GetSystemMetrics(77)
+            width, height = user.GetSystemMetrics(78), user.GetSystemMetrics(79)
+            for i in range(8):
+                backend.pointer('move', (175 + i - left) / width, (175 - top) / height,
+                                'left', 0, lambda: True)
+                state = report('probe')
+                self.assertFalse(state['visible'], 'Foreground WM_SETCURSOR must not reveal the app cursor: ' + str(state))
+            self.assertGreater(state['moves'], before['moves'], 'The foreground window must actually receive SendInput movement')
+            worker.close();worker = None
+            self.assertTrue(report('probe')['visible'], 'Closing the worker must restore the app cursor')
+        finally:
+            if worker:worker.close()
+            if backend.guard:backend.guard.close()
+            app.stdin.close()
+            try:app.wait(8)
+            except subprocess.TimeoutExpired:app.kill();app.wait(5)
+            app.stdout.close();app.stderr.close()
+
     def test_actual_cursor_bitmaps_are_transparent_and_a_scheme_reload_is_repaired(self):
         native=NativeCursors()
         before=native.transparent(native._load(32512))
