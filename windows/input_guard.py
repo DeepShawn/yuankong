@@ -152,6 +152,9 @@ class NativeInputGuard:
             _fields_ = [('device', w.DWORD), ('origin', w.DWORD)]
         self.user.GetCurrentInputMessageSource.argtypes = [ctypes.POINTER(MessageSource)]
         self.user.GetCurrentInputMessageSource.restype = w.BOOL
+        from touch_injection import PointerInfo
+        self.user.GetPointerInfo.argtypes = [w.UINT, ctypes.POINTER(PointerInfo)]
+        self.user.GetPointerInfo.restype = w.BOOL
         self.last_touch_source = None
 
         def keyboard(code, message, address):
@@ -183,10 +186,15 @@ class NativeInputGuard:
             if event.flags & 1 and event.extra & 0xffffff00 == 0xff515700 and event.extra & 0x80:
                 source = MessageSource()
                 known = self.user.GetCurrentInputMessageSource(ctypes.byref(source))
-                self.last_touch_source = (event.flags,event.extra,bool(known),source.device,source.origin)
+                pointer = PointerInfo()
+                pointer_known = self.user.GetPointerInfo(event.extra & 0x7f, ctypes.byref(pointer))
+                self.last_touch_source = (event.flags,event.extra,bool(known),source.device,source.origin,
+                    bool(pointer_known),pointer.pointerType,pointer.sourceDevice,pointer.pointerId)
                 # Windows touch promotion has its own signature. Only software
                 # injection is allowed; hardware touch remains blocked here.
                 if known and source.device == 4 and source.origin == 2:
+                    return self.user.CallNextHookEx(None, code, message, address)
+                if pointer_known and pointer.pointerType == 2 and not pointer.sourceDevice:
                     return self.user.CallNextHookEx(None, code, message, address)
             return 1
 
