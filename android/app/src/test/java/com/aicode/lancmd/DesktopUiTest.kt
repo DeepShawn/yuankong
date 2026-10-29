@@ -380,9 +380,20 @@ class DesktopUiTest {
         Stub(nativeTouchSupported=false).use {stub ->
             stub.install();val controller=Robolectric.buildActivity(DesktopActivity::class.java).setup();val page=controller.get()
             try {
-                page.begin();waitUntil{!page.sharing && page.note.contains("v3.6.0")}
+                page.begin();waitUntil{!page.sharing && page.note.contains("v3.7.0")}
                 assertFalse(stub.requests.any{it.second.optString("cmd")=="session"})
                 assertFalse(stub.requests.any{it.second.optString("cmd")=="pointer"})
+            }finally{controller.pause().stop().destroy()}
+        }
+    }
+
+    @Test fun receiverWithOldNativeTouchRequiresTheActualWindowsHoldFix() {
+        Stub(holdSupported=false).use {stub ->
+            stub.install();val controller=Robolectric.buildActivity(DesktopActivity::class.java).setup();val page=controller.get()
+            try {
+                page.begin();waitUntil{!page.sharing && page.note.contains("v3.7.0")}
+                assertTrue(page.note.contains("双击与长按"))
+                assertFalse(stub.requests.any{it.second.optString("cmd")=="session"})
             }finally{controller.pause().stop().destroy()}
         }
     }
@@ -505,7 +516,7 @@ class DesktopUiTest {
         }
     }
 
-    private class Stub(private val pointerSupported: Boolean = true, private val localSupported: Boolean = false, private val nativeTouchSupported:Boolean=true, private val touchReady:Boolean=true) : Closeable {
+    private class Stub(private val pointerSupported: Boolean = true, private val localSupported: Boolean = false, private val nativeTouchSupported:Boolean=true, private val touchReady:Boolean=true,private val holdSupported:Boolean=true) : Closeable {
         private val server = ServerSocket(0)
         private val clients = CopyOnWriteArrayList<Socket>()
         private val workers = CopyOnWriteArrayList<Thread>()
@@ -533,7 +544,7 @@ class DesktopUiTest {
                                     val result = JSONObject().put("ok", true).put("id", request.getInt("id"))
                                     when (request.optString("cmd")) {
                                         "hello" -> result.put("agent_id", "desktop-test").put("token", "test-token")
-                                        "capabilities" -> result.put("features", JSONArray(listOf("screen", "input") + (if(nativeTouchSupported)listOf("native_touch")else emptyList()) + (if (pointerSupported) listOf("pointer") else emptyList()) + (if (localSupported) listOf("local_input", "touch_pause") else emptyList())))
+                                        "capabilities" -> result.put("features", JSONArray(listOf("screen", "input") + (if(nativeTouchSupported)listOf("native_touch")else emptyList()) + (if(holdSupported)listOf("native_touch_hold")else emptyList()) + (if (pointerSupported) listOf("pointer") else emptyList()) + (if (localSupported) listOf("local_input", "touch_pause") else emptyList())))
                                         "touch" -> result.put("api",if(touchReady)"InjectTouchInput" else "unavailable").put("max_contacts",10).put("active",0)
                                         "local_input" -> {
                                             if (request.optString("action") == "pause") paused = true
