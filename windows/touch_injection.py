@@ -313,7 +313,10 @@ class TouchInjection:
                         return
                     self.worker.call()
         except Exception:
-            with self.lock:self._close()
+            with self.lock:
+                try:self._close()
+                finally:
+                    if self.thread is threading.current_thread():self.thread = None
         finally:
             with self.lock:
                 if self.thread is threading.current_thread():self.thread = None

@@ -100,9 +100,16 @@ class NativeTouchTest(unittest.TestCase):
     def test_touch_promotion_reaches_legacy_apps_while_local_mouse_hook_is_active(self):
         from cursor_window_fixture import CursorWindow
         from input_guard import InputGuard, NativeInputGuard
+        import touch_injection as injection
+        seen = []
+        original = injection.authorized_touch_mouse
+        def check(*args):
+            result = original(*args)
+            seen.append((args,result))
+            return result
         class Guard(NativeInputGuard):
             def __init__(self):
-                super().__init__()
+                with mock.patch.object(injection,'authorized_touch_mouse',check):super().__init__()
                 self.touch = SimpleNamespace(start=lambda:None,stop=lambda:None,ping=lambda:None)
         guard = InputGuard(Guard())
         with CursorWindow() as app:
@@ -120,7 +127,7 @@ class NativeTouchTest(unittest.TestCase):
                 while True:
                     events = app.report('probe')['mouse_taps']
                     if sum(p['message']==0x202 for p in events)>=3:break
-                    if time.monotonic()>=deadline:self.fail('Native touch promotion was blocked by local-input hook: '+str(events))
+                    if time.monotonic()>=deadline:self.fail('Native touch promotion was blocked by local-input hook: '+str((events,seen[-20:],list(injection._promotions)[-8:])))
                     time.sleep(.02)
             finally:
                 if worker:worker.close()
