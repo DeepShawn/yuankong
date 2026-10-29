@@ -7,6 +7,7 @@ import secrets
 from collections import deque
 import ipaddress
 import json
+import math
 import os
 from pathlib import Path
 import queue
@@ -29,7 +30,7 @@ class NetworkHardware(PrivacyHardware):
 NETWORK_CHANGE_LOCK=threading.RLock()
 AREAS=('hotspot','wifi','bluetooth','adapters')
 OPERATIONS={
-    'hotspot':{'start','stop','restart','configure','device','client_access','hotspot_interface','device_batch','client_access_batch'},
+    'hotspot':{'start','stop','restart','configure','device','client_access','hotspot_interface','device_batch','client_access_batch','restart_after','cancel_restart'},
     'wifi':{'connect','disconnect','forget','radio','device','device_batch'},
     'bluetooth':{'pair','unpair','radio','device','device_batch'},
     'adapters':{'enable','disable','dns','renew','device','device_batch','adapter_batch'},
@@ -61,7 +62,15 @@ def text(value,name,limit=256,empty=False):
 def validate(area,operation,params):
     if area not in AREAS or operation not in OPERATIONS[area] or not isinstance(params,dict):raise ValueError('无效的网络操作')
     p={}
-    if operation in ('device_batch','adapter_batch','client_access_batch'):
+    if operation=='restart_after':
+        seconds=params.get('seconds')
+        if type(seconds) is not int or not 1<=seconds<=86400:raise ValueError('定时开启须填写 1–86400 秒')
+        p=dict(seconds=seconds)
+    elif operation=='cancel_restart':
+        ident=params.get('timer_id')
+        if not isinstance(ident,str) or not re.fullmatch('[0-9a-f]{32}',ident):raise ValueError('定时任务编号无效，请刷新')
+        p=dict(timer_id=ident)
+    elif operation in ('device_batch','adapter_batch','client_access_batch'):
         field='addresses' if operation=='client_access_batch' else 'adapters' if operation=='adapter_batch' else 'instances'
         values=params.get(field)
         if not isinstance(values,list) or not 1<=len(values)<=32:raise ValueError('每批请选择 1–32 台设备')
@@ -325,13 +334,86 @@ class NetworkAuthorization:
             if isinstance(token,str) and self.sessions.get(token,{}).get('owner')==owner:self.sessions.pop(token,None)
 
 
+class HotspotTimer:
+    """Windows-owned one-shot timer; no phone, password or live RPC is needed."""
+    def __init__(self,backend,admin,clock=time.monotonic,wall=time.time,autostart=True):
+        self.backend=backend;self.admin=admin;self.clock=clock;self.wall=wall;self.autostart=autostart
+        self.lock=threading.RLock();self.data=None;self.deadline=0.;self.wake=threading.Event()
+
+    def status(self):
+        with self.lock:
+            if self.data is None:return None
+            result=dict(self.data)
+            result['remaining_seconds']=max(0,math.ceil(self.deadline-self.clock())) if result['status']=='waiting' else 0
+            return result
+
+    def active(self):
+        with self.lock:return self.data is not None and self.data['status'] in ('stopping','waiting','starting')
+
+    def changing(self):
+        with self.lock:return self.data is not None and self.data['status'] in ('stopping','starting')
+
+    def schedule(self,seconds):
+        if type(seconds) is not int or not 1<=seconds<=86400:raise ValueError('定时开启须填写 1–86400 秒')
+        with self.lock:
+            if self.active():raise ValueError('已有热点定时任务，请先取消后重新设置')
+            self.wake=threading.Event()
+            self.data=dict(id=uuid.uuid4().hex,status='stopping',seconds=seconds,message='正在关闭热点，确认关闭后开始计时')
+        try:
+            if not self.admin():raise ValueError('定时热点需要管理员接收端；未自动提权')
+            result=self.backend.perform('hotspot','stop',{},None)
+            if result.get('state')!='Off':raise ValueError('Windows 未确认热点已关闭，未开始计时；请刷新实际状态')
+            with self.lock:
+                self.deadline=self.clock()+seconds
+                self.data.update(status='waiting',due_at=self.wall()+seconds,message='热点已关闭，Windows 正在计时')
+            if self.autostart:threading.Thread(target=self._watch,args=(self.wake,),daemon=True,name='hotspot-timer').start()
+            return dict(confirmed=True,message=f'热点已关闭，将在 {seconds} 秒后由 Windows 开启')
+        except Exception as exc:
+            with self.lock:self.data.update(status='failed',message=str(exc)[:1500])
+            raise
+
+    def cancel(self,ident=None):
+        with self.lock:
+            if ident is not None and (not self.data or self.data['id']!=ident):raise ValueError('热点定时任务已变化，请刷新后重试')
+            if self.data and self.data['status'] in ('stopping','starting'):raise ValueError('Windows 已在切换热点状态，请等待实际结果')
+            if self.data and self.data['status']=='waiting':
+                self.data.update(status='cancelled',message='已取消定时开启，热点保持当前状态');self.wake.set()
+            return dict(confirmed=True,message='热点定时开启已取消；未更改当前热点开关')
+
+    def run_due(self):
+        # Never overlap another network change; remain cancellable while waiting.
+        if not NETWORK_CHANGE_LOCK.acquire(blocking=False):return False
+        try:
+            with self.lock:
+                if not self.data or self.data['status']!='waiting' or self.clock()<self.deadline:return False
+                self.data.update(status='starting',message='Windows 正在按定时任务开启热点')
+            try:
+                if not self.admin():raise ValueError('管理员权限已失效，未执行定时开启')
+                result=self.backend.perform('hotspot','start',{},None)
+                if result.get('state')!='On':raise ValueError('Windows 未确认热点已开启；请刷新实际状态，不会自动重复执行')
+                with self.lock:self.data.update(status='completed',message='Windows 已确认热点定时开启成功')
+            except Exception as exc:
+                with self.lock:self.data.update(status='failed',message=str(exc)[:1500])
+            return True
+        finally:NETWORK_CHANGE_LOCK.release()
+
+    def _watch(self,event):
+        while not event.is_set():
+            self.run_due()
+            with self.lock:
+                if event is not self.wake or not self.data or self.data['status']!='waiting':return
+                remaining=self.deadline-self.clock()
+            event.wait(max(.05,min(remaining,1.)))
+
+
 class NetworkManagement:
-    def __init__(self,backend=None,grace=.6,authorization=None):
+    def __init__(self,backend=None,grace=.6,authorization=None,timer=None):
         self.backend=backend or WindowsNetwork();self.grace=grace;self.authorization=authorization or NetworkAuthorization()
         self.lock=threading.RLock();self.jobs={};self.reading={};self.snapshots={};self.mutation=None
+        self.timer=timer or HotspotTimer(self.backend,self.authorization.admin)
 
     def busy(self):
-        with self.lock:return self.mutation is not None
+        with self.lock:return self.mutation is not None or self.timer.active()
 
     def _question(self,job,event):
         challenge=dict(id=event.get('id'),kind=event.get('kind'),display_code=event.get('display_code',''))
@@ -355,7 +437,13 @@ class NetworkManagement:
                 if scan:result['message']='已请求 Wi-Fi 扫描；请数秒后刷新查看新发现的网络'
             else:
                 time.sleep(self.grace)  # Let the phone receive its job ID before a link changes.
-                with network_change():result=self.backend.perform(area,data['operation'],params,lambda event:self._question(job,event))
+                with network_change():
+                    operation=data['operation']
+                    if operation=='restart_after':result=self.timer.schedule(params['seconds'])
+                    elif operation=='cancel_restart':result=self.timer.cancel(params['timer_id'])
+                    else:
+                        if area=='hotspot' and operation in ('start','stop','restart','configure'):self.timer.cancel()
+                        result=self.backend.perform(area,operation,params,lambda event:self._question(job,event))
             if not refresh:
                 try:
                     snapshot=self.backend.read(area)
@@ -390,6 +478,7 @@ class NetworkManagement:
                 self.authorization.revoke(owner,q.get('network_token'));return dict(locked=True)
             self.authorization.require(owner,q.get('network_token'))
             if area not in AREAS:raise ValueError('网络分类无效')
+            if action=='timer_status':return dict(timer=self.timer.status(),busy=self.timer.changing())
             with self.lock:
                 if action in ('refresh','scan','submit'):
                     refresh=action!='submit'
@@ -410,7 +499,7 @@ class NetworkManagement:
                     elif refresh and area in self.reading and self.jobs[self.reading[area]]['owner']==owner:
                         job=self.jobs[self.reading[area]]
                     else:
-                        if not refresh and self.mutation:raise ValueError('已有网络修改正在执行，请等待结果')
+                        if not refresh and (self.mutation or self.timer.changing()):raise ValueError('已有网络修改正在执行，请等待结果')
                         if len(self.jobs)>=80:
                             for key in list(self.jobs):
                                 if 'finished' in self.jobs[key]['public']:self.jobs.pop(key);break
@@ -443,5 +532,5 @@ class NetworkManagement:
                     if job and job['owner']!=owner:raise ValueError('网络任务不属于此手机')
                 else:raise ValueError('无效的网络管理请求')
                 return dict(area=area,snapshot=copy.deepcopy(self.snapshots.get(area,{})),
-                    job=copy.deepcopy(job['public']) if job else None,busy=self.mutation is not None)
+                    job=copy.deepcopy(job['public']) if job else None,busy=self.mutation is not None or self.timer.changing(),timer=self.timer.status())
         except (ValueError,OSError,TypeError,KeyError) as exc:raise error(str(exc))

@@ -81,7 +81,7 @@ class VirtualKeyboard(context: Context, private val send: (List<String>) -> Unit
 
         row(this, listOf("Esc", "Tab", "空格", "退格", "Enter"), special = true,
             weights = listOf(1f, 1f, 2.2f, 1.3f, 1.4f))
-        row(this, listOf("←", "↑", "↓", "→", "Delete"), special = true)
+        row(this, listOf("←", "↑", "↓", "→", "删除"), special = true)
         selectPage(0)
         updateModifiers()
     }
@@ -126,7 +126,7 @@ class VirtualKeyboard(context: Context, private val send: (List<String>) -> Unit
             val button = styledButton(label, if (label.length == 1) 17f else if (label.length > 4) 11f else 12f).apply {
                 contentDescription = "虚拟键盘 " + when (label) {
                     "←" -> "向左"; "↑" -> "向上"; "↓" -> "向下"; "→" -> "向右"
-                    "Enter" -> "回车"; "Delete" -> "删除"; else -> label
+                    "Enter" -> "回车"; "删除" -> "删除"; else -> label
                 }
                 if (special) backgroundTintList = states(R.color.surface, R.color.accent_dim, R.color.surface)
                 if (label == "Enter") {
@@ -198,7 +198,7 @@ class VirtualKeyboard(context: Context, private val send: (List<String>) -> Unit
     }
 
     private fun keyName(label: String) = when (label) {
-        "空格" -> "SPACE"; "退格" -> "BACKSPACE"; "←" -> "LEFT"; "↑" -> "UP"; "↓" -> "DOWN"; "→" -> "RIGHT"
+        "空格" -> "SPACE"; "退格" -> "BACKSPACE"; "删除" -> "DELETE"; "←" -> "LEFT"; "↑" -> "UP"; "↓" -> "DOWN"; "→" -> "RIGHT"
         "-" -> "OEM_MINUS"; "=" -> "OEM_PLUS"; "[" -> "OEM_4"; "]" -> "OEM_6"
         ";" -> "OEM_1"; "'" -> "OEM_7"; "," -> "OEM_COMMA"; "." -> "OEM_PERIOD"
         "/" -> "OEM_2"; "\\" -> "OEM_5"; "`" -> "OEM_3"

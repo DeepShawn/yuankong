@@ -30,6 +30,10 @@ class NetworkManagementActivity : MiuixActivity() {
     private var adapterSelectionSupported by mutableStateOf(false)
     private var hotspotAdaptersExpanded by mutableStateOf(false)
     private var hotspotDiagnosticsExpanded by mutableStateOf(false)
+    private var timerSupported by mutableStateOf(false)
+    internal var restartDelay by mutableStateOf("60")
+    internal var hotspotTimer by mutableStateOf<JSONObject?>(null)
+    private var timerConnected by mutableStateOf(false)
     private var devicesExpanded by mutableStateOf(false)
     internal var authorized by mutableStateOf(false)
     internal var administrator by mutableStateOf(false)
@@ -80,6 +84,16 @@ class NetworkManagementActivity : MiuixActivity() {
         }
         content {
             val listState=rememberLazyListState()
+            LaunchedEffect(authorized,timerSupported,area) {
+                if(authorized && timerSupported && area=="hotspot")while(true) {
+                    try {
+                        val result=networkCall(JSONObject().put("action","timer_status"))
+                        hotspotTimer=result.optJSONObject("timer");timerConnected=true
+                    } catch(e:CancellationException){throw e}
+                    catch(e:Exception){timerConnected=false;if(!authorized){status(e.message ?: "请重新验证",true);break}}
+                    delay(1000)
+                }
+            }
             LaunchedEffect(area,wifiSelection,adapterSelection){listState.scrollToItem(0)}
             FixedPage("网络与蓝牙") {
                 if(!authorized) {
@@ -107,6 +121,7 @@ class NetworkManagementActivity : MiuixActivity() {
                     item {HardwareControls(snapshot)}
                     when(area) {
                         "hotspot" -> {
+                            if(timerSupported)item {HotspotTimerControls()}
                             item {HotspotControls(snapshot)}
                             if(batchSupported && accessSupported)item {ClientBatchControls(snapshot)}
                             items(snapshot.rows("clients"),key={it.optString("address")}) {client ->SectionCard {
@@ -231,6 +246,7 @@ class NetworkManagementActivity : MiuixActivity() {
         task {
             val caps=pinnedCall(owner,"capabilities").optJSONArray("features")
             supported=caps!=null && listOf("network_management","network_password").all{feature ->(0 until caps.length()).any{caps.optString(it)==feature}}
+            timerSupported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="hotspot_timer"}
             batchSupported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="network_batch"}
             hardwareSupported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="network_device_state"}
             accessSupported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="hotspot_client_access"}
@@ -267,7 +283,7 @@ class NetworkManagementActivity : MiuixActivity() {
     private fun resetAuthorization() {
         authorized=false;networkToken="";managementPassword="";confirmation=null
         hotspotPassword="";wifiPassword="";pairingPin="";wifiSelection=null;adapterSelection=null
-        snapshots.clear();job=null;selectedHardware.clear();selectedAdapters.clear();selectedClients.clear()
+        snapshots.clear();job=null;hotspotTimer=null;timerConnected=false;selectedHardware.clear();selectedAdapters.clear();selectedClients.clear()
     }
     private fun revoke(client:AgentClient?,token:String) {
         if(client==null || token.isBlank())return
@@ -337,6 +353,27 @@ class NetworkManagementActivity : MiuixActivity() {
 
     @Composable private fun SecretField(label:String,value:String,onChange:(String)->Unit) =
         Field(label,value,onChange,password=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password))
+
+    @Composable private fun HotspotTimerControls() {
+        val timer=hotspotTimer
+        val state=timer?.optString("status").orEmpty()
+        val active=state in listOf("stopping","waiting","starting")
+        val seconds=restartDelay.toIntOrNull()
+        SectionCard("热点定时开启") {
+            Field("关闭后等待秒数（1–86400）",restartDelay,{restartDelay=it.take(5)},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number))
+            Action("关闭并定时开启",enabled=canChange() && !active && seconds!=null && seconds in 1..86400,primary=true) {
+                ask("restart_after",JSONObject().put("seconds",seconds),"关闭热点，Windows 确认关闭后等待 $seconds 秒，再开启热点。手机断线也会执行，请保持电脑和接收端运行。")
+            }
+            if(timer!=null) {
+                InfoItem(when(state){"waiting"->if(timerConnected)"剩余 ${timer.optInt("remaining_seconds")} 秒" else "等待连接恢复，剩余时间以电脑为准"
+                    "stopping"->"正在关闭热点";"starting"->"正在开启热点";"completed"->"定时开启已完成";"cancelled"->"定时开启已取消";else->"定时开启失败"},timer.optString("message"))
+                if(state=="waiting")Action("取消定时开启",enabled=canChange()) {
+                    ask("cancel_restart",JSONObject().put("timer_id",timer.optString("id")),"取消此次定时开启，保留热点当前开关状态。")
+                }
+            }
+            Note("全部计时和操作在 Windows 完成；手机可断线，电脑与接收端须保持运行。手动开启、关闭、重启或修改热点配置会取消原定时。")
+        }
+    }
 
     @Composable private fun HotspotControls(snapshot:JSONObject) {
         SectionCard("移动热点") {
@@ -449,6 +486,7 @@ class NetworkManagementActivity : MiuixActivity() {
     }
     internal fun render(result:JSONObject) {
         val key=result.optString("area",area)
+        if(result.has("timer")){hotspotTimer=result.optJSONObject("timer");timerConnected=true}
         result.optJSONObject("snapshot")?.takeIf{it.length()>0}?.let {
             snapshots[key]=it
             if(key==area) {

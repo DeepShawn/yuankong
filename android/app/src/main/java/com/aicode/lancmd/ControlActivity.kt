@@ -97,7 +97,7 @@ class ControlActivity : MiuixActivity() {
         }
         SectionCard("虚拟键盘") {
             keyboard.isEnabled = controlling
-            HostedView(keyboard, Modifier.fillMaxWidth().height(300.dp).padding(vertical = 6.dp))
+            HostedView(keyboard, Modifier.fillMaxWidth().padding(vertical = 6.dp))
         }
         SectionCard("文字输入") {
             Field(
