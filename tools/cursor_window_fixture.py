@@ -46,10 +46,16 @@ def main():
     requests = queue.SimpleQueue()
     moves = [0]
     def report():
+        # Query the owning queue without ever increasing its existing count.
+        # Headless runners may suppress hardware display even when this count
+        # would show a cursor on a physical desktop.
+        user.ShowCursor(False)
+        display_count = user.ShowCursor(True)
         current = native._current()
         return {'visible': bool(current.flags & 1), 'flags': current.flags,
                 'foreground': user.GetForegroundWindow() == window,
-                'moves': moves[0], 'cursor': current.cursor, 'custom': custom}
+                'moves': moves[0], 'cursor': current.cursor, 'custom': custom,
+                'display_count': display_count}
     def proc(hwnd, message, word, long):
         if message in (0x20, 0x200):  # Real WM_SETCURSOR / WM_MOUSEMOVE path.
             user.SetCursor(custom)

@@ -123,6 +123,7 @@ class CursorTest(unittest.TestCase):
     def test_custom_white_cursor_is_not_mistaken_for_transparency_and_must_be_replaced(self):
         native=NativeCursors.__new__(NativeCursors)
         native.blank=101;native.native_error=None;native.reapply_at=time.monotonic()+100
+        native.input_mask=None;native.prepared=None
         native.reference=(32,64,4,b'\xff'*128+b'\0'*128)
         # Swapping AND and XOR makes a solid white cursor, not a hidden one.
         native._mask=mock.Mock(return_value=(32,64,4,b'\0'*128+b'\xff'*128))
@@ -152,7 +153,7 @@ class NativeCursorTest(unittest.TestCase):
         try:
             before = report()
             self.assertTrue(before['foreground'], before)
-            self.assertTrue(before['visible'], 'The fixture must prove a visible native cursor before hiding')
+            self.assertGreaterEqual(before['display_count'], 0, before)
             worker = CursorWorker();worker.ping()
             user = NativeCursors().user
             # Fixture client area, mapped the same way as phone coordinates.
@@ -162,10 +163,12 @@ class NativeCursorTest(unittest.TestCase):
                 backend.pointer('move', (175 + i - left) / width, (175 - top) / height,
                                 'left', 0, lambda: True)
                 state = report('probe')
+                self.assertLess(state['display_count'], 0, 'The actual app input queue must suppress its own cursor: ' + str(state))
                 self.assertFalse(state['visible'], 'Foreground WM_SETCURSOR must not reveal the app cursor: ' + str(state))
             self.assertGreater(state['moves'], before['moves'], 'The foreground window must actually receive SendInput movement')
             worker.close();worker = None
-            self.assertTrue(report('probe')['visible'], 'Closing the worker must restore the app cursor')
+            self.assertEqual(before['display_count'], report('probe')['display_count'],
+                             'Closing the worker must restore the exact application display count')
         finally:
             if worker:worker.close()
             if backend.guard:backend.guard.close()
