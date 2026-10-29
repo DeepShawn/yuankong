@@ -324,6 +324,19 @@ class DesktopUiTest {
             render(activity, "desktop-keyboard-expanded")
             val virtual = activity.findViewById<VirtualKeyboard>(R.id.desktopVirtualKeyboard)
             assertTrue("Expanded keyboard must be laid out", virtual.height > 0)
+            for(label in listOf("退格","删除")) {
+                fun buttons(view:View):List<com.google.android.material.button.MaterialButton> = when(view) {
+                    is com.google.android.material.button.MaterialButton->listOf(view)
+                    is android.view.ViewGroup->(0 until view.childCount).flatMap{buttons(view.getChildAt(it))}
+                    else->emptyList()
+                }
+                val key=buttons(virtual).single{it.text==label}
+                val bounds=android.graphics.Rect();key.getDrawingRect(bounds);virtual.offsetDescendantRectToMyCoords(key,bounds)
+                assertTrue("Bottom editing key must not be clipped: $label $bounds / ${virtual.height}",bounds.bottom<=virtual.height)
+                key.performClick()
+            }
+            waitUntil{stub.requests.any{it.second.optString("cmd")=="input" && it.second.optJSONArray("keys")?.optString(0)=="BACKSPACE"}
+                && stub.requests.any{it.second.optString("cmd")=="input" && it.second.optJSONArray("keys")?.optString(0)=="DELETE"}}
             activity.toggleVirtualKeyboard()
             assertFalse(activity.virtualKeyboardExpanded)
             activity.mode = 2

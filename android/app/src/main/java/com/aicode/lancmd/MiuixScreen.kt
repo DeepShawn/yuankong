@@ -490,7 +490,8 @@ fun HostedView(view: View, modifier: Modifier = Modifier) {
             if (view.parent !== host) {
                 (view.parent as? ViewGroup)?.removeView(view)
                 host.removeAllViews()
-                host.addView(view, ViewGroup.LayoutParams(-1, -1))
+                // Keyboards measure all rows naturally inside their scrollable workspace.
+                host.addView(view, ViewGroup.LayoutParams(-1, if(view is VirtualKeyboard)-2 else -1))
             }
         }
     )

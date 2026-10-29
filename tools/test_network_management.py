@@ -16,7 +16,7 @@ import xml.etree.ElementTree as E
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'windows'))
 from native_wifi import NativeWifi, Guid, Interface, Available, Profile, ConnectionParameters, profile_xml
-from network_management import NetworkAuthorization, NetworkManagement, WindowsNetwork, NetworkHardware, NETWORK_CLASSES, validate
+from network_management import HotspotTimer, NETWORK_CHANGE_LOCK, NetworkAuthorization, NetworkManagement, WindowsNetwork, NetworkHardware, NETWORK_CLASSES, validate
 
 class Error(Exception):pass
 TEST_PASSWORD='test-only-network-password'
@@ -122,7 +122,7 @@ class NetworkAuthorizationTest(unittest.TestCase):
     def unlock(self,owner='phone'):return self.call(owner,action='unlock',password=TEST_PASSWORD)['network_token']
     def test_all_inventory_and_mutations_require_a_password_before_creating_jobs(self):
         self.assertTrue(self.call(action='auth_status')['admin'])
-        for action in ('refresh','scan','status','submit','answer'):
+        for action in ('refresh','scan','status','submit','answer','timer_status'):
             with self.subTest(action=action),self.assertRaisesRegex(Error,'NETWORK_AUTH_REQUIRED'):
                 self.call(action=action,operation='start',confirm=True)
         self.assertFalse(self.manager.jobs);self.assertFalse(self.backend.calls)
@@ -178,6 +178,107 @@ class NetworkAuthorizationTest(unittest.TestCase):
         while not self.call(job=ident,network_token=token)['job'].get('finished') and time.monotonic()<deadline:time.sleep(.01)
         again=self.call(network_token=token,**query)
         self.assertEqual(ident,again['job']['id']);self.assertEqual(1,len(self.backend.calls))
+
+class TimerBackend:
+    def __init__(self):self.calls=[];self.state='On';self.stop_error=None;self.start_error=None;self.unconfirmed=False;self.started=threading.Event();self.after_stop=lambda:None
+    def read(self,area):return dict(state=self.state,supported=True)
+    def perform(self,area,operation,params,challenge):
+        self.calls.append(operation)
+        if operation=='stop':
+            if self.stop_error:raise OSError(self.stop_error)
+            self.after_stop()
+            if not self.unconfirmed:self.state='Off'
+        elif operation=='start':
+            self.started.set()
+            if self.start_error:raise OSError(self.start_error)
+            if not self.unconfirmed:self.state='On'
+        return dict(state=self.state)
+
+class HotspotTimerTest(unittest.TestCase):
+    def setUp(self):
+        self.now=100.;self.admin=True;self.backend=TimerBackend()
+        self.timer=HotspotTimer(self.backend,lambda:self.admin,clock=lambda:self.now,wall=lambda:2000.,autostart=False)
+    def test_seconds_are_bounded_integer_only_and_do_not_stop_a_hotspot_on_bad_input(self):
+        for value in (0,-1,86401,True,1.5,'60',None):
+            with self.subTest(value=value),self.assertRaises(ValueError):validate('hotspot','restart_after',dict(seconds=value))
+            with self.assertRaises(ValueError):self.timer.schedule(value)
+        self.assertFalse(self.backend.calls)
+        self.assertEqual(dict(seconds=86400),validate('hotspot','restart_after',dict(seconds=86400)))
+    def test_cancel_api_requires_the_current_exact_timer_identifier(self):
+        for ident in ('',None,'not-a-timer','D'*32,32):
+            with self.subTest(ident=ident),self.assertRaises(ValueError):validate('hotspot','cancel_restart',dict(timer_id=ident))
+        self.assertEqual(dict(timer_id='d'*32),validate('hotspot','cancel_restart',dict(timer_id='d'*32)))
+
+    def test_countdown_starts_only_after_off_confirmation_and_fires_exactly_once(self):
+        self.backend.after_stop=lambda:setattr(self,'now',105.)
+        self.timer.schedule(10);first=self.timer.status()
+        self.assertEqual(10,first['remaining_seconds']);self.assertEqual(2010,first['due_at'])
+        self.now=114.1;self.assertEqual(1,self.timer.status()['remaining_seconds']);self.assertFalse(self.timer.run_due())
+        self.now=115.;self.assertTrue(self.timer.run_due());self.assertEqual('completed',self.timer.status()['status'])
+        self.assertFalse(self.timer.run_due());self.assertEqual(['stop','start'],self.backend.calls)
+    def test_cancel_retains_off_state_and_stale_identifiers_cannot_cancel_a_new_schedule(self):
+        self.timer.schedule(10);ident=self.timer.status()['id']
+        self.timer.cancel(ident);self.now+=20;self.assertFalse(self.timer.run_due())
+        self.assertEqual('Off',self.backend.state);self.assertEqual(['stop'],self.backend.calls)
+        self.timer.schedule(10)
+        with self.assertRaisesRegex(ValueError,'已变化'):self.timer.cancel(ident)
+        with self.assertRaisesRegex(ValueError,'已有'):self.timer.schedule(20)
+        self.assertEqual('waiting',self.timer.status()['status']);self.timer.cancel()
+    def test_unconfirmed_or_failed_stop_never_arms_an_automatic_start(self):
+        for failure in (False,True):
+            self.backend.unconfirmed=not failure;self.backend.stop_error='driver refused' if failure else None
+            with self.assertRaises((OSError,ValueError)):self.timer.schedule(5)
+            self.now+=10;self.assertFalse(self.timer.run_due());self.assertEqual('failed',self.timer.status()['status'])
+        self.assertNotIn('start',self.backend.calls)
+    def test_start_failure_or_missing_confirmation_is_reported_without_automatic_retry(self):
+        for failure in (False,True):
+            self.backend.unconfirmed=False;self.timer.schedule(5);self.now+=5
+            self.backend.unconfirmed=not failure;self.backend.start_error='driver refused' if failure else None
+            self.timer.run_due();self.assertEqual('failed',self.timer.status()['status'])
+            self.assertFalse(self.timer.run_due())
+        self.assertEqual(2,self.backend.calls.count('start'))
+    def test_due_operation_checks_administrator_and_waits_for_other_network_changes(self):
+        self.timer.schedule(1);self.now+=1
+        entered=threading.Event();release=threading.Event()
+        def hold():
+            with NETWORK_CHANGE_LOCK:entered.set();release.wait(3)
+        thread=threading.Thread(target=hold);thread.start();self.assertTrue(entered.wait(1))
+        try:
+            self.assertFalse(self.timer.run_due());self.assertEqual('waiting',self.timer.status()['status'])
+            self.timer.cancel(self.timer.status()['id'])
+        finally:release.set();thread.join(2)
+        self.assertFalse(self.timer.run_due());self.assertEqual(['stop'],self.backend.calls)
+        self.timer.schedule(1);self.now+=1;self.admin=False;self.timer.run_due()
+        self.assertEqual('failed',self.timer.status()['status']);self.assertNotIn('start',self.backend.calls)
+    def test_background_worker_runs_without_a_phone_or_status_polling(self):
+        timer=HotspotTimer(self.backend,lambda:True);timer.schedule(1)
+        self.assertTrue(self.backend.started.wait(3),'Windows worker must run without any phone request')
+        deadline=time.monotonic()+1
+        while timer.active() and time.monotonic()<deadline:time.sleep(.01)
+        self.assertEqual('completed',timer.status()['status']);self.assertEqual(['stop','start'],self.backend.calls)
+
+class NetworkTimerJobsTest(unittest.TestCase):
+    call=NetworkJobsTest.call
+    wait=NetworkJobsTest.wait
+    def setUp(self):
+        self.now=100.;self.backend=TimerBackend();auth=authorization()
+        timer=HotspotTimer(self.backend,auth.admin,clock=lambda:self.now,autostart=False)
+        self.manager=NetworkManagement(self.backend,grace=0,authorization=auth,timer=timer)
+        self.tokens={'phone':self.manager.request(dict(action='unlock',password=TEST_PASSWORD),'phone',Error)['network_token']}
+    def schedule(self):return self.call(action='submit',area='hotspot',operation='restart_after',confirm=True,params=dict(seconds=10),request_id='d'*32)
+    def test_reconnect_duplicate_and_expired_login_do_not_repeat_or_cancel_a_confirmed_timer(self):
+        first=self.schedule();self.wait(first['job']['id']);self.assertEqual(first['job']['id'],self.schedule()['job']['id'])
+        self.assertEqual(['stop'],self.backend.calls);self.assertTrue(self.manager.busy())
+        token=self.tokens['phone'];self.manager.authorization.revoke('phone',token)
+        with self.assertRaisesRegex(Error,'NETWORK_AUTH_REQUIRED'):self.call(action='timer_status')
+        self.now+=10;self.manager.timer.run_due();self.assertEqual(['stop','start'],self.backend.calls)
+        self.tokens['phone']=self.manager.request(dict(action='unlock',password=TEST_PASSWORD),'phone',Error)['network_token']
+        self.assertEqual('completed',self.call(action='timer_status')['timer']['status']);self.assertFalse(self.manager.busy())
+    def test_manual_hotspot_stop_cancels_pending_reopen_and_status_reads_are_nonblocking(self):
+        first=self.schedule();self.wait(first['job']['id']);self.assertEqual('waiting',self.call(action='timer_status')['timer']['status'])
+        next_job=self.call(action='submit',area='hotspot',operation='stop',confirm=True)
+        self.wait(next_job['job']['id']);self.now+=30;self.manager.timer.run_due()
+        self.assertNotIn('start',self.backend.calls);self.assertEqual('cancelled',self.call(action='timer_status')['timer']['status'])
 
 class NetworkValidationTest(unittest.TestCase):
     def test_device_changes_require_exact_instance_boolean_and_current_area(self):

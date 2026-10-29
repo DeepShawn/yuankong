@@ -42,6 +42,11 @@ class NetworkManagementUiTest {
         while(System.currentTimeMillis()<end){shadowOf(Looper.getMainLooper()).idleFor(10,java.util.concurrent.TimeUnit.MILLISECONDS);if(check())return;Thread.sleep(10)}
         fail("网络管理界面没有完成预期状态")
     }
+    private fun awaitTimer(check:()->Boolean) {
+        // LaunchedEffect delay uses the Compose test clock, not Robolectric's
+        // Looper clock. Advance frames while the real socket responses arrive.
+        waitFor{compose.mainClock.advanceTimeBy(100);check()}
+    }
     private fun enter(page:NetworkManagementActivity) {
         waitFor{page.supported && !page.busy && page.administrator}
         page.managementPassword="test-only-password";page.unlock()
@@ -293,7 +298,50 @@ class NetworkManagementUiTest {
         }
     }
 
-    private class Stub(val supported:Boolean=true,val fail:Boolean=false,val pair:Boolean=false,val dropReply:Boolean=false,val discovery:Boolean=false,val admin:Boolean=true,val multiple:Boolean=false):Closeable {
+    @Test fun hotspotTimerNeedsConfirmationReadsWindowsCountdownAndCanBeCancelled() {
+        Stub(timer=true).use {stub ->
+            stub.install();val c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=c.get()
+            try {
+                enter(page);page.restartDelay="75"
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("关闭并定时开启"))
+                compose.onNodeWithText("关闭并定时开启").performSemanticsAction(SemanticsActions.OnClick){it()}
+                assertFalse(stub.requests.any{it.optString("operation")=="restart_after"})
+                compose.onNodeWithText("执行").performSemanticsAction(SemanticsActions.OnClick){it()}
+                awaitTimer{!page.busy && page.hotspotTimer?.optString("status")=="waiting"}
+                val q=stub.requests.single{it.optString("operation")=="restart_after"}
+                assertEquals(75,q.getJSONObject("params").getInt("seconds"))
+                stub.timerState=JSONObject(stub.timerState.toString()).put("remaining_seconds",41)
+                awaitTimer{page.hotspotTimer?.optInt("remaining_seconds")==41}
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("剩余 41 秒"))
+                compose.onNodeWithText("剩余 41 秒").assertExists()
+                compose.onNodeWithText("取消定时开启").performSemanticsAction(SemanticsActions.OnClick){it()}
+                assertFalse(stub.requests.any{it.optString("operation")=="cancel_restart"})
+                compose.onNodeWithText("执行").performSemanticsAction(SemanticsActions.OnClick){it()}
+                awaitTimer{!page.busy && page.hotspotTimer?.optString("status")=="cancelled"}
+                assertEquals("d".repeat(32),stub.requests.single{it.optString("operation")=="cancel_restart"}.getJSONObject("params").getString("timer_id"))
+                assertEquals(1,stub.requests.count{it.optString("operation")=="restart_after"})
+            } finally{c.pause().stop().destroy()}
+        }
+    }
+    @Test fun restoredTimerIsReadFromWindowsAfterReauthenticationWithoutNewSubmission() {
+        Stub(timer=true).use {stub ->
+            stub.timerState=JSONObject().put("id","d".repeat(32)).put("status","waiting").put("remaining_seconds",22).put("message","Windows 正在计时")
+            stub.install();var c=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();var page=c.get()
+            try {
+                enter(page);awaitTimer{page.hotspotTimer?.optInt("remaining_seconds")==22}
+                page.restartDelay="0"
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("关闭并定时开启"))
+                compose.onNodeWithText("关闭并定时开启").assertIsNotEnabled()
+                val saved=Bundle();c.saveInstanceState(saved);c.pause().stop().destroy()
+                c=Robolectric.buildActivity(NetworkManagementActivity::class.java).create(saved).start().resume().visible();page=c.get()
+                awaitTimer{page.supported && !page.busy};assertFalse(page.authorized)
+                enter(page);awaitTimer{page.hotspotTimer?.optInt("remaining_seconds")==22}
+                assertFalse(stub.requests.any{it.optString("action")=="submit"})
+            } finally{c.pause().stop().destroy()}
+        }
+    }
+
+    private class Stub(val supported:Boolean=true,val fail:Boolean=false,val pair:Boolean=false,val dropReply:Boolean=false,val discovery:Boolean=false,val admin:Boolean=true,val multiple:Boolean=false,val timer:Boolean=false):Closeable {
         val requests=CopyOnWriteArrayList<JSONObject>()
         private val server=ServerSocket(0)
         private val clients=CopyOnWriteArrayList<AgentClient>()
@@ -301,6 +349,7 @@ class NetworkManagementUiTest {
         @Volatile private var submitted:JSONObject?=null
         @Volatile private var answered=false
         @Volatile var expired=false
+        @Volatile var timerState:JSONObject?=null
         private val sessions=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         private val thread=Thread {
             try {while(!server.isClosed){val socket=server.accept();Thread {
@@ -309,7 +358,7 @@ class NetworkManagementUiTest {
                     while(true) {
                         val q=JSONObject(input.readLine()?:break);requests.add(q)
                         val r=JSONObject().put("id",q.getInt("id")).put("ok",true)
-                        if(q.optString("cmd")=="capabilities")r.put("features",JSONArray().apply{if(supported){put("network_management");put("network_device_state");put("hotspot_client_access");put("network_password");put("network_batch");if(discovery)put("hotspot_adapter_selection")}})
+                        if(q.optString("cmd")=="capabilities")r.put("features",JSONArray().apply{if(supported){put("network_management");put("network_device_state");put("hotspot_client_access");put("network_password");put("network_batch");if(timer)put("hotspot_timer");if(discovery)put("hotspot_adapter_selection")}})
                         else if(q.optString("action")=="auth_status")r.put("admin",admin).put("requires_password",true)
                         else if(q.optString("action")=="unlock") {
                             if(admin && q.optString("password")=="test-only-password") {
@@ -319,8 +368,15 @@ class NetworkManagementUiTest {
                         }
                         else if(q.optString("action")=="lock"){sessions.remove(q.optString("network_token"));r.put("locked",true)}
                         else if(expired || q.optString("network_token") !in sessions)r.put("ok",false).put("error","NETWORK_AUTH_REQUIRED: 请重新输入网络管理密码")
+                        else if(q.optString("action")=="timer_status")r.put("timer",timerState ?: JSONObject.NULL)
                         else {
-                            if(q.optString("action")=="submit"){submitted=q;if(dropReply)break}
+                            if(q.optString("action")=="submit"){
+                                submitted=q
+                                if(q.optString("operation")=="restart_after")timerState=JSONObject().put("id","d".repeat(32)).put("status","waiting")
+                                    .put("remaining_seconds",q.getJSONObject("params").getInt("seconds")).put("message","Windows 正在计时")
+                                if(q.optString("operation")=="cancel_restart")timerState=JSONObject().put("id","d".repeat(32)).put("status","cancelled").put("message","已取消定时开启")
+                                if(dropReply)break
+                            }
                             if(q.optString("action")=="answer")answered=true
                             val area=q.optString("area","hotspot")
                             r.put("area",area).put("snapshot",JSONObject().put("supported",true).put("state","Off").put("name","office")
@@ -334,6 +390,7 @@ class NetworkManagementUiTest {
                                 r.getJSONObject("snapshot").getJSONArray("clients").put(JSONObject().put("address","02:AA:BB:CC:DD:EE").put("hosts",JSONArray()))
                                 for(index in 1..2)r.getJSONObject("snapshot").getJSONArray("adapters").put(JSONObject().put("id","11111111-2222-3333-4444-55555555555$index").put("name","测试网卡$index").put("status","Up"))
                             }
+                            if(timer)r.put("timer",timerState ?: JSONObject.NULL)
                             if(discovery && area=="hotspot") {
                                 val adapter=JSONObject().put("id","11111111-2222-3333-4444-555555555555").put("name","本地连接* 9")
                                     .put("description","Wi-Fi Direct").put("ipv4",JSONArray().put("10.77.20.1/24"))

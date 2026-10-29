@@ -216,7 +216,7 @@ class DesktopActivity : MiuixActivity(), ConnectionManager.Listener {
             ) { toggleVirtualKeyboard() }
             if (virtualKeyboardExpanded) {
                 virtual.isEnabled = sharing
-                HostedView(virtual, Modifier.fillMaxWidth().height(300.dp).padding(vertical = 6.dp))
+                HostedView(virtual, Modifier.fillMaxWidth().padding(vertical = 6.dp))
             }
             Field(
                 label = "输入文字到电脑",
