@@ -111,13 +111,15 @@ class NativeTouchTest(unittest.TestCase):
                 guard.pause('native-test',lambda:True)
                 worker = TouchWorker()
                 x,y = app.initial['x'], app.initial['y']
-                for _ in range(140):  # Exercise promoted cursor IDs beyond the signature's low 7 bits.
-                    worker.call('frame',[point(x=x,y=y)])
-                    worker.call('frame',[point(state='up',x=x,y=y)])
+                for index in range(3):
+                    tap_x = x + index*.02
+                    worker.call('frame',[point(x=tap_x,y=y)])
+                    worker.call('frame',[point(state='up',x=tap_x,y=y)])
+                    time.sleep(.03)  # Separate OS gesture timestamps, unlike a synthetic burst in one tick.
                 deadline = time.monotonic()+2
                 while True:
                     events = app.report('probe')['mouse_taps']
-                    if sum(p['message']==0x202 for p in events)>=140:break
+                    if sum(p['message']==0x202 for p in events)>=3:break
                     if time.monotonic()>=deadline:self.fail('Native touch promotion was blocked by local-input hook: '+str(events))
                     time.sleep(.02)
             finally:
@@ -131,17 +133,19 @@ class NativeTouchTest(unittest.TestCase):
             try:
                 x, y = app.initial['x'], app.initial['y']
                 worker.call('frame', [point(x=x,y=y)])
-                worker.call('frame', [point(state='move',x=x+.02,y=y)])
+                worker.call('frame', [point(state='move',x=x,y=y),point(1,x=x+.04,y=y)])
+                worker.call('frame', [point(state='move',x=x+.02,y=y),point(1,'move',x=x+.06,y=y)])
                 worker.process.stdin.close()  # Abrupt parent EOF, without an explicit cancel command.
                 worker.close();worker = None
                 deadline = time.monotonic() + 3
                 while True:
                     events = app.report('probe')['touch_events']
-                    if any(p['flags'] & 4 for p in events):break
+                    if len({p['id'] for p in events if p['flags'] & 4})==2:break
                     if time.monotonic() >= deadline:self.fail('App did not receive native touch DOWN/UP: ' + str(events))
                     time.sleep(.02)
                 self.assertTrue(any(p['flags'] & 2 for p in events), events)
                 self.assertTrue(any(p['flags'] & 1 for p in events), events)
+                self.assertEqual(2,len({p['id'] for p in events if p['flags'] & 2}),events)
             finally:
                 if worker:worker.close()
 
