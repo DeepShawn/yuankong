@@ -1,4 +1,4 @@
-"""Asynchronous network device management; credentials remain in worker memory."""
+"""Asynchronous device management; helper credentials use stdin, never argv."""
 import copy
 from contextlib import contextmanager
 import hashlib

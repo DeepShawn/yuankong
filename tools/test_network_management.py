@@ -1,5 +1,6 @@
 """Network changes stay asynchronous, authenticated, idempotent and secret-free."""
 import ctypes
+import io
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import threading
 import time
 import unittest
 from unittest import mock
+from types import SimpleNamespace
 import uuid
 import xml.etree.ElementTree as E
 
@@ -127,6 +129,28 @@ class NetworkValidationTest(unittest.TestCase):
         adapter=str(uuid.uuid4())
         self.assertEqual(['1.1.1.1','2606:4700:4700::1111'],validate('adapters','dns',dict(adapter=adapter,servers=['1.1.1.1','2606:4700:4700::1111']))['servers'])
         self.assertEqual([],validate('adapters','dns',dict(adapter=adapter,servers=[]))['servers'])
+
+class NetworkTransportTest(unittest.TestCase):
+    def process(self,lines):
+        class Input(io.StringIO):
+            def close(self):self.sent=self.getvalue();super().close()
+        return SimpleNamespace(stdin=Input(),stdout=io.StringIO(lines),stderr=io.StringIO(),wait=mock.Mock(return_value=0))
+    def test_helper_receives_password_only_on_stdin_and_reports_native_failure(self):
+        process=self.process('123\n'+json.dumps(dict(ok=False,error='Access denied'))+'\n')
+        request=dict(area='hotspot',operation='configure',name='office',password='unique-network-secret')
+        with mock.patch('network_management.subprocess.Popen',return_value=process) as popen:
+            with self.assertRaisesRegex(OSError,'Access denied'):WindowsNetwork().run(request)
+        self.assertEqual(request,json.loads(process.stdin.sent))
+        self.assertNotIn(request['password'],' '.join(popen.call_args.args[0]))
+        self.assertEqual(0x08000000,popen.call_args.kwargs['creationflags'])
+        self.assertTrue(process.stdout.closed);self.assertTrue(process.stderr.closed)
+    def test_unhandled_pairing_challenge_is_declined_never_silently_accepted(self):
+        event=dict(type='pairing',id='b'*32,kind='ConfirmOnly')
+        process=self.process(json.dumps(event)+'\n'+json.dumps(dict(ok=True,data={}))+'\n')
+        with mock.patch('network_management.subprocess.Popen',return_value=process):
+            WindowsNetwork().run(dict(area='bluetooth',operation='pair',id='device'))
+        response=json.loads(process.stdin.sent.splitlines()[1])
+        self.assertEqual(dict(confirm=False,id='b'*32),response)
 
 @unittest.skipUnless(os.name=='nt','Requires real Windows WLAN and WinRT metadata')
 class NativeNetworkTest(unittest.TestCase):
