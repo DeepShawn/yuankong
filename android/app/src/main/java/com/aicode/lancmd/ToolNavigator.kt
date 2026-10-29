@@ -30,6 +30,7 @@ object ToolNavigator {
         Tool("系统与应用","应用中心","自动识别已安装程序、应用锁、冻结和解冻",R.drawable.ic_process,ApplicationsActivity::class.java),
         Tool("系统与应用","桌面背景","更换电脑壁纸和图片显示方式",R.drawable.ic_desktop,WallpaperActivity::class.java),
         Tool("系统与应用","本地升级","安装 upgrade 文件夹中的 Windows ZIP",R.drawable.ic_history,UpgradeActivity::class.java),
+        Tool("系统与应用","启动与网络","开机自启、移动热点、局域网端口与重启还原说明",R.drawable.ic_history,StartupNetworkActivity::class.java),
         Tool("系统与应用","注册表编辑器","浏览、编辑和恢复备份",R.drawable.ic_terminal,RegistryActivity::class.java),
         Tool("系统与应用","浏览器","向电脑发送网址",R.drawable.ic_browser,BrowserActivity::class.java),
         Tool("录制与自动化","录音与录屏","麦克风、屏幕和摄像头视频录制",R.drawable.ic_camera,RecordingsActivity::class.java),

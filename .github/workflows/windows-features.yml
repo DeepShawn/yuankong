@@ -94,6 +94,10 @@ jobs:
         run: python -m unittest discover -s tools -p test_file_schedule.py -v
       - name: Batch file copy move delete and recoverable staging
         run: python -m unittest discover -s tools -p test_file_jobs.py -v
+      - name: Occupied file deletion and verified application closure
+        run: python -m unittest discover -s tools -p test_force_delete.py -v
+      - name: Explicit startup hotspot and local-subnet firewall settings
+        run: python -m unittest discover -s tools -p test_startup_network.py -v
   package-windows:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -72,7 +72,11 @@ class WorkspaceManagementUiTest {
         Stub(async=true).use {stub ->
             stub.install();val controller=Robolectric.buildActivity(ApplicationsActivity::class.java).setup();val page=controller.get()
             try {
-                waitFor{stub.requests.any{it.optString("cmd")=="app_catalog"}}
+                // Sending the catalog request precedes receiving and rendering
+                // its first entries; wait for the actual actionable UI.
+                compose.waitUntil(8000) {
+                    compose.onAllNodesWithText("冻结").fetchSemanticsNodes().isNotEmpty()
+                }
                 compose.onNodeWithText("冻结").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
                 compose.onNodeWithText("确认").performSemanticsAction(SemanticsActions.OnClick){it()}
                 waitFor{page.note.contains("Windows 正在处理")}

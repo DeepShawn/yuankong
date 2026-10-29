@@ -44,7 +44,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 APP_ID = "LANCMD"
-VERSION = "3.4.3"
+VERSION = "3.5.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1145,11 +1145,14 @@ from file_jobs import FileJobs, file_token
 from file_schedule import FileSchedule
 from file_search import FileSearch
 from local_upgrade import LocalUpgrade
+from startup_network import StartupNetwork, WindowsStartupNetwork
 import weakref
 _connections=weakref.WeakSet()
 _connections_lock=threading.RLock()
 
 def upgrade_busy():
+    with _startup_network.lock:
+        if _startup_network.job and _startup_network.job["status"] == "running":return "请等待启动与网络设置完成后更新"
     with _connections_lock:connections=list(_connections)
     if any(st.uploads or st.downloads for st in connections):return "请先完成或取消手机文件传输"
     for manager in (_placeholders,_file_jobs,_file_schedule):
@@ -1236,13 +1239,15 @@ _file_jobs = FileJobs(os.path.join(APP_DIR,"file-jobs.json"),protected=(_capture
 
 _file_search = FileSearch(os.path.join(APP_DIR,"file-search"))
 _updates=LocalUpgrade(_capture_dir,os.path.join(APP_DIR,"upgrade"),VERSION,upgrade_busy,upgrade_stop,_app_freeze.prepare_upgrade)
+_startup_network=StartupNetwork(_capture_dir,WindowsStartupNetwork(_capture_dir,is_admin,
+    lambda:(load_cfg()["port"],load_cfg()["discovery_port"]),_netsh),log)
 
 
 def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
-        features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures", "cursor_visibility"])
-        features.extend(["app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
+        features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures", "cursor_visibility", "cursor_visibility_verified"])
+        features.extend(["app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","force_delete","startup_network","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
         if os.path.isfile(_recordings.executable):
             features.append("recordings")
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1287,6 +1292,7 @@ HANDLERS = {
     "placeholders": lambda q, st: _placeholders.request(q,st,RpcError),
     "file_search": lambda q,st: _file_search.request(q,st,RpcError),
     "file_jobs": lambda q, st: _file_jobs.request(q,st,RpcError),
+    "startup_network": lambda q, st: _startup_network.request(q,RpcError),
     "message": _remote.message,
     "info": lambda q, st: cmd_info(),
     "exec": lambda q, st: run_exec(
@@ -2034,6 +2040,7 @@ def main(argv):
             log.info("防火墙规则已放行")
 
     threading.Thread(target=_check_firewall_async, daemon=True, name="fwcheck").start()
+    _startup_network.boot()
 
     sup = Supervisor(cfg)
     sup.spawn("tcp", tcp_server)

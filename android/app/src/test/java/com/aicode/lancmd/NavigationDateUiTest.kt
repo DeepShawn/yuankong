@@ -65,7 +65,7 @@ class NavigationDateUiTest {
         c.recreate();a=c.get()
         assertEquals("文件与设备",a.homeCategory)
         a.homeCategory="系统与应用"
-        assertEquals(listOf("任务管理器","注册表编辑器","浏览器","应用中心","应用锁","桌面背景","本地升级"),a.toolGroups.getValue("系统与应用").map{it.label})
+        assertEquals(listOf("任务管理器","注册表编辑器","浏览器","应用中心","应用锁","桌面背景","本地升级","启动与网络"),a.toolGroups.getValue("系统与应用").map{it.label})
         a.homeCategory="命令控制台"
         c.recreate();a=c.get()
         assertEquals("命令控制台",a.homeCategory)

@@ -88,6 +88,8 @@ class StorageActivity : MiuixActivity() {
     private var listingSequence=0
     private var transfer: Job? = null
     private var remoteJob: String? = null
+    private var forceConfirmation by mutableStateOf<JSONObject?>(null)
+    private var forceConfirmSending by mutableStateOf(false)
     private var lastResult: String? = null
     private var lastError = false
     private val selection = mutableStateMapOf<String, JSONObject>()
@@ -207,6 +209,7 @@ class StorageActivity : MiuixActivity() {
     private fun Screen() = FixedPage("电脑存储") {
         if (transferText.isNotBlank()) SectionCard {
             Note(transferText)
+            if (forceConfirmation != null) Action("查看占用并确认", enabled = !forceConfirmSending) { confirmForceDelete() }
             Action("取消操作") { cancelTransfer() }
         }
         if (results.isNotEmpty()) SectionCard("逐项结果") {
@@ -276,6 +279,7 @@ class StorageActivity : MiuixActivity() {
                         ) { beginBatch(operation) }
                     }
             }
+            Action("强制删除", enabled = !operationsBusy && selection.isNotEmpty()) { beginBatch("force_delete") }
         }
         if(listingBusy) {Note("目录加载中，返回和其他操作仍可使用…")}
         else if(visible.isEmpty())EmptyNote(listingMessage)
@@ -518,7 +522,7 @@ class StorageActivity : MiuixActivity() {
                 if (scriptType == "exe") add("应用锁")
             }
         }
-        groups["删除"] = listOf("删除")
+        groups["删除"] = if (dir) listOf("删除") else listOf("删除", "强制删除")
         return groups
     }
 
@@ -576,6 +580,7 @@ class StorageActivity : MiuixActivity() {
             }
             "重命名" -> renameOrCreate(item)
             "删除" -> deleteItem(item, selected)
+            "强制删除" -> beginFileOperation("force_delete", listOf(JSONObject(item.toString())))
         }
     }
 
@@ -658,7 +663,14 @@ class StorageActivity : MiuixActivity() {
 
     internal fun beginBatch(operation: String) {
         if (operationsBusy || selection.isEmpty() || !sourceReady()) return
-        val targets = selection.values.map { JSONObject(it.toString()) }
+        beginFileOperation(operation, selection.values.map { JSONObject(it.toString()) })
+    }
+
+    private fun beginFileOperation(operation: String, targets: List<JSONObject>) {
+        if (operationsBusy || targets.isEmpty() || !sourceReady()) return
+        if (operation == "force_delete" && targets.any { it.optBoolean("dir") }) {
+            status("强制删除仅支持文件，请取消选择文件夹；文件夹仍可使用普通删除", true); return
+        }
         val base = path
         if (operation == "download") {
             pendingTreeBase = base; pendingTreeItems = targets
@@ -668,7 +680,7 @@ class StorageActivity : MiuixActivity() {
             status("批量操作需要文件版本，请更新 Windows 接收端并刷新目录", true); return
         }
         fun confirm(destination: String = "") {
-            val title = when (operation) { "copy" -> "复制"; "move" -> "移动"; else -> "删除" }
+            val title = operationName(operation)
             WorkspaceDialog.Builder(this).setTitle("$title 所选 ${targets.size} 项？")
                 .setMessage(
                     targets.take(8).joinToString("\n") { it.optString("name") } +
@@ -676,6 +688,7 @@ class StorageActivity : MiuixActivity() {
                         (
                             if (destination.isNotBlank())
                                 "\n\n目标：$destination\n目标必须不存在，不覆盖同名文件或目录。"
+                            else if (operation == "force_delete") "\n\n先尝试直接删除。若文件被独占，将列出占用应用，再次确认后结束所列应用并删除；未保存内容可能丢失。文件删除无法撤销。"
                             else "\n\n文件夹中的内容也会删除，无法撤销。"
                             ) +
                         "\n停止操作只停止后续步骤，已完成的复制、移动或删除不会撤销。结果显示在页面顶部。"
@@ -685,6 +698,13 @@ class StorageActivity : MiuixActivity() {
                     task {
                         checkSource()
                         if (operationsBusy) return@task
+                        if (operation == "force_delete") {
+                            val features = storageCall("capabilities").optJSONArray("features")
+                            if (features == null || (0 until features.length()).none { features.optString(it) == "force_delete" }) {
+                                status("当前接收端不支持强制删除，请完整更新 Windows 包后重新启动并刷新目录", true)
+                                return@task
+                            }
+                        }
                         operationsBusy = true
                         lastResult = null; lastError = false; results = emptyList()
                         status("正在提交$title 文件任务…")
@@ -706,18 +726,54 @@ class StorageActivity : MiuixActivity() {
                     }
                 }.show()
         }
-        if (operation == "delete") confirm()
+        if (operation in listOf("delete", "force_delete")) confirm()
         else RemoteDirectoryPicker(this, origin).show(base) { destination ->
             if (sourceReady()) confirm(destination)
         }
     }
 
     private fun operationName(operation: String) =
-        when (operation) { "copy" -> "复制"; "move" -> "移动"; "delete" -> "删除"; else -> operation }
+        when (operation) { "copy" -> "复制"; "move" -> "移动"; "delete" -> "删除"; "force_delete" -> "强制删除"; else -> operation }
+
+    internal fun confirmForceDelete() {
+        val job = forceConfirmation?.let { JSONObject(it.toString()) } ?: return
+        if (!sourceReady() || forceConfirmSending) return
+        val list = job.getJSONArray("items")
+        val lines = buildList {
+            for (i in 0 until list.length()) {
+                val item = list.getJSONObject(i)
+                if (item.optString("status") != "needs_confirmation") continue
+                add(item.optString("path"))
+                val blockers = item.optJSONArray("blockers") ?: continue
+                for (index in 0 until blockers.length()) {
+                    val process = blockers.getJSONObject(index)
+                    val created = process.optString("created").toLongOrNull()
+                        ?.let { DateFormat.getDateTimeInstance().format(Date(it / 10000 - 11644473600000L)) }
+                    add("${process.optString("application")} · PID ${process.optInt("pid")}\n${process.optString("path")}\n进程启动：${created ?: "未知"}")
+                }
+            }
+        }
+        WorkspaceDialog.Builder(this).setTitle("结束占用应用后删除？")
+            .setMessage(lines.joinToString("\n\n") + "\n\n仅结束以上经过身份验证的应用。未保存内容可能丢失；程序可能重新创建同名文件。若占用程序变化，会要求重新确认。")
+            .setNegativeButton("暂不结束", null)
+            .setPositiveButton("结束所列应用并删除") { _, _ ->
+                task {
+                    forceConfirmSending = true
+                    try {
+                        storageCall("file_jobs", JSONObject().put("action", "confirm_force_delete")
+                            .put("job_id", job.getString("id"))
+                            .put("confirmation_id", job.getString("confirmation_id"))
+                            .put("confirm_data_loss", true))
+                        forceConfirmation = null
+                        status("已确认，正在结束所列占用应用并删除文件…")
+                    } finally { forceConfirmSending = false }
+                }
+            }.show()
+    }
 
     private fun fileResults(job: JSONObject): Pair<String, List<String>> {
         val list = job.getJSONArray("items")
-        var success = 0; var failed = 0; var cancelled = 0; var warnings = 0
+        var success = 0; var failed = 0; var cancelled = 0; var warnings = 0; var pending = 0
         val lines = (0 until list.length()).map { i ->
             val item = list.getJSONObject(i)
             val label = item.getString("path")
@@ -727,16 +783,19 @@ class StorageActivity : MiuixActivity() {
                     "成功 · $label" + (if (item.has("destination")) " → ${item.getString("destination")}" else "")
                 }
                 "failed" -> { failed++; "失败 · $label：${item.optString("error")}" }
+                "pending_release" -> { pending++; "待句柄释放 · $label：${item.optString("notice")}" }
                 else -> { cancelled++; "取消/未执行 · $label" }
             }
+            val described = line + if (item.optString("notice").isNotBlank() && item.optString("status") != "pending_release") "；${item.optString("notice")}" else ""
             if (item.has("cleanup_warning")) {
                 warnings++
-                line + "；清理提示：${item.optString("cleanup_warning")}"
-            } else line
+                described + "；清理提示：${item.optString("cleanup_warning")}"
+            } else described
         }
-        lastError = failed > 0 || warnings > 0
+        lastError = failed > 0 || warnings > 0 || pending > 0
         return "${operationName(job.optString("operation"))}：成功 $success，失败 $failed，取消/未执行 $cancelled" +
-            (if (warnings > 0) "，清理提示 $warnings" else "") to lines
+            (if (warnings > 0) "，清理提示 $warnings" else "") +
+            (if (pending > 0) "，待句柄释放 $pending（未确认立即删除）" else "") to lines
     }
 
     internal fun showFileJobs() {
@@ -791,6 +850,14 @@ class StorageActivity : MiuixActivity() {
                         .firstOrNull { it.optString("id") == id }
                         ?: throw IOException("文件任务记录已失效，请刷新任务列表")
                     val children = job.getJSONArray("items")
+                    if (job.optString("status") == "needs_confirmation") {
+                        forceConfirmation = JSONObject(job.toString())
+                        transferText = "文件被应用占用，等待在手机上确认；尚未删除占用文件"
+                        status(transferText)
+                        delay(800)
+                        continue
+                    }
+                    forceConfirmation = null
                     if (job.has("finished")) {
                         val result = fileResults(job)
                         lastResult = result.first
@@ -831,7 +898,7 @@ class StorageActivity : MiuixActivity() {
                 lastError = true
                 status(lastResult!!, true)
             }
-            finally { remoteJob = null; operationsBusy = false; transferText = "" }
+            finally { remoteJob = null; operationsBusy = false; transferText = ""; forceConfirmation = null }
         }
     }
 

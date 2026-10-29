@@ -10,6 +10,7 @@ import stat
 import threading
 import time
 import uuid
+from force_delete import FileInUse, NativeForceDelete, identity
 
 MAX_ITEMS = 100
 MAX_ENTRIES = 20000
@@ -72,7 +73,7 @@ class Cancelled(Exception):
 
 
 class FileJobs:
-    def __init__(self, journal, protected=(), allow_non_windows=False):
+    def __init__(self, journal, protected=(), allow_non_windows=False, force_backend=None):
         self.journal = Path(journal)
         self.protected = [Path(p).absolute() for p in protected if p]
         self.allow_non_windows = allow_non_windows
@@ -82,6 +83,7 @@ class FileJobs:
         self.loaded = False
         self.warning = ""
         self.closed = False
+        self.force_backend = force_backend
         atexit.register(self.close)
 
     def _save_stages(self):
@@ -217,11 +219,27 @@ class FileJobs:
         if source.parent == source:
             raise ValueError("不能操作磁盘根目录")
         original = snapshot(source)
-        if file_token(original) != spec["file_id"]:
-            raise ValueError("所选文件已变化，请刷新后重新选择")
         operation = job["data"]["operation"]
-        if operation in ("move", "delete") and any(source == p or source in p.parents or p in source.parents for p in self.protected):
+        previous = job.get("force_originals", {}).get(str(source))
+        if previous is not None:
+            if identity(previous) != identity(original):
+                raise ValueError("文件身份已变化，未删除替换后的对象")
+        elif file_token(original) != spec["file_id"]:
+            raise ValueError("所选文件已变化，请刷新后重新选择")
+        if operation in ("move", "delete", "force_delete") and any(source == p or source in p.parents or p in source.parents for p in self.protected):
             raise ValueError("不能移动或删除系统、接收端或恢复配置所在路径")
+        if operation == "force_delete":
+            if not stat.S_ISREG(original.st_mode):
+                raise ValueError("强制删除仅支持普通文件；文件夹请使用普通删除")
+            job.setdefault("force_originals", {}).setdefault(str(source), original)
+            if self.force_backend is None:
+                self.force_backend = NativeForceDelete(self.protected)
+            result = self.force_backend.remove(source, previous or original,
+                                                job.get("approved", {}).get(str(source), []), job["cancel"])
+            spec.update(result)
+            if result.get("pending_release"):
+                spec["status"] = "pending_release"
+            return
         target = None
         if operation != "delete":
             destination = checked_path(job["data"]["destination"], directory=True)
@@ -249,24 +267,45 @@ class FileJobs:
 
     def _run(self, job):
         data = job["data"]
+        waiting = False
         try:
             data["status"] = "running"
             for item in data["items"]:
+                if item["status"] in ("completed", "failed", "cancelled", "pending_release"):
+                    continue
                 if job["cancel"].is_set():
                     item["status"] = "cancelled"
                     continue
                 item["status"] = "running"
                 try:
                     self._run_item(item, job)
-                    item["status"] = "completed"
+                    if item["status"] == "running":
+                        item["status"] = "completed"
+                except FileInUse as exc:
+                    item["blockers"] = exc.blockers
+                    if any(not p["can_close"] for p in exc.blockers):
+                        item.update(status="failed", error="文件被系统服务、受保护进程或其他登录会话占用，未结束这些进程")
+                    else:
+                        item["status"] = "needs_confirmation"
                 except Cancelled:
                     item["status"] = "cancelled"
                 except Exception as exc:
                     item.update(status="failed", error=str(exc)[:1600])
-            data["status"] = "cancelled" if job["cancel"].is_set() else "completed"
+            with self.lock:
+                if job["cancel"].is_set():
+                    for item in data["items"]:
+                        if item["status"] == "needs_confirmation":item["status"] = "cancelled"
+                    data["status"] = "cancelled"
+                elif any(i["status"] == "needs_confirmation" for i in data["items"]):
+                    data.update(status="needs_confirmation", confirmation_id=uuid.uuid4().hex)
+                    waiting = True
+                else:
+                    data["status"] = "completed"
         finally:
-            data["finished"] = time.time()
-            job["done"].set()
+            with self.lock:
+                if not waiting:
+                    data["finished"] = time.time()
+                    job["done"].set()
 
     @staticmethod
     def _public(job):
@@ -290,8 +329,22 @@ class FileJobs:
                     if not job or job["owner"] != state.client_id:
                         raise ValueError("任务不存在或属于其他手机")
                     job["cancel"].set()
+                    self._cancel_confirmation(job)
                     return {"cancel_requested": not job["done"].is_set()}
-                if action != "create" or q.get("operation") not in ("copy", "move", "delete"):
+                if action == "confirm_force_delete":
+                    job = self.jobs.get(q.get("job_id"))
+                    if (not job or job["owner"] != state.client_id or job["cancel"].is_set() or
+                            job["data"]["operation"] != "force_delete" or job["data"]["status"] != "needs_confirmation" or
+                            q.get("confirmation_id") != job["data"].get("confirmation_id") or
+                            q.get("confirm_data_loss") is not True):
+                        raise ValueError("占用确认已过期、任务属于其他手机或未确认结束应用，请重新查看任务")
+                    job["approved"] = {item["path"]: [dict(p) for p in item["blockers"]]
+                        for item in job["data"]["items"] if item["status"] == "needs_confirmation"}
+                    job["data"].pop("confirmation_id", None)
+                    job["data"]["status"] = "queued"
+                    threading.Thread(target=self._run, args=(job,), daemon=True, name="force-delete").start()
+                    return {"job": self._public(job)}
+                if action != "create" or q.get("operation") not in ("copy", "move", "delete", "force_delete"):
                     raise ValueError("无效的文件任务")
                 specs = q.get("items")
                 if not isinstance(specs, list) or not 1 <= len(specs) <= MAX_ITEMS:
@@ -310,7 +363,7 @@ class FileJobs:
                         raise ValueError("批次包含重复路径")
                     paths.add(normalized)
                 destination = ""
-                if q["operation"] != "delete":
+                if q["operation"] not in ("delete", "force_delete"):
                     destination = str(checked_path(q.get("destination"), directory=True))
                 completed = [key for key, value in self.jobs.items() if value["done"].is_set()]
                 while len(self.jobs) >= 100 and completed:
@@ -330,6 +383,15 @@ class FileJobs:
             for job in self.jobs.values():
                 if not job["done"].is_set():
                     job["cancel"].set()
+                    self._cancel_confirmation(job)
+
+    @staticmethod
+    def _cancel_confirmation(job):
+        if job["data"]["status"] == "needs_confirmation":
+            for item in job["data"]["items"]:
+                if item["status"] == "needs_confirmation":item["status"] = "cancelled"
+            job["data"].update(status="cancelled", finished=time.time())
+            job["done"].set()
 
     def stop_for_device(self, device):
         roots = [str(p).replace("/", "\\").rstrip("\\").casefold() + "\\" for p in device.get("paths", []) if p]
@@ -339,7 +401,9 @@ class FileJobs:
                 raise ValueError("设备路径未知，请先停止文件任务")
             matches = [j for j in active if any(str(value).replace("/", "\\").casefold().startswith(root)
                 for root in roots for value in [j["data"].get("destination", ""), *[i["path"] for i in j["data"]["items"]]])]
-            for job in matches:job["cancel"].set()
+            for job in matches:
+                job["cancel"].set()
+                self._cancel_confirmation(job)
         deadline = time.monotonic() + 5
         for job in matches:
             if not job["done"].wait(max(0, deadline-time.monotonic())):
