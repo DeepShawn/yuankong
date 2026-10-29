@@ -153,6 +153,13 @@ class NetworkAuthorizationTest(unittest.TestCase):
         with self.assertRaisesRegex(Error,'尝试过多'):self.unlock()
         self.now+=31;token=self.unlock();self.assertEqual(64,len(token))
         self.assertNotIn(TEST_PASSWORD,str(self.auth.__dict__))
+    def test_global_throttle_cannot_be_bypassed_by_random_phone_ids(self):
+        for index in range(30):
+            with self.assertRaisesRegex(Error,'密码错误'):self.call(owner='phone-'+str(index),action='unlock',password='incorrect')
+        with self.assertRaisesRegex(Error,'尝试过多'):self.unlock(owner='new-phone')
+        self.assertFalse(self.auth.sessions);self.now+=61
+        self.assertEqual(64,len(self.unlock(owner='new-phone')))
+
     def test_expiry_during_a_batch_does_not_cancel_or_repeat_the_windows_job(self):
         self.backend.block=True;token=self.unlock()
         query=dict(action='submit',operation='device_batch',area='bluetooth',params=dict(instances=['a','b'],enabled=False),confirm=True,request_id='c'*32)

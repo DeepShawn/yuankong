@@ -45,7 +45,7 @@ class NetworkManagementUiTest {
     private fun enter(page:NetworkManagementActivity) {
         waitFor{page.supported && !page.busy && page.administrator}
         page.managementPassword="test-only-password";page.unlock()
-        waitFor{page.authorized && !page.busy && page.snapshots.isNotEmpty()}
+        waitFor{page.authorized && page.snapshots.isNotEmpty() && (!page.busy || page.job?.optJSONObject("question")!=null)}
     }
     @Test fun allFourAreasRefreshWithoutSendingChanges() {
         Stub().use {stub ->
@@ -301,7 +301,7 @@ class NetworkManagementUiTest {
         @Volatile private var submitted:JSONObject?=null
         @Volatile private var answered=false
         @Volatile var expired=false
-        @Volatile private var unlocked=false
+        private val sessions=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         private val thread=Thread {
             try {while(!server.isClosed){val socket=server.accept();Thread {
                 try {socket.use {
@@ -313,11 +313,12 @@ class NetworkManagementUiTest {
                         else if(q.optString("action")=="auth_status")r.put("admin",admin).put("requires_password",true)
                         else if(q.optString("action")=="unlock") {
                             if(admin && q.optString("password")=="test-only-password") {
-                                unlocked=true;expired=false;r.put("network_token","c".repeat(64)).put("admin",true).put("expires_in",1800)
+                                val token=java.util.UUID.randomUUID().toString().replace("-","")+java.util.UUID.randomUUID().toString().replace("-","")
+                                sessions.add(token);expired=false;r.put("network_token",token).put("admin",true).put("expires_in",1800)
                             } else r.put("ok",false).put("error","网络管理密码错误")
                         }
-                        else if(q.optString("action")=="lock"){unlocked=false;r.put("locked",true)}
-                        else if(!unlocked || expired || q.optString("network_token")!="c".repeat(64))r.put("ok",false).put("error","NETWORK_AUTH_REQUIRED: 请重新输入网络管理密码")
+                        else if(q.optString("action")=="lock"){sessions.remove(q.optString("network_token"));r.put("locked",true)}
+                        else if(expired || q.optString("network_token") !in sessions)r.put("ok",false).put("error","NETWORK_AUTH_REQUIRED: 请重新输入网络管理密码")
                         else {
                             if(q.optString("action")=="submit"){submitted=q;if(dropReply)break}
                             if(q.optString("action")=="answer")answered=true
