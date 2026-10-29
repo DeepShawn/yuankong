@@ -23,6 +23,7 @@ import org.robolectric.shadows.ShadowDialog
 import java.io.Closeable
 import java.io.IOException
 import java.net.ServerSocket
+import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
 
 @RunWith(RobolectricTestRunner::class)
@@ -42,7 +43,9 @@ class ForceDeleteUiTest {
     }
     private fun waitFor(check: () -> Boolean) {
         val end=System.currentTimeMillis()+8000
-        while(System.currentTimeMillis()<end) { shadowOf(Looper.getMainLooper()).idle(); if(check())return; Thread.sleep(10) }
+        // File-job polling uses delay(800): advance Robolectric's virtual clock
+        // as well as letting the real RPC thread run after confirm/cancel.
+        while(System.currentTimeMillis()<end) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100)); if(check())return; Thread.sleep(10) }
         fail("强制删除界面未更新")
     }
     private fun latest() = ShadowDialog.getLatestDialog() as AlertDialog

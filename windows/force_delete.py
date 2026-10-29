@@ -73,7 +73,13 @@ class NativeForceDelete:
     def __init__(self, protected=()):
         from task_manager import NativeProcesses
         system = os.environ.get("SystemRoot", r"C:\Windows")
-        self.processes = NativeProcesses((*protected, system))
+        # A normal app such as Notepad can live under SystemRoot. File paths
+        # there remain protected by FileJobs, while process protection uses
+        # critical-process metadata, RM service/Explorer type and logon session.
+        # Keep the receiver/configuration paths protected independently.
+        process_protected = [p for p in protected if p and
+            os.path.normcase(os.path.abspath(p)) != os.path.normcase(os.path.abspath(system))]
+        self.processes = NativeProcesses(process_protected)
         self.occupancy = RestartManager()
         self.kernel = k = ctypes.WinDLL("kernel32", use_last_error=True)
         k.CreateFileW.argtypes = [w.LPCWSTR, w.DWORD, w.DWORD, ctypes.c_void_p,
