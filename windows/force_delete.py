@@ -199,14 +199,21 @@ class NativeForceDelete:
             raise FileInUse(blockers)
         if any(not p["can_close"] for p in blockers):
             raise ValueError("文件被系统服务、受保护进程或其他登录会话占用，未结束这些进程")
+        ended = []
+        def removed_on_exit():
+            return dict(deleted=True, method="application_exit", ended=list(ended),
+                        notice="占用应用退出后，原文件已移除")
         for item in blockers:
-            check()
+            try:check()
+            except FileNotFoundError:return removed_on_exit()
             self.end(item)
+            ended.append(dict(item))
         for attempt in range(10):
-            check()
+            try:check()
+            except FileNotFoundError:return removed_on_exit()
             try:
                 result = self._delete_handle(path, original)
-                result["ended"] = [dict(p) for p in blockers]
+                result["ended"] = list(ended)
                 return result
             except OSError as exc:
                 if exc.winerror not in (5, 32, 33) or attempt == 9:

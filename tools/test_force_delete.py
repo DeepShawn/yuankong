@@ -108,6 +108,19 @@ class ForceDeleteJobsTest(unittest.TestCase):
 
 
 class OccupantRaceTest(unittest.TestCase):
+    def test_application_exit_removing_its_own_file_counts_as_removed_without_ending_more_apps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "temporary"; path.write_text("temporary")
+            backend = NativeForceDelete.__new__(NativeForceDelete)
+            error = OSError("occupied"); error.winerror = 32
+            backend._delete_handle = mock.Mock(side_effect=error)
+            owners = [holder(), holder(102)]
+            backend.blockers = mock.Mock(return_value=owners)
+            backend.end = mock.Mock(side_effect=lambda item: path.unlink())
+            result = backend.remove(path, path.lstat(), owners, threading.Event())
+            self.assertTrue(result["deleted"])
+            self.assertEqual(1, backend.end.call_count)
+
     def test_new_or_reused_process_is_never_ended_using_old_confirmation(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "data"; path.write_text("data")
