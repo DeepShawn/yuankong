@@ -24,6 +24,7 @@ class TouchTest(unittest.TestCase):
     def test_touch_promotion_does_not_unlock_unrelated_physical_or_software_input(self):
         with authorized_promotion([dict(x=100,y=200,state='down')]):
             self.assertTrue(authorized_touch_mouse(0x201,1,0xff51578c,100,200))
+            self.assertFalse(authorized_touch_mouse(0x201,1,0xff51578c,100,200))
             self.assertFalse(authorized_touch_mouse(0x201,0,0xff51578c,100,200))
             self.assertFalse(authorized_touch_mouse(0x201,1,0,100,200))
             self.assertFalse(authorized_touch_mouse(0x201,1,0xff51578c,300,400))

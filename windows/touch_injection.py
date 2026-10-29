@@ -26,11 +26,13 @@ _promotions = deque(maxlen=64)
 @contextmanager
 def authorized_promotion(points):
     """Allow only compatibility messages for the frame we're about to inject."""
-    permit = {'points': points, 'until': time.monotonic() + 1}
+    permit = {'points': [dict(p,delivered=set()) for p in points], 'until': time.monotonic() + 3}
     with _promotion_lock:_promotions.append(permit)
     try:yield
     finally:
-        with _promotion_lock:permit['until'] = time.monotonic() + .1
+        # Windows gesture recognition can defer compatibility mouse messages
+        # until after InjectTouchInput has already acknowledged the touch frame.
+        with _promotion_lock:permit['until'] = time.monotonic() + 2
 
 
 def authorized_touch_mouse(message, flags, extra, x, y):
@@ -42,7 +44,11 @@ def authorized_touch_mouse(message, flags, extra, x, y):
             if permit['until'] < now:continue
             for point in permit['points']:
                 messages = {'down': (0x200,0x201), 'move': (0x200,), 'up': (0x200,0x202)}[point['state']]
-                if message in messages and abs(point['x']-x)<=1 and abs(point['y']-y)<=1:return True
+                if message in messages and abs(point['x']-x)<=1 and abs(point['y']-y)<=1:
+                    if message != 0x200:
+                        if message in point['delivered']:continue
+                        point['delivered'].add(message)
+                    return True
     return False
 
 
