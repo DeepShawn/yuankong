@@ -157,6 +157,7 @@ class NetworkManagementActivity : MiuixActivity() {
                             items(snapshot.rows("adapters"),key={it.optString("id")}) {adapter ->SectionCard {
                                 InfoItem(adapter.optString("name"),"${adapter.optString("description")}\n${adapter.optString("status")} · ${adapter.optString("speed")} · ${adapter.optString("mac")}")
                                 InfoItem("IP 地址",(adapter.strings("ipv4")+adapter.strings("ipv6")).joinToString("\n").ifBlank{"无地址"})
+                                if(adapter.optString("address_notice").isNotBlank())Note(adapter.optString("address_notice"))
                                 InfoItem("网关 / DNS",adapter.strings("gateways").joinToString()+"\n"+adapter.strings("dns").joinToString())
                                 ActionRow {
                                     Action("启用",enabled=canChange(),modifier=Modifier.weight(1f)){ask("enable",JSONObject().put("adapter",adapter.optString("id")),"启用 ${adapter.optString("name")}。需要电脑已有管理员权限。")}

@@ -183,12 +183,20 @@ function Pair-Device($device) {
 function Adapter-Status {
     return @{supported=$true;adapters=@(Get-NetAdapter -ErrorAction Stop | ForEach-Object {
         $adapter=$_;$index=$adapter.ifIndex
-        $ip=Get-NetIPConfiguration -InterfaceIndex $index -ErrorAction SilentlyContinue
-        $dns=Get-DnsClientServerAddress -InterfaceIndex $index -ErrorAction SilentlyContinue
+        # Get-NetIPConfiguration internally queries both IP families and can
+        # terminate the entire enumeration when one binding is absent.
+        $addressNotice=''
+        try {$addresses=@(Get-NetIPAddress -InterfaceIndex $index -ErrorAction Stop)}
+        catch {$addresses=@();$addressNotice=$_.Exception.Message}
+        try {$routes=@(Get-NetRoute -InterfaceIndex $index -ErrorAction Stop | Where-Object {$_.DestinationPrefix -in @('0.0.0.0/0','::/0')})}
+        catch {$routes=@()}
+        try {$dns=Get-DnsClientServerAddress -InterfaceIndex $index -ErrorAction Stop}
+        catch {$dns=@()}
         @{id=$adapter.InterfaceGuid.ToString();index=$index;name=$adapter.Name;description=$adapter.InterfaceDescription;
             status=$adapter.Status.ToString();mac=$adapter.MacAddress;speed=[string]$adapter.LinkSpeed;
-            ipv4=@($ip.IPv4Address | ForEach-Object {$_.IPAddress});ipv6=@($ip.IPv6Address | ForEach-Object {$_.IPAddress});
-            gateways=@($ip.IPv4DefaultGateway | ForEach-Object {$_.NextHop});dns=@($dns.ServerAddresses | ForEach-Object {$_})}
+            ipv4=@($addresses | Where-Object {$_.AddressFamily.ToString() -eq 'IPv4'} | ForEach-Object {$_.IPAddress});
+            ipv6=@($addresses | Where-Object {$_.AddressFamily.ToString() -eq 'IPv6'} | ForEach-Object {$_.IPAddress});
+            address_notice=$addressNotice;gateways=@($routes | ForEach-Object {$_.NextHop});dns=@($dns.ServerAddresses | ForEach-Object {$_})}
     })}
 }
 

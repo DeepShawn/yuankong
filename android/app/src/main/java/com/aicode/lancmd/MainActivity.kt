@@ -132,7 +132,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 Tool("应用锁") { openFeature(AppLocksActivity::class.java) },
                 Tool("桌面背景") { openFeature(WallpaperActivity::class.java) },
                 Tool("本地升级") { openFeature(UpgradeActivity::class.java) },
-                Tool("启动与网络") { openFeature(StartupNetworkActivity::class.java) }
+                Tool("启动与网络") { openFeature(StartupNetworkActivity::class.java) },
                 Tool("网络与蓝牙") { openFeature(NetworkManagementActivity::class.java) }
             ),
             "录制与自动化" to listOf(
