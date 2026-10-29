@@ -23,6 +23,7 @@ class NetworkManagementActivity : MiuixActivity() {
     internal var area by mutableStateOf("hotspot")
     internal var supported by mutableStateOf(false)
     private var hardwareSupported by mutableStateOf(false)
+    private var accessSupported by mutableStateOf(false)
     private var devicesExpanded by mutableStateOf(false)
     internal var busy by mutableStateOf(false)
     internal var job by mutableStateOf<JSONObject?>(null)
@@ -84,6 +85,19 @@ class NetworkManagementActivity : MiuixActivity() {
                             item {HotspotControls(snapshot)}
                             items(snapshot.rows("clients"),key={it.optString("address")}) {client ->SectionCard {
                                 InfoItem(client.optString("address"),client.strings("hosts").joinToString("\n").ifBlank{"已连接热点的设备"})
+                                if(client.optBoolean("blocked"))Note(if(client.optBoolean("access_active"))"禁止联网规则已安装，Wi-Fi 可能仍显示已连接" else "已保存限制，但当前规则未生效")
+                                Action(if(client.optBoolean("blocked"))"恢复联网" else "禁止联网",enabled=canChange() && accessSupported) {
+                                    val blocked=!client.optBoolean("blocked")
+                                    ask("client_access",JSONObject().put("address",client.optString("address")).put("blocked",blocked),
+                                        if(blocked)"按 MAC 禁止此设备通过热点通信，设备仍可能显示 Wi-Fi 已连接。若选择的是当前控制手机，远控也会断开。" else "移除此 MAC 的热点联网限制。")
+                                }
+                            }}
+                            val connected=snapshot.rows("clients").map{it.optString("address")}.toSet()
+                            items(snapshot.rows("client_access").filter{it.optString("address") !in connected},key={"access:"+it.optString("address")}) {rule ->SectionCard("已保存的客户端限制") {
+                                InfoItem(rule.optString("address"),if(rule.optBoolean("active"))"禁止联网规则已安装" else "限制待生效，开启热点后自动恢复")
+                                Action("恢复联网",enabled=canChange() && accessSupported) {
+                                    ask("client_access",JSONObject().put("address",rule.optString("address")).put("blocked",false),"移除该 MAC 的热点联网限制，设备重新连接时不再应用此限制。")
+                                }
                             }}
                         }
                         "wifi" -> {
@@ -184,6 +198,7 @@ class NetworkManagementActivity : MiuixActivity() {
             val caps=pinnedCall(owner,"capabilities").optJSONArray("features")
             supported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="network_management"}
             hardwareSupported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="network_device_state"}
+            accessSupported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="hotspot_client_access"}
             if(!supported){status("请完整更新 Windows 接收端后使用网络与蓝牙",true);return@task}
             if(pendingArea.isNotBlank())watchPending() else refresh()
         }
@@ -206,7 +221,9 @@ class NetworkManagementActivity : MiuixActivity() {
             ActionRow {listOf("auto","2.4","5").forEach {key ->SelectionAction(if(key=="auto")"自动频段" else "$key GHz",band==key,
                 enabled=key=="auto" || snapshot.optBoolean("band_supported"),modifier=Modifier.weight(1f)){band=key}}}
             Action("保存热点配置",enabled=canChange(),primary=true){ask("configure",JSONObject().put("name",hotspotName).put("password",hotspotPassword).put("band",band),"修改热点名称、密码或频段；已开启的热点会重启，客户端需重新连接。")}
-            Note("密码为 8–63 个可打印 ASCII 字符，不读取旧密码。Windows 不提供通用的单客户端踢出接口；可修改密码后关闭或重启热点。")
+            Note("密码为 8–63 个可打印 ASCII 字符，不读取旧密码。单台设备可按 MAC 禁止联网，Wi-Fi 仍可能显示已连接；更换随机 MAC 后需重新设置。")
+            if(!accessSupported)Note("单个客户端联网限制需要完整更新并重启 Windows 接收端")
+            snapshot.optString("access_error").takeIf{it.isNotBlank()}?.let{Note(it)}
         }
     }
 

@@ -16,6 +16,7 @@ import uuid
 from native_wifi import NativeWifi, profile_xml
 from privacy_devices import PrivacyHardware
 from device_property_change import change_state
+from hotspot_access import HotspotAccess,address as client_address
 
 NETWORK_CLASSES=frozenset({'4d36e972-e325-11ce-bfc1-08002be10318','e0cbf06c-cd8b-4647-bb8a-263b43f0f974'})
 
@@ -25,7 +26,7 @@ class NetworkHardware(PrivacyHardware):
 NETWORK_CHANGE_LOCK=threading.RLock()
 AREAS=('hotspot','wifi','bluetooth','adapters')
 OPERATIONS={
-    'hotspot':{'start','stop','restart','configure','device'},
+    'hotspot':{'start','stop','restart','configure','device','client_access'},
     'wifi':{'connect','disconnect','forget','radio','device'},
     'bluetooth':{'pair','unpair','radio','device'},
     'adapters':{'enable','disable','dns','renew','device'},
@@ -57,7 +58,10 @@ def text(value,name,limit=256,empty=False):
 def validate(area,operation,params):
     if area not in AREAS or operation not in OPERATIONS[area] or not isinstance(params,dict):raise ValueError('无效的网络操作')
     p={}
-    if operation=='device':
+    if operation=='client_access':
+        p=dict(address=client_address(params.get('address')),blocked=params.get('blocked'))
+        if type(p['blocked']) is not bool:raise ValueError('请选择禁止或恢复联网')
+    elif operation=='device':
         p=dict(instance=text(params.get('instance'),'设备实例编号',512),enabled=params.get('enabled'))
         if type(p['enabled']) is not bool:raise ValueError('设备开关必须明确选择启用或停用')
     elif operation=='radio':
@@ -88,8 +92,22 @@ def validate(area,operation,params):
 
 
 class WindowsNetwork:
-    def __init__(self):
-        self.wifi=None;self.hw=None
+    def __init__(self,access_path=None):
+        self.wifi=None;self.hw=None;self.access=HotspotAccess(access_path);self.access_thread=None;self.access_lock=threading.Lock()
+        if self.access.blocked:self.watch_access()
+
+    def watch_access(self):
+        if os.name!='nt':return
+        with self.access_lock:
+            if self.access_thread and self.access_thread.is_alive():return
+            def run():
+                while True:
+                    if self.access.blocked:
+                        try:snapshot=self.run(dict(area='hotspot',operation='status'))
+                        except Exception as exc:snapshot=dict(state='Unavailable',error=str(exc))
+                        self.access.sync(snapshot)
+                    time.sleep(8)
+            self.access_thread=threading.Thread(target=run,daemon=True,name='lancmd-hotspot-access');self.access_thread.start()
 
     def run(self,request,challenge=None):
         script=Path(__file__).with_name('network_winrt.ps1').read_text(encoding='utf-8')
@@ -152,12 +170,22 @@ class WindowsNetwork:
             else:result=self.run(dict(area=area,operation='status'))
         except (OSError,RuntimeError) as exc:
             result=dict(supported=False,error=str(exc))
+        if area=='hotspot':result=self.access.sync(result)
         try:result['hardware']=[d for d in self.hardware() if d['kind']==('bluetooth' if area=='bluetooth' else 'net')]
         except (OSError,RuntimeError) as exc:result['hardware_error']=str(exc)
         return result
 
     def perform(self,area,operation,params,challenge):
-        if operation=='device':
+        if operation=='client_access':
+            if not ctypes_admin():raise ValueError('热点客户端限制需要管理员接收端；未自动提权')
+            try:snapshot=self.run(dict(area='hotspot',operation='status'))
+            except OSError:
+                if params['blocked']:raise
+                snapshot=dict(state='Unavailable')
+            result=self.access.change(params['address'],params['blocked'],snapshot)
+            if self.access.blocked:self.watch_access()
+            return result
+        elif operation=='device':
             item=next((d for d in self.hardware() if d['id']==params['instance'] and d['kind']==('bluetooth' if area=='bluetooth' else 'net')),None)
             if not item:raise ValueError('设备已变化或不属于当前分类，请刷新后重新选择')
             if item.get('problem') not in (0,22) or item.get('error'):raise ValueError('设备状态异常，未执行启停，请检查驱动')

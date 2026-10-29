@@ -106,6 +106,8 @@ jobs:
         run: python -m unittest discover -s tools -p test_startup_network.py -v
       - name: Network jobs, credentials, native WLAN and WinRT pairing bridge
         run: python -m unittest discover -s tools -p test_network_management.py -v
+      - name: Scoped hotspot MAC access and native WFP filter lifecycle
+        run: python -m unittest discover -s tools -p test_hotspot_access.py -v
   package-windows:
     runs-on: ubuntu-latest
     timeout-minutes: 15
