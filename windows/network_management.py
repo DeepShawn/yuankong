@@ -26,7 +26,7 @@ class NetworkHardware(PrivacyHardware):
 NETWORK_CHANGE_LOCK=threading.RLock()
 AREAS=('hotspot','wifi','bluetooth','adapters')
 OPERATIONS={
-    'hotspot':{'start','stop','restart','configure','device','client_access'},
+    'hotspot':{'start','stop','restart','configure','device','client_access','hotspot_interface'},
     'wifi':{'connect','disconnect','forget','radio','device'},
     'bluetooth':{'pair','unpair','radio','device'},
     'adapters':{'enable','disable','dns','renew','device'},
@@ -58,7 +58,10 @@ def text(value,name,limit=256,empty=False):
 def validate(area,operation,params):
     if area not in AREAS or operation not in OPERATIONS[area] or not isinstance(params,dict):raise ValueError('无效的网络操作')
     p={}
-    if operation=='client_access':
+    if operation=='hotspot_interface':
+        selected=text(params.get('interface',''),'热点网卡',40,True)
+        p=dict(interface=str(uuid.UUID(selected)) if selected else '')
+    elif operation=='client_access':
         p=dict(address=client_address(params.get('address')),blocked=params.get('blocked'))
         if type(p['blocked']) is not bool:raise ValueError('请选择禁止或恢复联网')
     elif operation=='device':
@@ -176,7 +179,16 @@ class WindowsNetwork:
         return result
 
     def perform(self,area,operation,params,challenge):
-        if operation=='client_access':
+        if operation=='hotspot_interface':
+            if self.access.blocked and not ctypes_admin():raise ValueError('重新应用联网限制需要管理员接收端；未自动提权')
+            try:snapshot=self.run(dict(area='hotspot',operation='status'))
+            except OSError:
+                if params['interface']:raise
+                snapshot=dict(state='Unavailable')
+            result=self.access.choose_interface(params['interface'],snapshot)
+            if self.access.blocked:self.watch_access()
+            return result
+        elif operation=='client_access':
             if not ctypes_admin():raise ValueError('热点客户端限制需要管理员接收端；未自动提权')
             try:snapshot=self.run(dict(area='hotspot',operation='status'))
             except OSError:

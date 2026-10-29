@@ -24,6 +24,9 @@ class NetworkManagementActivity : MiuixActivity() {
     internal var supported by mutableStateOf(false)
     private var hardwareSupported by mutableStateOf(false)
     private var accessSupported by mutableStateOf(false)
+    private var adapterSelectionSupported by mutableStateOf(false)
+    private var hotspotAdaptersExpanded by mutableStateOf(false)
+    private var hotspotDiagnosticsExpanded by mutableStateOf(false)
     private var devicesExpanded by mutableStateOf(false)
     internal var busy by mutableStateOf(false)
     internal var job by mutableStateOf<JSONObject?>(null)
@@ -75,8 +78,7 @@ class NetworkManagementActivity : MiuixActivity() {
                     item {SectionCard {
                         Action(if(busy)"正在处理，可等待或返回" else "刷新设备与连接",enabled=supported && !busy,primary=true){refresh()}
                         if(!supported)Note("需要完整更新 Windows 接收端，设备能力以电脑实际结果为准。")
-                        if(job!=null)Note(job!!.optString("message"))
-                        snapshots[area]?.optString("error")?.takeIf{it.isNotBlank()}?.let{Note(it)}
+                        snapshots[area]?.optString("error")?.takeIf{it.isNotBlank() && it!=noteText.value}?.let{Note(it)}
                     }}
                     val snapshot=snapshots[area] ?: JSONObject()
                     item {HardwareControls(snapshot)}
@@ -199,6 +201,7 @@ class NetworkManagementActivity : MiuixActivity() {
             supported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="network_management"}
             hardwareSupported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="network_device_state"}
             accessSupported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="hotspot_client_access"}
+            adapterSelectionSupported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="hotspot_adapter_selection"}
             if(!supported){status("请完整更新 Windows 接收端后使用网络与蓝牙",true);return@task}
             if(pendingArea.isNotBlank())watchPending() else refresh()
         }
@@ -211,6 +214,36 @@ class NetworkManagementActivity : MiuixActivity() {
         SectionCard("移动热点") {
             InfoItem(when(snapshot.optString("state")){"On"->"热点已开启";"Off"->"热点已关闭";"InTransition"->"正在切换热点状态";else->"尚未取得热点状态"},
                 "${snapshot.optString("name")} · ${snapshot.optInt("client_count")} / ${snapshot.optInt("max_clients")} 台设备")
+            if(adapterSelectionSupported) {
+                val selected=snapshot.optJSONObject("selected_adapter")
+                if(selected!=null)InfoItem("热点专用网卡",selected.optString("name")+" · "+when(snapshot.optString("adapter_source")) {
+                    "client_mac"->"客户端 MAC 匹配";"client_subnet"->"客户端网段匹配";"manual"->"手动选择";else->"共享配置识别"
+                }+"\n"+selected.strings("ipv4").joinToString())
+                val notice=snapshot.optString("adapter_notice")
+                if(notice.isNotBlank() && notice!=noteText.value)Note(notice)
+                Action(if(hotspotAdaptersExpanded)"收起热点网卡" else "选择热点网卡",enabled=!busy){hotspotAdaptersExpanded=!hotspotAdaptersExpanded}
+                if(hotspotAdaptersExpanded) {
+                    Note("仅列出已启用的 Wi-Fi Direct 候选网卡或已确认的共享网卡。选热点实际使用的网卡，再重试客户端联网限制。")
+                    Action("恢复自动识别",enabled=canChange()) {
+                        ask("hotspot_interface",JSONObject().put("interface",""),"恢复按共享配置、客户端 MAC 与网段自动识别热点网卡，重新应用已保存的限制。")
+                    }
+                    snapshot.rows("adapter_candidates").forEach {adapter ->
+                        InfoItem(adapter.optString("name"),adapter.optString("description")+"\n"+adapter.strings("ipv4").joinToString()+
+                            "\n客户端 MAC 匹配 ${adapter.optInt("mac_matches")} 个")
+                        Action("使用 ${adapter.optString("name")}",enabled=canChange() && snapshot.optString("state")=="On") {
+                            ask("hotspot_interface",JSONObject().put("interface",adapter.optString("id")),
+                                "将 ${adapter.optString("name")} 设为热点专用网卡，仅在这张网卡重新应用已保存的客户端限制。")
+                        }
+                    }
+                    if(snapshot.rows("adapter_candidates").isEmpty())Note("没有可选择的热点网卡，请先刷新设备与连接")
+                    Action(if(hotspotDiagnosticsExpanded)"收起识别详情" else "查看识别详情"){hotspotDiagnosticsExpanded=!hotspotDiagnosticsExpanded}
+                    if(hotspotDiagnosticsExpanded) {
+                        listOf("private_adapter_error" to "共享配置","neighbor_error" to "客户端邻居表","address_error" to "网卡地址").forEach {(key,label) ->
+                            snapshot.optString(key).takeIf{it.isNotBlank()}?.let{Note("$label：$it")}
+                        }
+                    }
+                }
+            }
             ActionRow {
                 Action("开启",enabled=canChange(),modifier=Modifier.weight(1f)){ask("start",JSONObject(),"开启 Windows 移动热点。")}
                 Action("关闭",enabled=canChange(),modifier=Modifier.weight(1f)){ask("stop",JSONObject(),"关闭移动热点，所有热点客户端都会断开。")}
@@ -223,7 +256,7 @@ class NetworkManagementActivity : MiuixActivity() {
             Action("保存热点配置",enabled=canChange(),primary=true){ask("configure",JSONObject().put("name",hotspotName).put("password",hotspotPassword).put("band",band),"修改热点名称、密码或频段；已开启的热点会重启，客户端需重新连接。")}
             Note("密码为 8–63 个可打印 ASCII 字符，不读取旧密码。单台设备可按 MAC 禁止联网，Wi-Fi 仍可能显示已连接；更换随机 MAC 后需重新设置。")
             if(!accessSupported)Note("单个客户端联网限制需要完整更新并重启 Windows 接收端")
-            snapshot.optString("access_error").takeIf{it.isNotBlank()}?.let{Note(it)}
+            snapshot.optString("access_error").takeIf{it.isNotBlank() && it!=noteText.value && it!=snapshot.optString("adapter_notice")}?.let{Note(it)}
         }
     }
 

@@ -4,6 +4,7 @@ These rules block network traffic, not 802.11 association. No drivers are instal
 and no existing firewall rules are changed. An engine disconnect removes our rules.
 """
 import ctypes as c
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -25,6 +26,72 @@ def address(value):
     if not re.fullmatch(r'(?:[0-9A-F]{2}:){5}[0-9A-F]{2}',value) or int(value[:2],16)&1 or value=='00:00:00:00:00:00':
         raise ValueError('请选择有效的单个热点客户端 MAC')
     return value
+
+
+def discover_private(snapshot,preferred=''):
+    """Correlate current tethering clients with active Wi-Fi Direct adapters.
+
+    ICS is useful evidence, but modern mobile hotspots may not publish its
+    legacy sharing flag. Never guess from adapter names or 192.168.137.1 alone.
+    """
+    def ident(item):
+        try:return str(uuid.UUID(item['id']))
+        except (KeyError,ValueError,TypeError,AttributeError):return None
+    client_macs=set();client_ips=set()
+    for client in snapshot.get('clients',[]):
+        try:client_macs.add(address(client['address']))
+        except (KeyError,ValueError):pass
+        for host in client.get('hosts',[]):
+            try:
+                ip=ipaddress.ip_address(host)
+                if ip.version==4 and not ip.is_link_local and not ip.is_loopback and not ip.is_unspecified:client_ips.add(ip)
+            except (ValueError,TypeError):pass
+    legacy={ident(item):item for item in snapshot.get('private_adapters',[]) if isinstance(item,dict) and ident(item)}
+    candidates={}
+    for row in snapshot.get('adapter_inventory',[]):
+        key=ident(row)
+        if not key or row.get('up') is not True:continue
+        if row.get('wifi_direct') is not True and key not in legacy:continue
+        networks=[];ips=[]
+        for item in row.get('ipv4',[]):
+            try:
+                ip=ipaddress.IPv4Interface('%s/%s'%(item['address'],item['prefix']))
+                if ip.ip.is_link_local or ip.ip.is_loopback or ip.ip.is_unspecified:continue
+                ips.append(str(ip))
+                if 8<=ip.network.prefixlen<=30:networks.append(ip.network)
+            except (ValueError,TypeError,KeyError):continue
+        neighbors=set()
+        for peer in row.get('neighbors',[]):
+            if peer.get('state','') not in ('Reachable','Stale','Delay','Probe','Permanent'):continue
+            try:neighbors.add(address(peer['address']))
+            except (KeyError,ValueError):pass
+        matched=len(neighbors & client_macs)
+        if not ips and not matched and key not in legacy:continue
+        candidates[key]=dict(id=key,name=row.get('name') or key,description=row.get('description',''),
+            index=row.get('index'),ipv4=ips,mac_matches=matched,
+            subnet_matches=sum(any(ip in network for network in networks) for ip in client_ips))
+    # Preserve older snapshots and explicit legacy ICS evidence. A fresh
+    # inventory, when supplied, must still show the adapter as active.
+    if 'adapter_inventory' not in snapshot:
+        for key,row in legacy.items():candidates[key]=dict(row,id=key,ipv4=[],mac_matches=0,subnet_matches=0)
+    selected=None;source='';notice=''
+    if snapshot.get('state')!='On':notice='热点尚未开启；开启后再识别热点专用网卡'
+    elif preferred:
+        selected=candidates.get(preferred);source='manual'
+        if not selected:notice='所选热点网卡已变化，请重新选择或恢复自动识别'
+    else:
+        mac=[row for row in candidates.values() if row['mac_matches']>0]
+        subnet=[row for row in candidates.values() if row['subnet_matches']>0]
+        shared=[row for key,row in candidates.items() if key in legacy]
+        if len(mac)==1:selected=mac[0];source='client_mac'
+        elif len(mac)>1:
+            corroborated=[row for row in mac if row['id'] in legacy or row['subnet_matches']>0]
+            if len(corroborated)==1:selected=corroborated[0];source='client_mac'
+        elif len(subnet)==1:selected=subnet[0];source='client_subnet'
+        elif len(shared)==1:selected=shared[0];source='ics'
+        if not selected:
+            notice='热点已开启，发现多个候选热点网卡，请选择实际使用的网卡' if len(candidates)>1 else '热点已开启，尚未识别专用网卡；请刷新或选择热点网卡'
+    return dict(selected=selected,source=source if selected else '',notice=notice,candidates=list(candidates.values()))
 
 class Display(c.Structure):_fields_=[('name',c.c_wchar_p),('description',c.c_wchar_p)]
 class Blob(c.Structure):_fields_=[('size',c.c_uint32),('data',c.c_void_p)]
@@ -122,39 +189,48 @@ class NativeAccess:
 class HotspotAccess:
     def __init__(self,path=None,factory=NativeAccess):
         self.path=Path(path) if path else None;self.factory=factory;self.engine=None;self.lock=threading.RLock()
-        self.blocked=set();self.applied=[];self.error='';self.load_error='';self.interface=None
+        self.blocked=set();self.applied=[];self.error='';self.load_error='';self.interface=None;self.preferred=''
         if self.path and self.path.exists():
             try:
                 if self.path.stat().st_size>65536:raise ValueError('设置文件过大')
                 data=json.loads(self.path.read_text(encoding='utf-8'))
                 if not isinstance(data,dict) or data.get('format')!=1 or not isinstance(data.get('blocked'),list) or len(data['blocked'])>64:raise ValueError('列表无效')
-                self.blocked={address(mac) for mac in data['blocked']}
+                blocked={address(mac) for mac in data['blocked']}
+                preferred=data.get('preferred_interface','')
+                if not isinstance(preferred,str):raise ValueError('热点网卡设置无效')
+                preferred=str(uuid.UUID(preferred)) if preferred else ''
+                self.blocked=blocked;self.preferred=preferred
             except (OSError,ValueError,TypeError) as exc:self.load_error=self.error='无法读取热点限制设置：'+str(exc)
 
-    @staticmethod
-    def private(snapshot):
-        adapters=snapshot.get('private_adapters',[])
-        if snapshot.get('state')!='On' or len(adapters)!=1:raise ValueError('无法确认唯一的热点专用网卡，未创建全局阻断规则；请开启热点并刷新')
-        return dict(adapters[0],id=str(uuid.UUID(adapters[0]['id'])))
+    def private(self,snapshot):
+        result=discover_private(snapshot,self.preferred)
+        if not result['selected']:raise ValueError(result['notice'])
+        return result['selected']
 
     def _replace(self,entries):
         if not entries and self.engine is None:return
         if self.engine is None:self.engine=self.factory()
         self.engine.replace(entries);self.applied=entries
 
-    def _save(self,blocked):
+    def _save(self,blocked,preferred=None):
         if self.path:
             self.path.parent.mkdir(parents=True,exist_ok=True);temp=self.path.with_suffix('.tmp')
             try:
                 with temp.open('w',encoding='utf-8') as out:
-                    json.dump(dict(format=1,blocked=sorted(blocked)),out);out.flush();os.fsync(out.fileno())
+                    json.dump(dict(format=1,blocked=sorted(blocked),preferred_interface=self.preferred if preferred is None else preferred),out);out.flush();os.fsync(out.fileno())
                 os.replace(temp,self.path)
             finally:temp.unlink(missing_ok=True)
 
     def sync(self,snapshot):
         with self.lock:
+            snapshot=dict(snapshot)
+            discovery=discover_private(snapshot,self.preferred)
+            snapshot.update(adapter_candidates=discovery['candidates'],selected_adapter=discovery['selected'],
+                adapter_source=discovery['source'],adapter_notice=discovery['notice'],preferred_interface=self.preferred)
+            snapshot.pop('adapter_inventory',None)  # Unrelated LAN neighbors are not part of the phone's client list.
             try:
-                self.interface=self.private(snapshot) if self.blocked else None
+                self.interface=discovery['selected']
+                if self.blocked and not self.interface:raise ValueError(discovery['notice'])
                 entries=[dict(address=mac,interface=self.interface['id']) for mac in sorted(self.blocked)] if self.interface else []
                 if entries!=self.applied or entries and (self.engine is None or not self.engine.live()):self._replace(entries)
                 self.error=self.load_error
@@ -174,6 +250,28 @@ class HotspotAccess:
                 try:mac=address(client['address']);client.update(address=mac,blocked=mac in self.blocked,access_active=mac in active)
                 except (KeyError,ValueError):continue
             return snapshot
+
+    def choose_interface(self,preferred,snapshot):
+        preferred=str(uuid.UUID(preferred)) if preferred else ''
+        with self.lock:
+            discovered=discover_private(snapshot,preferred)
+            if preferred and not discovered['selected']:raise ValueError(discovered['notice'])
+            chosen=discovered['selected']
+            entries=[dict(address=mac,interface=chosen['id']) for mac in sorted(self.blocked)] if chosen else []
+            previous=list(self.applied);self._replace(entries)
+            try:self._save(self.blocked,preferred)
+            except Exception:
+                try:self._replace(previous)
+                except Exception:
+                    if self.engine:
+                        try:self.engine.close()
+                        except Exception:pass
+                        self.engine=None
+                    self.applied=[]
+                raise
+            self.preferred=preferred;self.interface=chosen;self.load_error=self.error=''
+            return dict(confirmed=bool(chosen) or not self.blocked,
+                message='已选择热点网卡：'+chosen['name'] if chosen else '已恢复自动识别；'+discovered['notice'])
 
     def change(self,mac,blocked,snapshot):
         mac=address(mac)
