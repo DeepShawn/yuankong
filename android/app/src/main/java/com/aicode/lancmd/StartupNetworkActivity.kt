@@ -32,6 +32,7 @@ class StartupNetworkActivity : MiuixActivity() {
                     InfoItem("当前用户自启动", registration.ifBlank { "正在读取…" })
                     InfoItem("Windows 移动热点", hotspot)
                     Action("刷新实际状态", enabled=!busy) { refresh() }
+                    Action("热点、Wi-Fi 与蓝牙管理") { startActivity(android.content.Intent(this@StartupNetworkActivity,NetworkManagementActivity::class.java)) }
                 }
                 SectionCard("启动后自动执行") {
                     SelectionRow("开机自启动", "当前用户登录 Windows 后运行本目录接收端", autostart,
@@ -46,7 +47,7 @@ class StartupNetworkActivity : MiuixActivity() {
                 }
                 SectionCard("C 盘重启还原") {
                     Note(retention.ifBlank { "重启会还原 C 盘时，需要在还原软件允许的维护模式或保留策略中保存自启动项。" })
-                    Note("自动执行开关保存在接收端目录的 startup-network.json。请先在 Windows 设置中配置移动热点，并让还原策略保留该配置。")
+                    Note("自动执行开关保存在接收端目录的 startup-network.json。热点名称和密码可在「网络与蓝牙」管理，请让还原策略保留对应 Windows 配置。")
                 }
             }
             if(confirm) ConfirmAction("应用启动与网络设置？",

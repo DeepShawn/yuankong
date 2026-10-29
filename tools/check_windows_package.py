@@ -95,8 +95,16 @@ class PackagedStartupTest(unittest.TestCase):
                 capabilities = call("capabilities")
                 self.assertEqual(self.display_version, capabilities["version"])
                 self.assertEqual(self.version, capabilities['build_version'])
-                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch"):
+                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network", "network_management", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"):
                     self.assertIn(feature, capabilities["features"])
+                network=call('network',action='refresh',area='adapters')
+                job_id=network['job']['id'];deadline=time.monotonic()+30
+                while not network['job'].get('finished'):
+                    if time.monotonic()>=deadline:self.fail('Packaged network helper did not return its job result')
+                    time.sleep(.2)
+                    network=call('network',action='status',area='adapters',job=job_id)
+                self.assertEqual('completed',network['job']['status'],network['job'])
+                self.assertIsInstance(network['snapshot']['adapters'],list)
                 with CursorWindow() as window:
                     self.assertGreaterEqual(window.initial['display_count'], 0)
                     lease = call("session", scope="input")["sid"]

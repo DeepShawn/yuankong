@@ -43,7 +43,8 @@ def authorized_touch_mouse(message, flags, extra, x, y):
         for permit in _promotions:
             if permit['until'] < now:continue
             for point in permit['points']:
-                messages = {'down': (0x200,0x201,0x204), 'move': (0x200,), 'up': (0x200,0x202,0x205)}[point['state']]
+                messages = {'down': (0x200,0x201,0x204), 'move': (0x200,),
+                    'hold': (0x200,0x202,0x204,0x205), 'up': (0x200,0x202,0x205)}[point['state']]
                 if message in messages and abs(point['x']-x)<=1 and abs(point['y']-y)<=1:
                     if message != 0x200:
                         if message in point['delivered']:continue
@@ -107,6 +108,7 @@ class NativeTouch:
             raise RuntimeError('Windows 无法初始化官方触控注入接口')
         self.points = {}
         self.prepared = None
+        self.last_injection = 0
 
     def pixel(self, item):
         width, height = self.user.GetSystemMetrics(78), self.user.GetSystemMetrics(79)
@@ -126,6 +128,9 @@ class NativeTouch:
             output.orientation, output.pressure = 90, 512
         previous = self.user.SetMessageExtraInfo(INPUT_TAG)
         try:
+            # Auto timestamps must be separated even for two quick taps.
+            spacing = .001 - (time.monotonic() - self.last_injection)
+            if spacing > 0:time.sleep(spacing)
             deadline = time.monotonic() + .1
             while not self.user.InjectTouchInput(len(array), array):
                 error = ctypes.get_last_error()
@@ -133,6 +138,7 @@ class NativeTouch:
                     if error == 87:self.points.clear()  # Windows cancels all contacts for an invalid frame.
                     raise RuntimeError('Windows 触控注入失败（错误 %s），未回退为鼠标模拟' % error)
                 time.sleep(.001)
+            self.last_injection = time.monotonic()
         finally:self.user.SetMessageExtraInfo(previous)
 
     def prepare(self, contacts):
@@ -146,7 +152,7 @@ class NativeTouch:
         pixels = self.prepared[1] if self.prepared and self.prepared[0] == frame else {p['id']:self.pixel(p) for p in frame}
         self.prepared = None
         # Windows requires UP coordinates to match the preceding UPDATE.
-        if any(p['state'] == 'up' and pixels[p['id']] != self.points[p['id']] for p in frame):
+        if any(p['state'] == 'up' for p in frame):
             update = [(p['id'], UPDATE | 6, *pixels[p['id']]) for p in frame if p['id'] in self.points]
             self.inject(update)
             self.points.update({ident: (x, y) for ident, _, x, y in update})
@@ -155,8 +161,14 @@ class NativeTouch:
         self.points = {p['id']: pixels[p['id']] for p in frame if p['state'] != 'up'}
         return len(self.points)
 
+    def hold(self):
+        # Microsoft's contract requires stationary UPDATE frames during a
+        # press-and-hold. RPC keepalives alone do not maintain a touch contact.
+        if self.points:self.inject([(ident, UPDATE | 6, *point) for ident, point in self.points.items()])
+
     def cancel(self):
         if self.points:
+            self.hold()
             self.inject([(ident, CANCELED | UP, *point) for ident, point in self.points.items()])
             self.points.clear()
 
@@ -173,14 +185,23 @@ def recovery_worker(native, input_stream, output_stream, watchdog=4):
         output_stream.write(json.dumps(dict(id=sequence, ok=True, **data)) + '\n');output_stream.flush()
     try:
         reply(0, api='InjectTouchInput', max_contacts=MAX_CONTACTS, active=0)
+        last_message=time.monotonic();next_hold=last_message+.02
         while True:
-            try:message = pending.get(timeout=watchdog)
-            except queue.Empty:break
+            now=time.monotonic()
+            remaining=watchdog-(now-last_message)
+            if remaining<=0:break
+            if native.points and now>=next_hold:
+                native.hold();next_hold=time.monotonic()+.02
+            timeout=min(remaining,max(.001,next_hold-time.monotonic())) if native.points else remaining
+            try:message = pending.get(timeout=timeout)
+            except queue.Empty:continue
             if message is None:break
+            last_message=time.monotonic()
             action = message.get('action')
             details = {}
             if action == 'prepare':details['points'] = native.prepare(message.get('contacts'))
             elif action == 'prepare_cancel':details['points'] = [dict(x=x,y=y,state='up') for x,y in native.points.values()]
+            elif action == 'prepare_hold':details['points'] = [dict(x=x,y=y,state='hold') for x,y in native.points.values()]
             elif action == 'frame':native.frame(message.get('contacts'))
             elif action == 'cancel':native.cancel()
             elif action != 'ping':raise ValueError('无效的触控工作进程请求')
@@ -228,8 +249,8 @@ class TouchWorker:
         return result
 
     def call(self, action='ping', contacts=None):
-        if action in ('frame','cancel'):
-            prepared = self._call('prepare' if action == 'frame' else 'prepare_cancel', contacts)
+        if action in ('frame','cancel','ping'):
+            prepared = self._call({'frame':'prepare','cancel':'prepare_cancel','ping':'prepare_hold'}[action], contacts)
             with authorized_promotion(prepared['points']):return self._call(action, contacts)
         return self._call(action, contacts)
 

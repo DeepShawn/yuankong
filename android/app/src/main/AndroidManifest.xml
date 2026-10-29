@@ -60,6 +60,7 @@
         <activity android:name=".WallpaperActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".UpgradeActivity" android:exported="false" />
         <activity android:name=".StartupNetworkActivity" android:exported="false" />
+        <activity android:name=".NetworkManagementActivity" android:exported="false" />
         <activity android:name=".TaskManagerActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".RegistryActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".BrowserActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />

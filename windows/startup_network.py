@@ -13,6 +13,8 @@ import threading
 import time
 import uuid
 from local_upgrade import ordinary
+from contextlib import nullcontext
+from network_management import network_change
 
 
 DEFAULTS = dict(autostart=False, auto_hotspot=False, auto_firewall=False)
@@ -104,10 +106,11 @@ class WindowsStartupNetwork:
 
     def hotspot(self, start=False):
         executable = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-        result = subprocess.run([str(executable), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", HOTSPOT],
-            env=dict(os.environ, LANCMD_START_HOTSPOT="1" if start else "0"),
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            creationflags=0x08000000, timeout=40)
+        with network_change() if start else nullcontext():
+            result = subprocess.run([str(executable), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", HOTSPOT],
+                env=dict(os.environ, LANCMD_START_HOTSPOT="1" if start else "0"),
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                creationflags=0x08000000, timeout=40)
         if result.returncode:
             raise OSError("移动热点调用失败：" + result.stderr.decode("utf-8", "replace")[:1600])
         data = json.loads(result.stdout.decode("utf-8-sig"))
