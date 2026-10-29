@@ -98,12 +98,12 @@ class DesktopUiTest {
         for (index in 0..2) {
             activity.mode = index
             render(activity, "desktop-idle-$index")
-            assertEquals(PointerIcon.TYPE_NULL, activity.findViewById<RemoteScreenView>(R.id.desktopScreen).pointerIcon.type)
+            assertEquals(PointerIcon.getSystemIcon(activity, PointerIcon.TYPE_NULL), activity.findViewById<RemoteScreenView>(R.id.desktopScreen).pointerIcon)
         }
         activity.showFullscreen(true)
         render(activity, "desktop-fullscreen-portrait")
         assertTrue(activity.fullscreen)
-        assertEquals(PointerIcon.TYPE_NULL, activity.findViewById<RemoteScreenView>(R.id.desktopScreen).pointerIcon.type)
+        assertEquals(PointerIcon.getSystemIcon(activity, PointerIcon.TYPE_NULL), activity.findViewById<RemoteScreenView>(R.id.desktopScreen).pointerIcon)
         assertTrue("Fullscreen image must use the full body height", activity.findViewById<RemoteScreenView>(R.id.desktopScreen).height > 750)
         activity.onBackPressedDispatcher.onBackPressed()
         assertFalse(activity.isFinishing)
@@ -172,12 +172,12 @@ class DesktopUiTest {
             try {
                 for (enabled in listOf(false, true)) {
                     view.touchEnabled = enabled
-                    assertEquals(PointerIcon.TYPE_NULL, view.onResolvePointerIcon(event, 0).type)
-                    assertEquals(PointerIcon.TYPE_NULL, view.pointerIcon.type)
+                    assertEquals(PointerIcon.getSystemIcon(view.context, PointerIcon.TYPE_NULL), view.onResolvePointerIcon(event, 0))
+                    assertEquals(PointerIcon.getSystemIcon(view.context, PointerIcon.TYPE_NULL), view.pointerIcon)
                 }
                 view.clearFrame()
-                assertEquals("An empty preview must not restore Android's arrow", PointerIcon.TYPE_NULL,
-                    view.onResolvePointerIcon(event, 0).type)
+                assertEquals("An empty preview must not restore Android's arrow", PointerIcon.getSystemIcon(view.context, PointerIcon.TYPE_NULL),
+                    view.onResolvePointerIcon(event, 0))
             } finally { event.recycle() }
         }
     }
