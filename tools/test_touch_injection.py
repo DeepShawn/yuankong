@@ -104,12 +104,13 @@ class NativeTouchTest(unittest.TestCase):
                 guard.pause('native-test',lambda:True)
                 worker = TouchWorker()
                 x,y = app.initial['x'], app.initial['y']
-                worker.call('frame',[point(x=x,y=y)])
-                worker.call('frame',[point(state='up',x=x,y=y)])
+                for _ in range(140):  # Exercise promoted cursor IDs beyond the signature's low 7 bits.
+                    worker.call('frame',[point(x=x,y=y)])
+                    worker.call('frame',[point(state='up',x=x,y=y)])
                 deadline = time.monotonic()+2
                 while True:
                     events = app.report('probe')['mouse_taps']
-                    if any(p['message']==0x202 for p in events):break
+                    if sum(p['message']==0x202 for p in events)>=140:break
                     if time.monotonic()>=deadline:self.fail('Native touch promotion was blocked by local-input hook: '+str((events,guard.native.last_touch_source)))
                     time.sleep(.02)
             finally:
