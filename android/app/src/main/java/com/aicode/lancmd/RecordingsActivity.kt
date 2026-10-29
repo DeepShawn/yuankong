@@ -47,10 +47,16 @@ class RecordingsActivity : MiuixActivity() {
         val active get() = state in listOf("starting", "recording", "stopping")
     }
 
-    private val modes = listOf("环境声音（WAV）", "屏幕视频（MP4）", "摄像头视频（MP4）")
+    private val modes = listOf("环境声音（WAV）", "屏幕视频（MP4）", "摄像头视频（MP4）", "全景：桌面＋摄像头小窗（MP4）")
 
-    private var modeIndex by mutableIntStateOf(0)
-    private var withAudio by mutableStateOf(true)
+    internal var modeIndex by mutableIntStateOf(0)
+    internal var withAudio by mutableStateOf(true)
+    internal var withSystemAudio by mutableStateOf(false)
+    internal var systemGain by mutableStateOf("100")
+    internal var microphoneGain by mutableStateOf("100")
+    internal var corner by mutableIntStateOf(0)
+    private var modernRecorder by mutableStateOf(false)
+    private var modernCapable=false
     private var microphoneNames by mutableStateOf(listOf("Windows 默认录音设备"))
     private var microphoneIndex by mutableIntStateOf(0)
     private var cameraNames by mutableStateOf(listOf("读取设备后选择"))
@@ -115,14 +121,16 @@ class RecordingsActivity : MiuixActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         download = savedInstanceState?.getString("download")?.let { runCatching { JSONObject(it) }.getOrNull() }
-        modeIndex = when (intent.getStringExtra("kind")) { "screen" -> 1; "camera" -> 2; else -> 0 }
-        status("录制电脑上的麦克风、屏幕或摄像头，文件保存在电脑。")
+        modeIndex = when (intent.getStringExtra("kind")) { "screen" -> 1; "camera" -> 2; "panorama" -> 3; else -> 0 }
+        if(modeIndex==3){withSystemAudio=true;withAudio=true}
+        status("录制电脑的桌面、摄像头、系统声音和麦克风，文件保存在电脑。")
         content { Screen() }
         task {
             val features = pinnedCall(origin, "capabilities").optJSONArray("features")
             if (features == null || (0 until features.length()).none { features.optString(it) == "recordings" }) {
                 error("请完整更新 Windows 2.2.0，包含 LanCmdRecord.exe")
             }
+            modernCapable=(0 until features.length()).any{features.optString(it)=="panorama_recording"}
             canRecord = true
             loadDevices()
         }
@@ -135,33 +143,31 @@ class RecordingsActivity : MiuixActivity() {
                 items = modes,
                 title = "录制内容",
                 selectedIndex = modeIndex,
-                onSelectedIndexChange = { modeIndex = it }
+                onSelectedIndexChange = { selectMode(it) }
             )
-            SuperSwitch(
-                checked = withAudio,
-                onCheckedChange = { withAudio = it },
-                title = "视频同时录制麦克风声音"
-            )
-            ChoiceField(
-                items = microphoneNames,
-                title = "麦克风",
-                selectedIndex = microphoneIndex.coerceAtMost(microphoneNames.size - 1),
-                onSelectedIndexChange = { microphoneIndex = it }
-            )
-            ChoiceField(
-                items = cameraNames,
-                title = "摄像头",
-                summary = "仅摄像头模式使用",
-                selectedIndex = cameraIndex.coerceAtMost(cameraNames.size - 1),
-                onSelectedIndexChange = { cameraIndex = it }
-            )
+            if(modeIndex!=0) {
+                SuperSwitch(checked=withSystemAudio,onCheckedChange={withSystemAudio=it},title="录制电脑系统声音",enabled=modernRecorder)
+                SuperSwitch(checked=withAudio,onCheckedChange={withAudio=it},title="同时录制麦克风环境声")
+                if(!modernRecorder)Note("全景与系统声音需完整更新 Windows，包括 LanCmdRecord.exe。")
+            }
+            if(modeIndex==0 || withAudio)ChoiceField(
+                items=microphoneNames,title="麦克风",selectedIndex=microphoneIndex.coerceAtMost(microphoneNames.size-1),onSelectedIndexChange={microphoneIndex=it})
+            if(modeIndex in listOf(2,3))ChoiceField(
+                items=cameraNames,title="摄像头",selectedIndex=cameraIndex.coerceAtMost(cameraNames.size-1),onSelectedIndexChange={cameraIndex=it})
+            if(modeIndex==3)ChoiceField(items=listOf("右下角","左下角","右上角","左上角"),title="摄像头小窗位置",selectedIndex=corner,onSelectedIndexChange={corner=it})
+            if(modeIndex!=0 && modernRecorder) {
+                if(withSystemAudio)Field("系统声音录制音量（0–200%）",systemGain,{systemGain=it.filter(Char::isDigit).take(3)},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number))
+                if(withAudio)Field("麦克风录制音量（0–200%）",microphoneGain,{microphoneGain=it.filter(Char::isDigit).take(3)},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number))
+                Note("录制音量仅影响文件。系统声音使用开始时的默认播放设备，切换输出设备后需重新录制；没有播放声音时录为静音。")
+                Action("电脑扬声器音量"){AudioDialog(this@RecordingsActivity).show()}
+            }
             Field(
                 label = "录制时长（秒，1–3600）",
                 value = seconds,
                 onValueChange = { seconds = it.filter(Char::isDigit).take(4) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
             )
-            Action("开始录制", enabled = canRecord && !busy, primary = true) { confirmStart() }
+            Action("开始录制", enabled = canRecord && !busy && (modeIndex!=3 || modernRecorder), primary = true) { confirmStart() }
             ActionRow {
                 Action("刷新麦克风 / 摄像头", enabled = !busy, modifier = Modifier.weight(1f)) { loadDevices() }
                 Action("管理摄像头 / 麦克风启停", modifier = Modifier.weight(1f)) {
@@ -210,6 +216,7 @@ class RecordingsActivity : MiuixActivity() {
         task {
             try {
                 val result = pinnedCall(origin, "recordings", JSONObject().put("action", "devices"))
+                modernRecorder=modernCapable && result.optInt("protocol")>=2
                 val mics = result.getJSONArray("microphones")
                 microphoneIds = listOf(-1) + (0 until mics.length()).map { mics.getJSONObject(it).getInt("id") }
                 microphoneNames = listOf("Windows 默认录音设备") +
@@ -225,18 +232,33 @@ class RecordingsActivity : MiuixActivity() {
         }
     }
 
+    internal fun selectMode(index:Int) {
+        if(index !in modes.indices)return
+        modeIndex=index
+        if(index==3){withSystemAudio=true;withAudio=true}
+        if(index==0)withSystemAudio=false
+    }
+
     internal fun confirmStart() {
         if (busy) return
         val duration = seconds.toIntOrNull()
         if (duration == null || duration !in 1..3600) { status("请输入 1–3600 秒", true); return }
-        val kind = listOf("audio", "screen", "camera")[modeIndex]
-        if (kind == "camera" && cameraIds.isEmpty()) { status("请先选择可用摄像头", true); return }
+        val kind = listOf("audio", "screen", "camera", "panorama")[modeIndex]
+        val systemAudio=modeIndex!=0 && withSystemAudio
+        if((kind=="panorama" || systemAudio) && !modernRecorder){status("请完整更新 Windows，包括 LanCmdRecord.exe，再使用全景／系统声音",true);return}
+        val systemLevel=if(systemAudio)systemGain.toIntOrNull() else 100
+        val microphoneLevel=if(kind!="audio" && withAudio && modernRecorder)microphoneGain.toIntOrNull() else 100
+        if(systemLevel==null || systemLevel !in 0..200 || microphoneLevel==null || microphoneLevel !in 0..200){status("录制音量须为 0–200%",true);return}
+        if (kind in listOf("camera","panorama") && cameraIds.isEmpty()) { status("请先选择可用摄像头", true); return }
         val params = JSONObject().put("action", "start").put("mode", kind).put("seconds", duration)
             .put("audio", kind == "audio" || withAudio)
             .put("microphone", microphoneIds.getOrElse(microphoneIndex) { -1 })
             .put("camera", cameraIds.getOrElse(cameraIndex) { 0 })
+            .put("system_audio",systemAudio).put("system_gain",systemLevel).put("microphone_gain",microphoneLevel).put("corner",corner)
+        val sources=listOfNotNull(if(kind in listOf("screen","panorama"))"电脑桌面" else null,if(kind in listOf("camera","panorama"))"摄像头" else null,
+            if(systemAudio)"系统声音 $systemLevel%" else null,if(kind=="audio" || withAudio)"麦克风 $microphoneLevel%" else null).joinToString("＋")
         WorkspaceDialog.Builder(this).setTitle("开始录制电脑？")
-            .setMessage("${modes[modeIndex]}，最长 $duration 秒。\n请确认设备和录制范围，文件保存在电脑，可随时手动停止。")
+            .setMessage("$sources，最长 $duration 秒。\n请确认设备和录制范围，文件保存在电脑，可随时手动停止。")
             .setNegativeButton("取消", null)
             .setPositiveButton("开始") { _, _ ->
                 if (!busy) {
@@ -286,7 +308,7 @@ class RecordingsActivity : MiuixActivity() {
                 records = (0 until items.length()).map { index ->
                     val record = items.getJSONObject(index)
                     val mode = record.getString("mode")
-                    val name = when (mode) { "audio" -> "环境录音"; "screen" -> "屏幕录制"; else -> "摄像头录制" }
+                    val name = when (mode) { "audio" -> "环境录音"; "screen" -> "屏幕录制"; "panorama" -> "全景录制"; else -> "摄像头录制" }
                     val state = record.getString("status")
                     val date = DateFormat.getDateTimeInstance()
                         .format(Date((record.getDouble("created") * 1000).toLong()))
@@ -301,7 +323,8 @@ class RecordingsActivity : MiuixActivity() {
                             "interrupted" -> "曾被中断"; else -> "失败"
                         },
                         detail = "$date · ${FileTransfer.humanSize(record.optLong("size"))} · 最长 ${record.optInt("seconds")} 秒" +
-                            if (record.optBoolean("audio") && name != "环境录音") " · 含麦克风声音" else "",
+                            (if (record.optBoolean("audio") && name != "环境录音") " · 麦克风" else "") +
+                            (if(record.optBoolean("system_audio"))" · 系统声音" else ""),
                         reason = when (record.optString("reason")) {
                             "size_limit" -> "已达到单文件大小上限"
                             "disk_space" -> "磁盘空间不足，已提前停止"
@@ -317,7 +340,7 @@ class RecordingsActivity : MiuixActivity() {
 
     override fun onStart() {
         super.onStart()
-        poll = lifecycleScope.launch { while (isActive) { refresh(); delay(2000) } }
+        poll = lifecycleScope.launch { while (isActive) { if(canRecord)refresh(); delay(2000) } }
     }
 
     override fun onStop() { poll?.cancel(); super.onStop() }

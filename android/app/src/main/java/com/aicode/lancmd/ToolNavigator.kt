@@ -34,7 +34,8 @@ object ToolNavigator {
         Tool("系统与应用","网络与蓝牙","热点密码与客户端、Wi-Fi 连接、蓝牙配对和网卡 DNS",R.drawable.ic_history,NetworkManagementActivity::class.java),
         Tool("系统与应用","注册表编辑器","浏览、编辑和恢复备份",R.drawable.ic_terminal,RegistryActivity::class.java),
         Tool("系统与应用","浏览器","向电脑发送网址",R.drawable.ic_browser,BrowserActivity::class.java),
-        Tool("录制与自动化","录音与录屏","麦克风、屏幕和摄像头视频录制",R.drawable.ic_camera,RecordingsActivity::class.java),
+        Tool("录制与自动化","录音与录屏","麦克风、系统声音、屏幕、摄像头和全景录制",R.drawable.ic_camera,RecordingsActivity::class.java),
+        Tool("录制与自动化","全景录制","桌面、摄像头小窗、系统声音与麦克风",R.drawable.ic_camera,RecordingsActivity::class.java,"panorama"),
         Tool("录制与自动化","手势回放","手势板、保存和延迟播放",R.drawable.ic_keyboard,GesturesActivity::class.java),
         Tool("录制与自动化","延迟命令","按顺序执行命令列表",R.drawable.ic_history,CommandsActivity::class.java)
     )

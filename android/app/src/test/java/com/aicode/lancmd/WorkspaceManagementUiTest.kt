@@ -62,7 +62,10 @@ class WorkspaceManagementUiTest {
                 try { waitFor{stub.requests.any{it.optString("action")=="freeze"} && page.note.contains("冻结 1")} }
                 catch(error:Throwable){throw AssertionError("冻结后的状态=${page.note}; RPC=${stub.requests}",error)}
                 assertEquals("C:\\Apps\\demo.exe",stub.requests.single{it.optString("action")=="freeze"}.getString("path"))
-                compose.onNodeWithText("解冻").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
+                // Inserting a freeze row keeps the app row as the lazy-list
+                // anchor. The new row may be above the composed viewport.
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("解冻"))
+                compose.onNodeWithText("解冻").performSemanticsAction(SemanticsActions.OnClick){it()}
                 waitFor{stub.requests.any{it.optString("action")=="resume"} && page.note.contains("冻结 0")}
                 assertEquals("held",stub.requests.single{it.optString("action")=="resume"}.getString("freeze_id"))
             }finally{controller.pause().stop().destroy()}
@@ -83,7 +86,10 @@ class WorkspaceManagementUiTest {
                 compose.onNodeWithText("应用列表正在后台加载，不会阻止解冻或返回。").assertExists()
                 stub.finishJob=true
                 waitFor{page.note.contains("已暂停") && page.note.contains("冻结 1")}
-                compose.onNodeWithText("解冻").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
+                // Inserting a freeze row keeps the app row as the lazy-list
+                // anchor. The new row may be above the composed viewport.
+                compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("解冻"))
+                compose.onNodeWithText("解冻").performSemanticsAction(SemanticsActions.OnClick){it()}
                 waitFor{page.note.contains("已恢复") && page.note.contains("冻结 0")}
                 compose.onNodeWithText("关闭").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
                 assertFalse(stub.requests.any{it.optString("operation")=="close"})

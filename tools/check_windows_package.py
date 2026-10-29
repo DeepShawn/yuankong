@@ -66,6 +66,16 @@ class PackagedStartupTest(unittest.TestCase):
                     raise
                 time.sleep(.2)
 
+    def test_packaged_recorder_encodes_and_decodes_panorama_and_stereo_sources(self):
+        media=self.folder/'encoded panorama'
+        media.mkdir(exist_ok=True)
+        result=subprocess.run([str(self.package/'LanCmdRecord.exe'),'self-test',str(media)],cwd=self.folder,
+                              env=self.env,capture_output=True,timeout=45)
+        self.assertEqual(0,result.returncode,(result.stdout+result.stderr).decode('utf-8','replace'))
+        report=json.loads(result.stdout)
+        self.assertTrue(report['panorama_decode']);self.assertTrue(report['stereo_mix'])
+        self.assertTrue((media/'panorama.mp4').is_file())
+
     def setUp(self):
         self.state = self.folder / uuid.uuid4().hex
         self.state.mkdir()
@@ -95,7 +105,7 @@ class PackagedStartupTest(unittest.TestCase):
                 capabilities = call("capabilities")
                 self.assertEqual(self.display_version, capabilities["version"])
                 self.assertEqual(self.version, capabilities['build_version'])
-                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network", "network_management", "network_device_state", "hotspot_client_access", "hotspot_adapter_selection", "network_password", "network_batch", "hotspot_timer", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"):
+                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network", "network_management", "network_device_state", "hotspot_client_access", "hotspot_adapter_selection", "network_password", "network_batch", "hotspot_timer", "panorama_recording", "system_audio_recording", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"):
                     self.assertIn(feature, capabilities["features"])
                 gate=call('network',action='auth_status')
                 self.assertTrue(gate['requires_password']);self.assertIsInstance(gate['admin'],bool)
