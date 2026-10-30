@@ -30,7 +30,7 @@ class DelayTest(unittest.TestCase):
         self.assertEqual(0,restarted.request({'action':'settings'},SimpleNamespace(client_id='other'),Error)['settings']['command'])
     def test_queries_streaming_stop_recovery_and_single_item_schedules_never_stack(self):
         self.configure(600,600)
-        for cmd,q in [('screen',{}),('touch',{'action':'frame'}),('input',{}),('audio',{'action':'set'}),('upload',{'action':'begin'}),('download',{}),('file_schedule',{'action':'add'}),('delays',{'action':'cancel'}),('network',{'action':'unlock'}),('recordings',{'action':'stop'}),('announcements',{'action':'pause'}),('app_freeze',{'action':'submit','operation':'resume'}),('app_locks',{'action':'unlock'}),('file_locks',{'action':'unlock'}),('ls',{})]:
+        for cmd,q in [('screen',{}),('touch',{'action':'frame'}),('input',{}),('audio',{'action':'set'}),('upload',{'action':'begin'}),('download',{}),('file_schedule',{'action':'add'}),('delays',{'action':'cancel'}),('network',{'action':'unlock'}),('network',{'action':'submit','operation':'restart_after','params':{'seconds':60}}),('devices',{'action':'policy','mode':'allow'}),('recordings',{'action':'stop'}),('announcements',{'action':'pause'}),('app_freeze',{'action':'submit','operation':'resume'}),('app_locks',{'action':'unlock'}),('file_locks',{'action':'unlock'}),('ls',{})]:
             with self.subTest(cmd=cmd):self.assertIsNone(self.intercept(cmd,**q))
         self.assertIsNone(self.intercept('exec',line='now',delay_override=0))
         self.assertIsNone(self.intercept('commands',action='add',items=[{'line':'x','delay':3}]))

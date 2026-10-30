@@ -12,10 +12,11 @@ import java.io.IOException
 /** Windows owns remote countdowns; transfers and phone app launches need a live phone. */
 object FileDelay {
     fun seconds(context:Context)=context.getSharedPreferences("file-operations",Context.MODE_PRIVATE).getInt("delay",0).coerceIn(0,86400)
+    fun label(context:Context)=if(context.getSharedPreferences("file-operations",Context.MODE_PRIVATE).contains("delay"))"${seconds(context)} 秒" else "跟随全局"
     fun choose(context:Context,changed:()->Unit={}) {
         val input=EditText(context).apply { inputType=InputType.TYPE_CLASS_NUMBER;setSingleLine();setText(seconds(context).toString());contentDescription="文件操作延迟秒数" }
         val dialog=WorkspaceDialog.Builder(context).setTitle("文件操作延迟（秒）")
-            .setMessage("0–86400 秒，0 立即执行。此设置用于后续文件操作；电脑端由 Windows 计时，上传、下载、手机 WPS 需要手机保持连接。")
+            .setMessage("未单独设置时跟随全局操作延迟。保存 0–86400 秒可覆盖全局，保存 0 即立即执行；选择“跟随全局”可清除覆盖。电脑端由 Windows 计时，上传、下载、手机 WPS 需要手机保持连接。")
             .setView(input).setNegativeButton("取消",null).setNeutralButton("跟随全局") { _,_ ->
                 context.getSharedPreferences("file-operations",Context.MODE_PRIVATE).edit().remove("delay").apply();changed()
             }.setPositiveButton("保存",null).create()

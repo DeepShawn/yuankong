@@ -74,7 +74,7 @@ object ToolNavigator {
             override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){render()}
             override fun afterTextChanged(s:Editable?){}
         })
-        body.addView(MaterialButton(activity).apply { text="文件操作延迟 · ${FileDelay.seconds(activity)} 秒";minHeight=dp(48);isAllCaps=false;cornerRadius=dp(14);setIconResource(R.drawable.ic_history);iconTint=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.accent));backgroundTintList=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.surface_variant));strokeWidth=dp(1);strokeColor=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.outline_soft));setTextColor(Themes.color(activity,R.color.accent));setOnClickListener { FileDelay.choose(activity) { text="文件操作延迟 · ${FileDelay.seconds(activity)} 秒" } } },LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(10) })
+        body.addView(MaterialButton(activity).apply { text="文件操作延迟 · ${FileDelay.label(activity)}";minHeight=dp(48);isAllCaps=false;cornerRadius=dp(14);setIconResource(R.drawable.ic_history);iconTint=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.accent));backgroundTintList=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.surface_variant));strokeWidth=dp(1);strokeColor=android.content.res.ColorStateList.valueOf(Themes.color(activity,R.color.outline_soft));setTextColor(Themes.color(activity,R.color.accent));setOnClickListener { FileDelay.choose(activity) { text="文件操作延迟 · ${FileDelay.label(activity)}" } } },LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(10) })
         render();dialog.show()
     }
 }

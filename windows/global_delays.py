@@ -34,7 +34,8 @@ def category(command,q):
     if command=='privacy_devices' and (q.get('enabled') is True or q.get('muted') is False):return None
     if command=='app_freeze' and action=='submit' and q.get('operation') not in ('freeze','close'):return None
     # Restoring a device / cancelling the hotspot timer must remain available.
-    if command=='network' and q.get('operation')=='cancel_restart':return None
+    if command=='network' and q.get('operation') in ('cancel_restart','restart_after'):return None
+    if command=='devices' and action=='policy' and q.get('mode')=='allow':return None
     return 'operation'
 
 

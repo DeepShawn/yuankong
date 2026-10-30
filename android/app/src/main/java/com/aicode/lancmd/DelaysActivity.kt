@@ -15,6 +15,7 @@ class DelaysActivity:MiuixActivity() {
     private var operationSeconds by mutableStateOf("0")
     internal var jobs by mutableStateOf<List<JSONObject>>(emptyList())
     private var supported by mutableStateOf(false)
+    private var ready by mutableStateOf(false)
     private var busy by mutableStateOf(false)
     private var poll:Job?=null
     override fun onCreate(state:Bundle?){
@@ -25,11 +26,12 @@ class DelaysActivity:MiuixActivity() {
             check(supported){"请完整更新 Windows 接收端以使用全局延迟"}
             val settings=pinnedCall(origin,"delays",JSONObject().put("action","settings")).getJSONObject("settings")
             commandSeconds=settings.optInt("command").toString();operationSeconds=settings.optInt("operation").toString()
-            refresh();startPoll();status("设置只影响本手机后续提交的请求；Windows 计时，手机断线继续。")
+            refresh();ready=true;startPoll();status("设置只影响本手机后续提交的请求；Windows 计时，手机断线继续。")
         }
     }
     @Composable private fun Screen()=FixedPage("全局命令与操作延迟") {
-        SectionCard {
+        if(!ready)Note("正在从电脑读取全局延迟设置…")
+        if(ready)SectionCard {
             Field("全局命令延迟（0–86400 秒）",commandSeconds,{commandSeconds=it.filter(Char::isDigit).take(5)})
             Field("全局操作延迟（0–86400 秒）",operationSeconds,{operationSeconds=it.filter(Char::isDigit).take(5)})
             ActionRow {

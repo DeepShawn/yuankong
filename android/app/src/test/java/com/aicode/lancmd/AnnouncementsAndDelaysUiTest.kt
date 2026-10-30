@@ -74,7 +74,7 @@ class AnnouncementsAndDelaysUiTest {
         Stub().use{stub->
             stub.install();val c=Robolectric.buildActivity(DelaysActivity::class.java).setup()
             try {
-                waitFor{stub.requests.any{it.optString("action")=="settings"}}
+                waitFor{c.get().note.contains("设置只影响")}
                 compose.onNodeWithText("全局命令延迟（0–86400 秒）").performTextClearance();compose.onNodeWithText("全局命令延迟（0–86400 秒）").performTextInput("9")
                 compose.onNodeWithText("全局操作延迟（0–86400 秒）").performTextClearance();compose.onNodeWithText("全局操作延迟（0–86400 秒）").performTextInput("4")
                 compose.onNodeWithText("保存设置").performSemanticsAction(SemanticsActions.OnClick){it()}
