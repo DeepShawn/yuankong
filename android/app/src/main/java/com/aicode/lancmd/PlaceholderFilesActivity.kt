@@ -47,6 +47,7 @@ class PlaceholderFilesActivity : MiuixActivity() {
     internal var items by mutableStateOf<List<Item>>(emptyList())
     internal var busy by mutableStateOf(false)
     private var polling: Job? = null
+    private var confirmationOpen = false
     private var detailsExpanded by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -94,7 +95,7 @@ class PlaceholderFilesActivity : MiuixActivity() {
         super.onStart()
         polling = task {
             while (true) {
-                if (!busy) {
+                if (!busy && !confirmationOpen) {
                     try { refreshNow() }
                     catch (e: CancellationException) { throw e }
                     catch (e: Exception) { status(e.message ?: "读取占位任务失败", true) }
@@ -116,22 +117,26 @@ class PlaceholderFilesActivity : MiuixActivity() {
     }
 
     internal fun confirmCreate() {
-        if (busy) return
+        if (busy || confirmationOpen) return
         val path = targetPath.trim()
         if (path.isEmpty()) { status("请输入新文件完整路径", true); return }
         val bytes = runCatching { parseSize(sizeText) }.getOrNull()
         if (bytes == null) { status("请输入 0–500 GB，最多精确到 1 字节", true); return }
         val selectedMode = if (modeIndex == 1) "fast" else "stable"
         val modeName = if (selectedMode == "stable") "稳定" else "快速"
-        WorkspaceDialog.Builder(this).setTitle("创建并实际占用空间？")
+        // Reserve the action while confirmation is visible. A periodic status
+        // read must never make the positive-button tap silently disappear.
+        confirmationOpen = true
+        val dialog = WorkspaceDialog.Builder(this).setTitle("创建并实际占用空间？")
             .setMessage(
                 "$path\n\n大小：$sizeText GB（$bytes 字节）\n模式：$modeName\n" +
                     "将实际分配磁盘空间，至少保留 1 GB 可用空间。可在任务中取消；已完成文件可在文件管理删除。"
             )
             .setNegativeButton("取消", null)
             .setPositiveButton("创建") { _, _ ->
-                if (!busy) task {
-                    busy = true
+                confirmationOpen = false
+                busy = true
+                task {
                     try {
                         val features = pinnedCall(origin, "capabilities").optJSONArray("features")
                         check(
@@ -147,7 +152,9 @@ class PlaceholderFilesActivity : MiuixActivity() {
                     } finally { busy = false }
                     refreshNow()
                 }
-            }.show()
+            }.create()
+        dialog.setOnDismissListener { confirmationOpen = false }
+        dialog.show()
     }
 
     internal fun cancel(item: Item) {
@@ -182,7 +189,7 @@ class PlaceholderFilesActivity : MiuixActivity() {
     }
 
     private suspend fun refreshNow() {
-        if (busy) return
+        if (busy || confirmationOpen) return
         busy = true
         try {
             val result = pinnedCall(origin, "placeholders")
