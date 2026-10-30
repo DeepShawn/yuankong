@@ -66,6 +66,7 @@ python -m PyInstaller --noconfirm --clean --onefile --noconsole ^
     --hidden-import recordings ^
     --hidden-import gestures ^
     --hidden-import text_editor ^
+    --hidden-import file_locks ^
     --hidden-import app_locks ^
     --hidden-import registry_editor ^
     --hidden-import task_manager ^
@@ -105,6 +106,7 @@ python -m PyInstaller --noconfirm --clean --onefile --console ^
     --hidden-import recordings ^
     --hidden-import gestures ^
     --hidden-import text_editor ^
+    --hidden-import file_locks ^
     --hidden-import app_locks ^
     --hidden-import registry_editor ^
     --hidden-import task_manager ^

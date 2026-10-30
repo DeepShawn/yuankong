@@ -45,6 +45,38 @@ class CatalogTest(unittest.TestCase):
             self.assertIsNone(executable("relative.exe"));self.assertIsNone(executable("http://example.test/app.exe"))
 
 
+class RuntimeCatalogTest(unittest.TestCase):
+    def test_runtime_scan_classifies_windows_keeps_office_and_attaches_verified_desktop_windows(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);system=root/'Windows';system.mkdir();apps=root/'Apps';apps.mkdir()
+            system_exe=system/'system.exe';office=apps/'office.exe';system_exe.write_bytes(b'exe');office.write_bytes(b'exe')
+            processes=[dict(pid=11,created='1',path=str(system_exe),name='system',can_terminate=False),
+                       dict(pid=22,created='2',path=str(office),name='Office',can_terminate=True)]
+            windows=[dict(handle='12',pid=22,title='Document',path=str(office),minimized=False),
+                     dict(handle='13',pid=22,title='Stale PID',path=str(system_exe.resolve()),minimized=False)]
+            backend=SimpleNamespace(records=lambda:(_ for _ in ()).throw(AssertionError('runtime must not rescan registry')))
+            labels=SimpleNamespace(lock=threading.RLock(),cached=dict(items=[dict(path=str(office.resolve()),name='Office Writer',publisher='Microsoft Corporation',version='1.0')]))
+            catalog=AppCatalog(lambda value:None,SimpleNamespace(list=lambda:processes),backend,runtime=True,
+                               windows=SimpleNamespace(windows=lambda:windows),labels=labels)
+            with mock.patch.dict(os.environ,{'SystemRoot':str(system)}):
+                result=catalog.request({},Error)
+            by_name={item['name']:item for item in result['items']}
+            self.assertEqual('windows',by_name['system']['kind'])
+            self.assertEqual('third_party',by_name['Office Writer']['kind'])
+            self.assertEqual('Microsoft Corporation',by_name['Office Writer']['publisher'])
+            self.assertEqual(['Document'],[w['title'] for w in by_name['Office Writer']['windows']])
+            self.assertEqual(1,by_name['Office Writer']['running'])
+            processes.clear();catalog.updated=0
+            result=catalog.request({'refresh':True},Error)
+            self.assertEqual([],result['items'])
+
+    def test_unverified_catalog_entries_are_not_misreported_as_third_party(self):
+        result=AppCatalog(lambda value:None,SimpleNamespace(list=lambda:[]),
+                          SimpleNamespace(records=lambda:[dict(name='Unresolved metadata',path='')])).request({},Error)
+        self.assertEqual('unknown',result['items'][0]['kind'])
+
+
 class FreezeTest(unittest.TestCase):
     def core(self):
         processes=[dict(pid=10,created="100",path="app.exe",can_terminate=True),dict(pid=20,created="200",path="app.exe",can_terminate=False)]

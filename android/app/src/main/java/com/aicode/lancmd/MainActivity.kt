@@ -120,6 +120,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
             ),
             "文件与设备" to listOf(
                 Tool("文件管理") { openFeature(StorageActivity::class.java) },
+                Tool("文件密码锁") { openFeature(FileLocksActivity::class.java) },
                 Tool("文件搜索") { openFeature(FileSearchActivity::class.java) },
                 Tool("U盘与设备") { openFeature(DevicesActivity::class.java) },
                 Tool("隐私设备") { openFeature(PrivacyDevicesActivity::class.java) }

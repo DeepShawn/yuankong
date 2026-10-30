@@ -532,7 +532,7 @@ class StorageActivity : MiuixActivity() {
         groups["编辑与属性"] = buildList {
             if (!dir) add(if (office) "手机 WPS 预览 / 编辑" else "编辑文本")
             if (!dir && name.substringAfterLast('.', "").lowercase() in listOf("jpg","jpeg","png","bmp")) add("设为桌面背景")
-            add("最后修改日期"); add("文件属性")
+            add("最后修改日期"); add("文件属性"); if(!dir)add("文件密码锁")
         }
         groups["传输与整理"] = buildList {
             if (!dir) add("下载到手机")
@@ -581,6 +581,7 @@ class StorageActivity : MiuixActivity() {
                 ) { status(it) }
                 status(response.optString("notice", "已向电脑发送打开请求"))
             }
+            "文件密码锁" -> if(sourceReady())startActivity(Intent(this,FileLocksActivity::class.java).putExtra("path",selected))
             "最后修改日期" -> modifyDate(item, selected)
             "文件属性" -> WorkspaceDialog.Builder(this).setTitle(item.optString("name")).setMessage(
                 "$selected\n\n${if (item.optBoolean("dir")) "文件夹" else FileTransfer.humanSize(item.optLong("size"))}\n" +

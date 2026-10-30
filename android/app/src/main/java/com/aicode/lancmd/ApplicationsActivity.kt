@@ -17,6 +17,10 @@ import java.io.IOException
 /** Inventory reads and process operations have independent, visible progress. */
 class ApplicationsActivity:MiuixActivity() {
     private var apps by mutableStateOf<List<JSONObject>>(emptyList())
+    private var runtimeApps by mutableStateOf<List<JSONObject>>(emptyList())
+    private var category by mutableIntStateOf(0)
+    private var runtimeSupported by mutableStateOf(false)
+    private var runtimePoll: Job? = null
     private var freezes by mutableStateOf<List<JSONObject>>(emptyList())
     private var query by mutableStateOf("")
     private var busy by mutableStateOf(false)
@@ -34,7 +38,7 @@ class ApplicationsActivity:MiuixActivity() {
         task {
             val features=pinnedCall(origin,"capabilities",timeout=6000).optJSONArray("features")
             fun supports(name:String)=features!=null && (0 until features.length()).any{features.optString(it)==name}
-            jobsSupported=supports("app_freeze_jobs");closeSupported=supports("app_close")
+            jobsSupported=supports("app_freeze_jobs");closeSupported=supports("app_close");runtimeSupported=supports("app_runtime")
             refresh()
             try {
                 val result=pinnedCall(origin,"app_freeze",JSONObject().put("action",if(jobsSupported)"state" else "list"),6000)
@@ -71,14 +75,36 @@ class ApplicationsActivity:MiuixActivity() {
             }finally{catalogLoading=false}
         }
     }
+    private fun refreshRuntime() {
+        runtimePoll?.cancel()
+        if (!runtimeSupported || category == 0) return
+        runtimePoll = task {
+            while (category != 0) {
+                val result = pinnedCall(origin,"app_runtime",JSONObject().put("background",true),6000)
+                runtimeApps = array(result,"items")
+                if (result.optString("error").isNotBlank()) error(result.optString("error"))
+                delay(if(result.optBoolean("loading")) 500 else 3000)
+            }
+        }
+    }
     @Composable private fun Screen() = FixedPage(if(intent.getBooleanExtra("selectForLock",false))"选择要锁定的应用" else "应用中心") {
         val listState=rememberLazyListState()
         LaunchedEffect(resultSequence){if(resultSequence>0)listState.scrollToItem(0)}
-        val shown=remember(apps,query) {apps.filter{(it.optString("name")+it.optString("path")+it.optString("publisher")).contains(query,true)}}
+        val shown=remember(apps,runtimeApps,category,query) {
+            (if(category==0)apps else runtimeApps).filter {
+                (category!=1 || it.optString("kind")=="third_party") &&
+                (category!=2 || (it.optJSONArray("windows")?.length() ?: 0)>0) &&
+                (it.optString("name")+it.optString("path")+it.optString("publisher")+it.optJSONArray("windows").toString()).contains(query,true)
+            }
+        }
         SectionCard {
             Field("名称、路径或发布者",query,{query=it})
+            if(runtimeSupported)ChoiceField(listOf("所有应用","运行中的第三方软件","当前桌面窗口"),"管理范围",category) {
+                category=it;refreshRuntime()
+            }
+            if(category!=0)Note("自动刷新运行状态；按 EXE 路径识别 Windows 系统目录，无法验证的条目不归为第三方。")
             ActionRow {
-                Action("刷新应用列表",enabled=!catalogLoading,modifier=Modifier.weight(1f)){refresh(true)}
+                Action("刷新应用列表",enabled=!catalogLoading,modifier=Modifier.weight(1f)){if(category==0)refresh(true) else refreshRuntime()}
                 Note("${shown.size} 个应用 · 冻结 ${freezes.size}",modifier=Modifier.weight(1f))
             }
         }
@@ -94,6 +120,17 @@ class ApplicationsActivity:MiuixActivity() {
             items(shown,key={"app:"+it.optString("id")}) {item ->SectionCard {
                 InfoItem(item.optString("name"),listOf(item.optString("publisher"),item.optString("version"),item.optString("path")).filter{it.isNotBlank()}.joinToString("\n"))
                 if(!item.optBoolean("can_lock"))Note(item.optString("reason"))
+                val windowList=item.optJSONArray("windows")
+                if(windowList!=null && windowList.length()>0) {
+                    for(index in 0 until windowList.length()) {
+                        val window=windowList.getJSONObject(index)
+                        InfoItem(window.optString("title"),if(window.optBoolean("minimized"))"窗口已最小化" else "桌面窗口")
+                        ActionRow {
+                            Action("还原到电脑",enabled=!busy,modifier=Modifier.weight(1f)){windowAction(window,"activate")}
+                            Action("最小化窗口",enabled=!busy,modifier=Modifier.weight(1f)){windowAction(window,"minimize")}
+                        }
+                    }
+                }
                 ActionRow {
                     Action(if(intent.getBooleanExtra("selectForLock",false))"选择" else "应用锁",enabled=!busy && item.optBoolean("can_lock"),modifier=Modifier.weight(1f)) {
                         if(intent.getBooleanExtra("selectForLock",false))task {pinnedCall(origin,"capabilities");setResult(RESULT_OK,Intent().putExtra("path",item.optString("path")));finish()}
@@ -114,6 +151,19 @@ class ApplicationsActivity:MiuixActivity() {
                 else->"\n将在电脑当前桌面打开。"},
             onDismiss={pending=null},onConfirm={pending=null;operate(action,item)})}
     }
+    private fun windowAction(window:JSONObject,action:String) {
+        if(busy)return
+        busy=true
+        task {
+            try {
+                pinnedCall(origin,"apps",JSONObject().put("action",action).put("handle",window.getString("handle")).put("pid",window.getInt("pid")))
+                status(if(action=="minimize")"已请求最小化，仍可从电脑任务栏还原" else "已请求在电脑还原窗口")
+                refreshRuntime()
+            } finally {busy=false}
+        }
+    }
+    override fun onStart() {super.onStart();refreshRuntime()}
+    override fun onStop() {runtimePoll?.cancel();super.onStop()}
     private fun showResult(action:String,result:JSONObject) {
         if(result.has("items"))freezes=array(result,"items")
         val errors=result.optJSONArray("errors")

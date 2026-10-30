@@ -2,8 +2,8 @@
 # PyInstaller Windows 版本资源。让 exe 属性面板显示名称/版本/说明。
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(3, 6, 0, 0),
-    prodvers=(3, 6, 0, 0),
+    filevers=(3, 12, 0, 0),
+    prodvers=(3, 12, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -18,12 +18,12 @@ VSVersionInfo(
           u'080404b0',
           [StringStruct(u'CompanyName', u'LanCmd'),
            StringStruct(u'FileDescription', u'LanCmd 局域网命令接收端'),
-           StringStruct(u'FileVersion', u'3.6.0.0'),
+           StringStruct(u'FileVersion', u'3.12.0.0'),
            StringStruct(u'InternalName', u'LanCmdAgent'),
            StringStruct(u'LegalCopyright', u'LanCmd'),
            StringStruct(u'OriginalFilename', u'LanCmdAgent.exe'),
            StringStruct(u'ProductName', u'LanCmd'),
-           StringStruct(u'ProductVersion', u'3.6.0.0')])
+           StringStruct(u'ProductVersion', u'3.12.0.0')])
       ]
     ),
     VarFileInfo([VarStruct(u'Translation', [2052, 1200])])

@@ -118,6 +118,11 @@ class PlaceholderUiTest {
             // Do not confirm creation until that read has actually completed.
             waitFor { stub.requests.any { it.optString("cmd")=="placeholders" } && !page.busy }
             page.confirmCreate();shadowOf(Looper.getMainLooper()).idle()
+            val reads=stub.requests.count { it.optString("cmd")=="placeholders" }
+            // The status timer must not steal the action while its modal
+            // confirmation is open, even after its next scheduled poll.
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(1700))
+            assertEquals(reads,stub.requests.count { it.optString("cmd")=="placeholders" })
             latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             try { waitFor { page.note.contains("旧版不支持稳定模式") } }
             catch(error:Throwable) { throw AssertionError("状态=${page.note}；RPC=${stub.requests}",error) }

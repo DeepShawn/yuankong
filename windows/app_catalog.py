@@ -69,25 +69,62 @@ class NativeCatalog:
         return records
 
 
+def application_kind(path, system_root=None):
+    """Classify by a verified executable location, not by a Microsoft publisher string.
+
+    Office and other installed Microsoft products remain third-party applications.
+    Unresolved entries cannot honestly be identified as either kind.
+    """
+    if path is None:return "unknown"
+    root=system_root or os.environ.get("SystemRoot") or os.environ.get("WINDIR")
+    if root:
+        root=Path(root).resolve()
+        if path==root or root in path.parents:return "windows"
+    return "third_party"
+
+
 class AppCatalog:
-    def __init__(self,lock_target,processes=None,backend=None,protected=()):
+    def __init__(self,lock_target,processes=None,backend=None,protected=(),runtime=False,windows=None,labels=None):
         self.lock_target=lock_target;self.processes=processes;self.backend=backend
         self.protected=protected
+        self.runtime=runtime;self.windows=windows;self.labels=labels
         self.lock=threading.RLock();self.cached=None;self.updated=0
         self.building=False;self.failure="";self.done=None
 
     def _scan(self):
-        if self.backend is None:
+        if self.backend is None and not self.runtime:
             if os.name!="nt":raise ValueError("应用列表仅支持 Windows")
             self.backend=NativeCatalog()
         if self.processes is None:
             from task_manager import NativeProcesses
             self.processes=NativeProcesses(self.protected)
-        running=self.processes.list();by_path={}
+        running=self.processes.list();by_path={};windows_by_pid={}
+        if self.runtime:
+            if self.windows is None and os.name=="nt":
+                from desktop_apps import DesktopApps
+                self.windows=DesktopApps()
+            for window in self.windows.windows() if self.windows is not None else []:
+                window_path=executable(window.get("path",""))
+                if window_path:
+                    windows_by_pid.setdefault(window["pid"],[]).append(dict(window,path=str(window_path)))
         for process in running:
             path=executable(process.get("path",""))
             if path:by_path.setdefault(os.path.normcase(str(path)).casefold(),[]).append(process)
-        records=self.backend.records()+[dict(name=p.get("name",""),path=p.get("path",""),source="running") for p in running if p.get("path")]
+        records=([] if self.runtime else self.backend.records())+[dict(name=p.get("name",""),path=p.get("path",""),source="running") for p in running if p.get("path")]
+        if self.runtime and self.labels is not None:
+            # Reuse verified installed names without rescanning the registry on
+            # every live refresh. Match the full executable path, never a PID or
+            # basename alone (several products can have the same helper name).
+            with self.labels.lock:
+                labels={os.path.normcase(item["path"]).casefold():item for item in (self.labels.cached or {}).get("items",[]) if item.get("path")}
+            for record in records:
+                # Native process paths can use an 8.3/short-directory spelling;
+                # the installed catalog stores the resolved long file path.
+                resolved=executable(record.get("path",""))
+                label=labels.get(os.path.normcase(str(resolved)).casefold()) if resolved else None
+                if label:
+                    for field in ("name","publisher","version"):
+                        if label.get(field):record[field]=label[field]
         items={}
         for record in records:
             name=str(record.get("name","")).strip()[:200]
@@ -108,7 +145,9 @@ class AppCatalog:
                 publisher=str(record.get("publisher",""))[:200],version=str(record.get("version",""))[:200],
                 source=record.get("source","installed"),can_lock=can_lock,reason=reason,
                 processes=[dict(pid=p["pid"],created=p["created"],can_freeze=bool(p.get("can_terminate"))) for p in processes],
-                running=len(processes))
+                running=len(processes),kind=application_kind(path),
+                windows=[window for process in processes for window in windows_by_pid.get(process["pid"],[])
+                         if window.get("path") and os.path.normcase(window["path"]).casefold()==os.path.normcase(str(path)).casefold()])
             if len(items)>=2000:break
         return dict(items=sorted(items.values(),key=lambda item:item["name"].casefold()),updated=time.time())
 
@@ -127,7 +166,7 @@ class AppCatalog:
             force=q.get("refresh",False);background=q.get("background",False)
             if type(force)is not bool or type(background)is not bool:raise ValueError("刷新参数无效")
             with self.lock:
-                fresh=self.cached is not None and time.monotonic()-self.updated<30
+                fresh=self.cached is not None and time.monotonic()-self.updated<(3 if self.runtime else 30)
                 if not self.building and (force or not fresh and not self.failure):
                     self.building=True;self.failure="";self.done=threading.Event()
                     threading.Thread(target=self._build,args=(self.done,),name="app-catalog",daemon=True).start()

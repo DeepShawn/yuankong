@@ -169,7 +169,7 @@ class _FileSecurityApi:
         finally:
             if desired.value:self.kernel.LocalFree(desired)
 
-    def plan(self,path):
+    def plan(self,path,permissions=0x20,everyone=False):
         handle,fd=self.open(path)
         descriptor=ctypes.c_void_p();token=self.w.HANDLE();new_acl=ctypes.c_void_p();sid_text=ctypes.c_void_p()
         try:
@@ -186,7 +186,16 @@ class _FileSecurityApi:
             sid=ctypes.cast(buffer,ctypes.POINTER(ctypes.c_void_p)).contents.value
             if not self.advapi.ConvertSidToStringSidW(sid,ctypes.byref(sid_text)):
                 raise ctypes.WinError(ctypes.get_last_error())
-            rule=self.ExplicitAccess();rule.permissions=0x20;rule.mode=3
+            if everyone:
+                # The file lock denies data access, while keeping WRITE_DAC for
+                # recovery. Use World, not just the elevated receiver account.
+                world=ctypes.create_string_buffer(68);world_size=self.w.DWORD(len(world))
+                self.advapi.CreateWellKnownSid.argtypes=[ctypes.c_int,ctypes.c_void_p,ctypes.c_void_p,ctypes.POINTER(self.w.DWORD)]
+                self.advapi.CreateWellKnownSid.restype=self.w.BOOL
+                if not self.advapi.CreateWellKnownSid(1,None,world,ctypes.byref(world_size)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                sid=ctypes.addressof(world)
+            rule=self.ExplicitAccess();rule.permissions=permissions;rule.mode=3
             rule.trustee.form=0;rule.trustee.type=1;rule.trustee.name=sid
             result=self.advapi.SetEntriesInAclW(1,ctypes.byref(rule),dacl,ctypes.byref(new_acl))
             if result:raise ctypes.WinError(result)
@@ -198,7 +207,7 @@ class _FileSecurityApi:
             # Preserve the source's inheritance/protection state; owner/group and
             # SACL never participate in the plan or the subsequent write.
             desired.control|=self.control(descriptor)&0x1500
-            return dict(sid=ctypes.wstring_at(sid_text),original=original,applied=self.sddl(ctypes.byref(desired)))
+            return dict(sid="S-1-1-0" if everyone else ctypes.wstring_at(sid_text),original=original,applied=self.sddl(ctypes.byref(desired)))
         finally:
             if sid_text.value:self.kernel.LocalFree(sid_text)
             if new_acl.value:self.kernel.LocalFree(new_acl)

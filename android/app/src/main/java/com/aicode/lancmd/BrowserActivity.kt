@@ -43,7 +43,8 @@ class BrowserActivity : MiuixActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        address = savedInstanceState?.getString("address").orEmpty()
+        address = savedInstanceState?.getString("address")
+            ?: SharedWebLink.extract(intent.getStringExtra("shared_url")).orEmpty()
         linkName = savedInstanceState?.getString("linkName").orEmpty()
         selectedBrowser = savedInstanceState?.getString("browser") ?: "default"
         status("发送 HTTP / HTTPS 网址，由电脑浏览器打开。浏览器窗口会按打开网页的正常行为显示。")
@@ -60,6 +61,7 @@ class BrowserActivity : MiuixActivity() {
                 browsers.getOrNull(index)?.let{selectedBrowser=it.id}
             }
             Action("在电脑打开网址",primary=true) {open(address)}
+            Note("手机浏览器中点分享 → 发送网页到电脑 · LanCmd，即可填入当前网页。发送的是网址，不迁移登录状态。")
         }
         SectionCard("保存到手机") {
             Field("名称（留空用网址主机名）",linkName,{linkName=it})

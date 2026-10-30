@@ -105,7 +105,7 @@ class PackagedStartupTest(unittest.TestCase):
                 capabilities = call("capabilities")
                 self.assertEqual(self.display_version, capabilities["version"])
                 self.assertEqual(self.version, capabilities['build_version'])
-                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network", "network_management", "network_device_state", "hotspot_client_access", "hotspot_adapter_selection", "network_password", "network_batch", "hotspot_timer", "panorama_recording", "system_audio_recording", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"):
+                for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network", "network_management", "network_device_state", "hotspot_client_access", "hotspot_adapter_selection", "network_password", "network_batch", "hotspot_timer", "panorama_recording", "system_audio_recording", "app_runtime", "file_locks", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"):
                     self.assertIn(feature, capabilities["features"])
                 gate=call('network',action='auth_status')
                 self.assertTrue(gate['requires_password']);self.assertIsInstance(gate['admin'],bool)
