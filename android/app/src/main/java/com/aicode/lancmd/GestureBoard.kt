@@ -2,6 +2,7 @@ package com.aicode.lancmd
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Bitmap
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -11,8 +12,10 @@ import android.view.View
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** A local blank canvas. Recording never sends pointer input to the PC. */
+/** A local screenshot-backed canvas. Recording never sends input to the PC. */
 class GestureBoard(context: Context) : View(context) {
+    var desktopFrame: Bitmap? = null
+        set(value) { field = value; invalidate() }
     var dragMode = true
     var changed: (() -> Unit)? = null
     var aspect = 16f / 9f
@@ -34,6 +37,7 @@ class GestureBoard(context: Context) : View(context) {
     fun load(value: JSONArray) { finish(); events = JSONArray(value.toString()); invalidate(); changed?.invoke() }
     fun begin() { events = JSONArray(); recording = true; started = SystemClock.elapsedRealtime(); lastMs = -20; finger = -1; pressed = false; invalidate(); changed?.invoke() }
     fun finish() {
+        if (!recording && !pressed) return
         if (pressed) append("up", lastX, lastY, (SystemClock.elapsedRealtime() - started).coerceAtMost(300000))
         pressed = false; finger = -1; recording = false; invalidate(); changed?.invoke()
     }
@@ -89,9 +93,10 @@ class GestureBoard(context: Context) : View(context) {
         val unit=resources.displayMetrics.density
         paint.style = Paint.Style.FILL; paint.color = Themes.color(context,R.color.surface_variant); canvas.drawRoundRect(rect, 24*unit, 24*unit, paint)
         paint.color = Themes.color(context,R.color.outline);paint.strokeWidth=unit
+        desktopFrame?.let { canvas.drawBitmap(it, null, rect, paint) }
         val spacing=24*unit
         var gx=rect.left+spacing
-        while(gx<rect.right-spacing/2) {
+        while(desktopFrame == null && gx<rect.right-spacing/2) {
             var gy=rect.top+spacing
             while(gy<rect.bottom-spacing/2) {canvas.drawCircle(gx,gy,unit,paint);gy+=spacing}
             gx+=spacing
@@ -105,7 +110,7 @@ class GestureBoard(context: Context) : View(context) {
             if (e.getString("action") == "down") canvas.drawCircle(x, y, 5 * resources.displayMetrics.density, paint)
         }
         canvas.drawPath(path, paint)
-        if (events.length() == 0) {
+        if (events.length() == 0 && desktopFrame == null) {
             paint.style = Paint.Style.FILL; paint.color = Themes.color(context,R.color.dim); paint.textAlign = Paint.Align.CENTER; paint.textSize = 14 * resources.displayMetrics.scaledDensity
             canvas.drawText(if (recording) "在此移动、点击或拖动" else "点击「开始记录」后在此操作", rect.centerX(), rect.centerY(), paint)
         }

@@ -27,6 +27,8 @@ class DesktopApps:
         self.kernel.OpenProcess.restype = w.HANDLE
         self.kernel.QueryFullProcessImageNameW.argtypes = [w.HANDLE, w.DWORD, w.LPWSTR, ctypes.POINTER(w.DWORD)]
         self.kernel.CloseHandle.argtypes = [w.HANDLE]
+        self.dwm = ctypes.WinDLL("dwmapi", use_last_error=True)
+        self.dwm.DwmGetWindowAttribute.argtypes = [w.HWND, w.DWORD, ctypes.c_void_p, w.DWORD]
 
     def windows(self):
         items = []
@@ -34,6 +36,9 @@ class DesktopApps:
         def collect(handle, unused):
             if handle in excluded or not self.user.IsWindowVisible(handle):
                 return True
+            cloaked = self.w.DWORD()
+            if self.dwm.DwmGetWindowAttribute(handle, 14, ctypes.byref(cloaked), ctypes.sizeof(cloaked)) == 0 and cloaked.value:
+                return True  # Task-view desktops and suspended UWP placeholders are not current desktop windows.
             length = self.user.GetWindowTextLengthW(handle)
             if length <= 0:
                 return True
@@ -43,17 +48,18 @@ class DesktopApps:
             self.user.GetWindowThreadProcessId(handle, ctypes.byref(pid))
             if pid.value == os.getpid():
                 return True
-            name = ""
+            name, path = "", ""
             process = self.kernel.OpenProcess(0x1000, False, pid.value)
             if process:
                 try:
                     image = ctypes.create_unicode_buffer(32768); size = self.w.DWORD(len(image))
                     if self.kernel.QueryFullProcessImageNameW(process, 0, image, ctypes.byref(size)):
-                        name = os.path.basename(image.value)
+                        path = image.value
+                        name = os.path.basename(path)
                 finally:
                     self.kernel.CloseHandle(process)
             items.append({"handle": str(handle), "pid": pid.value, "title": title.value,
-                          "name": name, "minimized": bool(self.user.IsIconic(handle))})
+                          "name": name, "path": path, "minimized": bool(self.user.IsIconic(handle))})
             return len(items) < 500
         self.user.EnumWindows(self.callback(collect), 0)
         return items

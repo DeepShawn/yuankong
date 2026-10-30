@@ -44,9 +44,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 APP_ID = "LANCMD"
-VERSION = "3.11.0"
-BUILD_VERSION = "3.11.0"
-RELEASE_TAG = "v3.11.0"
+VERSION = "3.12.0"
+BUILD_VERSION = "3.12.0"
+RELEASE_TAG = "v3.12.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1135,6 +1135,7 @@ from recordings import Recordings
 from gestures import Gestures
 from app_locks import AppLocks
 from app_catalog import AppCatalog
+from file_locks import FileLocks
 from app_freeze import AppFreeze
 from wallpaper import Wallpaper
 from registry_editor import RegistryEditor
@@ -1224,6 +1225,8 @@ _app_locks = AppLocks(os.path.join(APP_DIR,"app-locks.json"),protected=(_capture
 _registry = RegistryEditor(os.path.join(APP_DIR,"registry-backups"))
 _tasks = TaskManager(protected=(_capture_dir,))
 _app_catalog = AppCatalog(_app_locks._target,protected=(_capture_dir,sys.executable,APP_DIR,os.environ.get("SystemRoot",r"C:\Windows")))
+_app_runtime = AppCatalog(_app_locks._target,protected=(_capture_dir,sys.executable,APP_DIR,os.environ.get("SystemRoot",r"C:\Windows")),runtime=True)
+_file_locks = FileLocks(os.path.join(APP_DIR,"file-locks.json"),protected=(_capture_dir,sys.executable,APP_DIR),worker=False)
 _app_freeze = AppFreeze()
 _wallpaper = Wallpaper(os.path.join(APP_DIR,"wallpapers"))
 _scripts = ScriptRunner()
@@ -1252,7 +1255,7 @@ def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures", "cursor_visibility", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"])
-        features.extend(["app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","force_delete","startup_network","network_management","network_device_state","hotspot_client_access","hotspot_adapter_selection","network_password","network_batch","hotspot_timer","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
+        features.extend(["app_runtime","file_locks","app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","force_delete","startup_network","network_management","network_device_state","hotspot_client_access","hotspot_adapter_selection","network_password","network_batch","hotspot_timer","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
         if os.path.isfile(_recordings.executable):
             features.extend(["recordings","panorama_recording","system_audio_recording"])
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1285,8 +1288,10 @@ HANDLERS = {
     "commands": lambda q, st: _commands.request(q, st, RpcError),
     "recordings": lambda q, st: _recordings.request(q, st, RpcError),
     "gestures": lambda q, st: _gestures.request(q, st, RpcError),
+    "file_locks": lambda q, st: _file_locks.request(q,RpcError),
     "app_locks": lambda q, st: _app_locks.request(q,RpcError),
     "app_catalog": lambda q, st: _app_catalog.request(q,RpcError),
+    "app_runtime": lambda q, st: _app_runtime.request(q,RpcError),
     "app_freeze": lambda q, st: _app_freeze.request(q,st,RpcError),
     "wallpaper": lambda q, st: _wallpaper.request(q,RpcError),
     "upgrade": lambda q, st: _updates.request(q,RpcError),
@@ -1921,6 +1926,7 @@ USAGE = r"""LanCmd Agent v%s
     LanCmdAgent.exe                      静默启动接收端（无窗口、无提示）
 
 管理命令（用 LanCmdCtl.exe 才有输出）:
+    LanCmdCtl.exe --recover-file-locks   本机管理员恢复文件锁原权限（保留备份）
     LanCmdCtl.exe --status               查看运行状态、端口、已配对设备
     LanCmdCtl.exe --stop                 停止接收端
     LanCmdCtl.exe --reset-pairing        清除所有已配对设备
@@ -1963,6 +1969,19 @@ def main(argv):
     _cfg_cache = cfg
     setup_logging(console)
 
+    if "--recover-file-locks" in argv:
+        if not IS_WIN or not is_admin():
+            print("File lock recovery requires a local elevated administrator console.")
+            return 1
+        try:
+            with io.open(PID_PATH,"r") as stream:lock_pid=int(stream.read().strip())
+        except (OSError,ValueError):lock_pid=None
+        if lock_pid and _pid_alive(lock_pid):
+            print("Stop the receiver with --stop before local file-lock recovery.")
+            return 1
+        results=_file_locks.recover()
+        for item in results:print(json.dumps(item,ensure_ascii=True))
+        return 0 if all(item["restored"] for item in results) else 1
     if "--status" in argv:
         return do_status()
     if "--stop" in argv:
@@ -2049,6 +2068,7 @@ def main(argv):
 
     threading.Thread(target=_check_firewall_async, daemon=True, name="fwcheck").start()
     _startup_network.boot()
+    if IS_WIN:_file_locks.start()
 
     sup = Supervisor(cfg)
     sup.spawn("tcp", tcp_server)
@@ -2061,6 +2081,7 @@ def main(argv):
         STOP.set()
     finally:
         if _updates.draining:_upgrade_exit_ready.wait(45)
+        _file_locks.close()
         cleanup_pid()
     return 0
 
