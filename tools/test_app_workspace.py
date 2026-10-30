@@ -53,7 +53,7 @@ class RuntimeCatalogTest(unittest.TestCase):
             system_exe=system/'system.exe';office=apps/'office.exe';system_exe.write_bytes(b'exe');office.write_bytes(b'exe')
             processes=[dict(pid=11,created='1',path=str(system_exe),name='system',can_terminate=False),
                        dict(pid=22,created='2',path=str(office),name='Office',can_terminate=True)]
-            windows=[dict(handle='12',pid=22,title='Document',path=str(office.resolve()),minimized=False),
+            windows=[dict(handle='12',pid=22,title='Document',path=str(office),minimized=False),
                      dict(handle='13',pid=22,title='Stale PID',path=str(system_exe.resolve()),minimized=False)]
             backend=SimpleNamespace(records=lambda:(_ for _ in ()).throw(AssertionError('runtime must not rescan registry')))
             labels=SimpleNamespace(lock=threading.RLock(),cached=dict(items=[dict(path=str(office.resolve()),name='Office Writer',publisher='Microsoft Corporation',version='1.0')]))

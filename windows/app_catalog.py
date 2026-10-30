@@ -104,7 +104,9 @@ class AppCatalog:
                 from desktop_apps import DesktopApps
                 self.windows=DesktopApps()
             for window in self.windows.windows() if self.windows is not None else []:
-                windows_by_pid.setdefault(window["pid"],[]).append(window)
+                window_path=executable(window.get("path",""))
+                if window_path:
+                    windows_by_pid.setdefault(window["pid"],[]).append(dict(window,path=str(window_path)))
         for process in running:
             path=executable(process.get("path",""))
             if path:by_path.setdefault(os.path.normcase(str(path)).casefold(),[]).append(process)
