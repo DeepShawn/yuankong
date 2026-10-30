@@ -41,12 +41,14 @@ class FileLocks(AppLocks):
     def _target(self, value):
         if not isinstance(value,str) or not value.strip() or "\0" in value or len(value)>32767:
             raise ValueError("请选择一个普通本地文件")
+        if os.name=="nt" and ":" in os.path.splitdrive(value)[1]:
+            raise ValueError("不能锁定 NTFS 备用数据流；请选择文件本身")
         selected=Path(value)
         if not selected.is_absolute() or str(selected).startswith("\\\\"):
             raise ValueError("文件锁仅支持本机绝对路径")
         first=selected.lstat()
-        if stat.S_ISLNK(first.st_mode) or getattr(first,"st_file_attributes",0)&0x400:
-            raise ValueError("不能锁定链接或重解析点")
+        if stat.S_ISLNK(first.st_mode) or getattr(first,"st_file_attributes",0)&0x404:
+            raise ValueError("不能锁定系统文件、链接或重解析点")
         path=selected.resolve(strict=True);info=path.stat()
         if path.name.casefold() in {"pagefile.sys","hiberfil.sys","swapfile.sys","bootmgr","boot.ini","ntldr","bcd"}:
             raise ValueError("不能锁定 Windows 启动或虚拟内存文件")

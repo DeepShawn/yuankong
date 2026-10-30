@@ -88,6 +88,17 @@ class WorkspaceEnhancementsUiTest {
         }finally{cleared.pause().stop().destroy()}
     }
 
+    @Test fun draftFromKilledProcessReleasesHeldFingerBeforePlayback() {
+        val pending=entry().put("events",JSONArray().put(events().getJSONObject(0)))
+        runBlocking {GestureLibrary(app).draft(pending)}
+        val c=Robolectric.buildActivity(GesturesActivity::class.java).setup()
+        try {
+            waitFor{c.get().eventCount==2}
+            assertEquals("up",c.get().board.snapshot().getJSONObject(1).getString("action"))
+            assertFalse(c.get().board.recording)
+        }finally{c.pause().stop().destroy()}
+    }
+
     @Test fun desktopLastFrameIsDrawnBehindLocalRecordingWithoutSendingPointerEvents() {
         Stub().use {stub ->
             stub.install();val c=Robolectric.buildActivity(GesturesActivity::class.java).setup()

@@ -98,6 +98,9 @@ class NativeFileLocksTest(unittest.TestCase):
             path.write_bytes(b'content intact');other.write_bytes(b'other intact')
             manager=FileLocks(root/'file-locks.json',worker=False)
             try:
+                stream=Path(str(path)+':extra');stream.write_bytes(b'ADS remains separate')
+                with self.assertRaises(Error):manager.request(dict(action='lock',path=str(stream),password='local test password'),Error)
+                self.assertEqual(b'content intact',path.read_bytes())
                 result=manager.request(dict(action='lock',path=str(path),password='local test password'),Error)
                 item=result['items'][0];self.assertEqual('locked',item['status'])
                 with self.assertRaises(PermissionError):path.read_bytes()

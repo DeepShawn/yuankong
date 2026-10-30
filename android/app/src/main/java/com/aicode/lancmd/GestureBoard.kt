@@ -34,7 +34,21 @@ class GestureBoard(context: Context) : View(context) {
     private val area = RectF()
     init { contentDescription = "空白手势记录板"; isClickable = true; setLayerType(LAYER_TYPE_SOFTWARE, null) }
     fun snapshot() = JSONArray(events.toString())
-    fun load(value: JSONArray) { finish(); events = JSONArray(value.toString()); invalidate(); changed?.invoke() }
+    fun load(value: JSONArray) {
+        finish()
+        events = JSONArray(value.toString())
+        // A periodic draft can be the last durable snapshot after Android kills
+        // the process while a finger is held. Restore a playable, balanced trace.
+        var held = false
+        for (i in 0 until events.length()) when (events.getJSONObject(i).optString("action")) {
+            "down" -> held = true
+            "up" -> held = false
+        }
+        if (held && events.length() < 6000) {
+            events.put(JSONObject(events.getJSONObject(events.length() - 1).toString()).put("action", "up"))
+        }
+        invalidate(); changed?.invoke()
+    }
     fun begin() { events = JSONArray(); recording = true; started = SystemClock.elapsedRealtime(); lastMs = -20; finger = -1; pressed = false; invalidate(); changed?.invoke() }
     fun finish() {
         if (!recording && !pressed) return
