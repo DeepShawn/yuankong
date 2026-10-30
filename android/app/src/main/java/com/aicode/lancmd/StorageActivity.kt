@@ -75,7 +75,7 @@ class StorageActivity : MiuixActivity() {
     /** 批量操作的逐项结果，和旧版顶部的「展开逐项结果」一致。 */
     internal var results by mutableStateOf<List<String>>(emptyList())
     private var resultsExpanded by mutableStateOf(false)
-    private var delaySeconds by mutableStateOf(0)
+    private var delaySummary by mutableStateOf("")
     private var toolsExpanded by mutableStateOf(false)
     private var disksExpanded by mutableStateOf(false)
 
@@ -188,7 +188,7 @@ class StorageActivity : MiuixActivity() {
         path = savedInstanceState?.getString("path") ?: intent.getStringExtra("path") ?: ""
         pendingDownload = savedInstanceState?.getString("download") ?: ""
         uploadTarget = savedInstanceState?.getString("upload") ?: ""
-        delaySeconds = FileDelay.seconds(this)
+        delaySummary = FileDelay.label(this)
         status("查看磁盘空间、浏览目录，或选择手机中的文件上传")
         content { Screen() }
         updateSelection()
@@ -259,8 +259,8 @@ class StorageActivity : MiuixActivity() {
             ActionRow {
                 SelectionAction("磁盘",selected=disksExpanded,modifier=Modifier.weight(1f)){disksExpanded=!disksExpanded}
                 SelectionAction("更多工具",selected=toolsExpanded,modifier=Modifier.weight(1f)){toolsExpanded=!toolsExpanded}
-                SelectionAction("延迟 ${delaySeconds}s", modifier = Modifier.weight(1f)) {
-                    FileDelay.choose(this@StorageActivity) { delaySeconds = FileDelay.seconds(this@StorageActivity) }
+                SelectionAction("延迟 · $delaySummary", modifier = Modifier.weight(1f)) {
+                    FileDelay.choose(this@StorageActivity) { delaySummary = FileDelay.label(this@StorageActivity) }
                 }
                 Action(
                     if (multi) "退出多选" else "多选",
@@ -1122,7 +1122,7 @@ class StorageActivity : MiuixActivity() {
         val dialog = WorkspaceDialog.Builder(this).setTitle("最后修改日期")
             .setMessage(
                 "电脑文件的最后修改时间，按手机本地时区输入。格式 yyyy-MM-dd HH:mm:ss。" +
-                    "操作延迟 ${FileDelay.seconds(this)} 秒。"
+                    "操作延迟：${FileDelay.label(this)}。"
             )
             .setView(box).setNegativeButton("取消", null)
             .setPositiveButton("保存", null).create()

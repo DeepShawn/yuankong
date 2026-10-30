@@ -63,7 +63,7 @@ rm -f "$PKG/python"/_msi.pyd \
       "$PKG/python"/winsound.pyd "$PKG/python"/_decimal.pyd \
       "$PKG/python"/_asyncio.pyd "$PKG/python"/_zoneinfo.pyd "$PKG/python"/_multiprocessing.pyd
 cp "使用说明.txt" "$PKG/使用说明.txt"
-cp local_upgrade.py touch_injection.py "$PKG/"
+cp announcements.py notice_window.py global_delays.py local_upgrade.py touch_injection.py "$PKG/"
 cp network_management.py native_wifi.py hotspot_access.py network_winrt.ps1 "$PKG/"
 mkdir -p "$PKG/upgrade"
 cp upgrade/README.txt "$PKG/upgrade/"

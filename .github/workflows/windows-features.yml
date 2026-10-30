@@ -84,6 +84,10 @@ jobs:
         run: python -m unittest discover -s tools -p "test_management*.py" -v
       - name: Filename index queries, persistence and cancellation
         run: python -m unittest discover -s tools -p test_file_search.py -v
+      - name: Native announcement surfaces and global delay isolation
+        run: python -m unittest discover -s tools -p "test_*announcements.py" -v
+      - name: Global command and operation delay defaults
+        run: python -m unittest discover -s tools -p test_global_delays.py -v
       - name: Recoverable file passwords and Windows-time expiry
         run: python -m unittest discover -s tools -p test_file_locks.py -v
       - name: Installed apps and freeze recovery

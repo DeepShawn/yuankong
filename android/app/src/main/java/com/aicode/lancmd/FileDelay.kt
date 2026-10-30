@@ -12,11 +12,14 @@ import java.io.IOException
 /** Windows owns remote countdowns; transfers and phone app launches need a live phone. */
 object FileDelay {
     fun seconds(context:Context)=context.getSharedPreferences("file-operations",Context.MODE_PRIVATE).getInt("delay",0).coerceIn(0,86400)
+    fun label(context:Context)=if(context.getSharedPreferences("file-operations",Context.MODE_PRIVATE).contains("delay"))"${seconds(context)} 秒" else "跟随全局"
     fun choose(context:Context,changed:()->Unit={}) {
         val input=EditText(context).apply { inputType=InputType.TYPE_CLASS_NUMBER;setSingleLine();setText(seconds(context).toString());contentDescription="文件操作延迟秒数" }
         val dialog=WorkspaceDialog.Builder(context).setTitle("文件操作延迟（秒）")
-            .setMessage("0–86400 秒，0 立即执行。此设置用于后续文件操作；电脑端由 Windows 计时，上传、下载、手机 WPS 需要手机保持连接。")
-            .setView(input).setNegativeButton("取消",null).setPositiveButton("保存",null).create()
+            .setMessage("未单独设置时跟随全局操作延迟。保存 0–86400 秒可覆盖全局，保存 0 即立即执行；选择“跟随全局”可清除覆盖。电脑端由 Windows 计时，上传、下载、手机 WPS 需要手机保持连接。")
+            .setView(input).setNegativeButton("取消",null).setNeutralButton("跟随全局") { _,_ ->
+                context.getSharedPreferences("file-operations",Context.MODE_PRIVATE).edit().remove("delay").apply();changed()
+            }.setPositiveButton("保存",null).create()
         dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val value=input.text.toString().toIntOrNull()
             if(value==null || value !in 0..86400)input.error="请输入 0–86400 的整数秒"
@@ -24,13 +27,17 @@ object FileDelay {
         } };dialog.show()
     }
     suspend fun waitLocal(context:Context,client:AgentClient?,notice:(String)->Unit={}) {
-        val count=seconds(context)
+        val count=if(context.getSharedPreferences("file-operations",Context.MODE_PRIVATE).contains("delay"))seconds(context)
+            else runCatching { pinnedCall(client,"delays",JSONObject().put("action","settings")).optJSONObject("settings")?.optInt("operation") ?: 0 }.getOrDefault(0)
         for(left in count downTo 1) { pinnedCall(client,"ping");notice("将在 $left 秒后开始，需要手机保持连接");delay(1000) }
     }
     private fun announce(context:Context,notice:(String)->Unit,message:String) { notice(message) }
     suspend fun call(context:Context,client:AgentClient?,command:String,params:JSONObject,timeout:Long=30_000,notice:(String)->Unit={}):JSONObject {
         val count=seconds(context)
-        if(count==0)return pinnedCall(client,command,params,timeout)
+        if(count==0) {
+            val explicit=context.getSharedPreferences("file-operations",Context.MODE_PRIVATE).contains("delay")
+            return pinnedCall(client,command,if(explicit)JSONObject(params.toString()).put("delay_override",0) else params,timeout)
+        }
         val response=pinnedCall(client,"file_schedule",JSONObject().put("action","add").put("command",command).put("params",params).put("delay",count))
         val id=response.getJSONObject("job").getString("id")
         while(true) {
