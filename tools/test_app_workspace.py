@@ -56,15 +56,17 @@ class RuntimeCatalogTest(unittest.TestCase):
             windows=[dict(handle='12',pid=22,title='Document',path=str(office.resolve()),minimized=False),
                      dict(handle='13',pid=22,title='Stale PID',path=str(system_exe.resolve()),minimized=False)]
             backend=SimpleNamespace(records=lambda:(_ for _ in ()).throw(AssertionError('runtime must not rescan registry')))
+            labels=SimpleNamespace(lock=threading.RLock(),cached=dict(items=[dict(path=str(office.resolve()),name='Office Writer',publisher='Microsoft Corporation',version='1.0')]))
             catalog=AppCatalog(lambda value:None,SimpleNamespace(list=lambda:processes),backend,runtime=True,
-                               windows=SimpleNamespace(windows=lambda:windows))
+                               windows=SimpleNamespace(windows=lambda:windows),labels=labels)
             with mock.patch.dict(os.environ,{'SystemRoot':str(system)}):
                 result=catalog.request({},Error)
             by_name={item['name']:item for item in result['items']}
             self.assertEqual('windows',by_name['system']['kind'])
-            self.assertEqual('third_party',by_name['Office']['kind'])
-            self.assertEqual(['Document'],[w['title'] for w in by_name['Office']['windows']])
-            self.assertEqual(1,by_name['Office']['running'])
+            self.assertEqual('third_party',by_name['Office Writer']['kind'])
+            self.assertEqual('Microsoft Corporation',by_name['Office Writer']['publisher'])
+            self.assertEqual(['Document'],[w['title'] for w in by_name['Office Writer']['windows']])
+            self.assertEqual(1,by_name['Office Writer']['running'])
             processes.clear();catalog.updated=0
             result=catalog.request({'refresh':True},Error)
             self.assertEqual([],result['items'])

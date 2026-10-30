@@ -84,10 +84,10 @@ def application_kind(path, system_root=None):
 
 
 class AppCatalog:
-    def __init__(self,lock_target,processes=None,backend=None,protected=(),runtime=False,windows=None):
+    def __init__(self,lock_target,processes=None,backend=None,protected=(),runtime=False,windows=None,labels=None):
         self.lock_target=lock_target;self.processes=processes;self.backend=backend
         self.protected=protected
-        self.runtime=runtime;self.windows=windows
+        self.runtime=runtime;self.windows=windows;self.labels=labels
         self.lock=threading.RLock();self.cached=None;self.updated=0
         self.building=False;self.failure="";self.done=None
 
@@ -109,6 +109,17 @@ class AppCatalog:
             path=executable(process.get("path",""))
             if path:by_path.setdefault(os.path.normcase(str(path)).casefold(),[]).append(process)
         records=([] if self.runtime else self.backend.records())+[dict(name=p.get("name",""),path=p.get("path",""),source="running") for p in running if p.get("path")]
+        if self.runtime and self.labels is not None:
+            # Reuse verified installed names without rescanning the registry on
+            # every live refresh. Match the full executable path, never a PID or
+            # basename alone (several products can have the same helper name).
+            with self.labels.lock:
+                labels={os.path.normcase(item["path"]).casefold():item for item in (self.labels.cached or {}).get("items",[]) if item.get("path")}
+            for record in records:
+                label=labels.get(os.path.normcase(record.get("path","")).casefold())
+                if label:
+                    for field in ("name","publisher","version"):
+                        if label.get(field):record[field]=label[field]
         items={}
         for record in records:
             name=str(record.get("name","")).strip()[:200]

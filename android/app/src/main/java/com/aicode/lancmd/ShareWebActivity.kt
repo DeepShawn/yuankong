@@ -27,7 +27,7 @@ class ShareWebActivity : MiuixActivity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         url = if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain")
-            SharedWebLink.extract(intent.getStringExtra(Intent.EXTRA_TEXT)).orEmpty() else ""
+            SharedWebLink.extract(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()).orEmpty() else ""
         content { Page("发送手机网页到电脑") {
             SectionCard {
                 if (url.isBlank()) EmptyNote("分享内容中没有有效的 HTTP / HTTPS 网页链接。")

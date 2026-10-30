@@ -138,7 +138,7 @@ class WorkspaceEnhancementsUiTest {
 
     @Test fun shareReceiverStagesUrlAndDoesNotSendToAnUnconnectedComputer() {
         val intent=Intent(app,ShareWebActivity::class.java).setAction(Intent.ACTION_SEND).setType("text/plain")
-            .putExtra(Intent.EXTRA_TEXT,"https://example.com/shared")
+            .putExtra(Intent.EXTRA_TEXT,android.text.SpannableString("https://example.com/shared"))
         val c=Robolectric.buildActivity(ShareWebActivity::class.java,intent).setup()
         try {
             compose.onNodeWithText("https://example.com/shared").assertExists()

@@ -1225,7 +1225,7 @@ _app_locks = AppLocks(os.path.join(APP_DIR,"app-locks.json"),protected=(_capture
 _registry = RegistryEditor(os.path.join(APP_DIR,"registry-backups"))
 _tasks = TaskManager(protected=(_capture_dir,))
 _app_catalog = AppCatalog(_app_locks._target,protected=(_capture_dir,sys.executable,APP_DIR,os.environ.get("SystemRoot",r"C:\Windows")))
-_app_runtime = AppCatalog(_app_locks._target,protected=(_capture_dir,sys.executable,APP_DIR,os.environ.get("SystemRoot",r"C:\Windows")),runtime=True)
+_app_runtime = AppCatalog(_app_locks._target,protected=(_capture_dir,sys.executable,APP_DIR,os.environ.get("SystemRoot",r"C:\Windows")),runtime=True,labels=_app_catalog)
 _file_locks = FileLocks(os.path.join(APP_DIR,"file-locks.json"),protected=(_capture_dir,sys.executable,APP_DIR),worker=False)
 _app_freeze = AppFreeze()
 _wallpaper = Wallpaper(os.path.join(APP_DIR,"wallpapers"))
