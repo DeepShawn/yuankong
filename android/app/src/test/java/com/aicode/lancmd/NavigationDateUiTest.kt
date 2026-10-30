@@ -60,7 +60,7 @@ class NavigationDateUiTest {
         )
         assertEquals("命令控制台",a.homeCategory)
         a.homeCategory="文件与设备"
-        assertEquals(listOf("文件管理","文件搜索","U盘与设备","隐私设备"),a.toolGroups.getValue("文件与设备").map { it.label })
+        assertEquals(listOf("文件管理","文件密码锁","文件搜索","U盘与设备","隐私设备"),a.toolGroups.getValue("文件与设备").map { it.label })
         preview(a.window.decorView,"home-file-category-small",640)
         c.recreate();a=c.get()
         assertEquals("文件与设备",a.homeCategory)
