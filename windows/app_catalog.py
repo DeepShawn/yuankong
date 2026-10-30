@@ -116,7 +116,10 @@ class AppCatalog:
             with self.labels.lock:
                 labels={os.path.normcase(item["path"]).casefold():item for item in (self.labels.cached or {}).get("items",[]) if item.get("path")}
             for record in records:
-                label=labels.get(os.path.normcase(record.get("path","")).casefold())
+                # Native process paths can use an 8.3/short-directory spelling;
+                # the installed catalog stores the resolved long file path.
+                resolved=executable(record.get("path",""))
+                label=labels.get(os.path.normcase(str(resolved)).casefold()) if resolved else None
                 if label:
                     for field in ("name","publisher","version"):
                         if label.get(field):record[field]=label[field]
