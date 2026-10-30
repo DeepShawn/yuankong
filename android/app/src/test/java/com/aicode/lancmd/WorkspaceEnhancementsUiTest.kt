@@ -185,6 +185,8 @@ class WorkspaceEnhancementsUiTest {
                 compose.onNodeWithText("输入密码解锁").performScrollTo().performSemanticsAction(SemanticsActions.OnClick){it()}
                 shadowOf(Looper.getMainLooper()).idle()
                 val dialog=ShadowDialog.getLatestDialog() as AlertDialog
+                assertEquals(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE,
+                    dialog.window!!.attributes.softInputMode and android.view.WindowManager.LayoutParams.SOFT_INPUT_MASK_STATE)
                 fun inputs(v:android.view.View):List<EditText> = if(v is EditText)listOf(v) else if(v is android.view.ViewGroup)(0 until v.childCount).flatMap{inputs(v.getChildAt(it))} else emptyList()
                 inputs(dialog.window!!.decorView).single().setText("local secret password")
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()

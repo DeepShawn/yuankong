@@ -76,7 +76,7 @@ class FileLocksActivity : MiuixActivity() {
     }
     private fun askUnlock(item:JSONObject) {
         val input=dialogInput().apply { inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD }
-        WorkspaceDialog.Builder(this).setTitle("输入文件锁密码").setMessage(item.optString("path")).setView(input)
+        WorkspaceDialog.Builder(this).setTitle("输入文件锁密码").setMessage(item.optString("path")).setView(input).focusInput(input)
             .setNegativeButton("取消",null).setPositiveButton("解锁") { _,_ ->
                 val secret=input.text.toString();input.setText("")
                 operate(JSONObject().put("action","unlock").put("lock_id",item.getString("id")).put("password",secret))

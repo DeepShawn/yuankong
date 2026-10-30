@@ -174,7 +174,7 @@ class GesturesActivity : MiuixActivity() {
         val value = draft()
         if (board.eventCount == 0) { status("请先记录手势", true); return }
         val input = dialogInput(text = "手势 ${DateFormat.getTimeInstance().format(Date())}")
-        WorkspaceDialog.Builder(this).setTitle("保存本地手势").setView(input)
+        WorkspaceDialog.Builder(this).setTitle("保存本地手势").setView(input).focusInput(input,selectAll=true)
             .setNegativeButton("取消", null)
             .setPositiveButton("保存") { _, _ ->
                 val name = input.text.toString().trim().take(60).ifBlank { "未命名手势" }
