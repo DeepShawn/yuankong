@@ -74,6 +74,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     internal var homeCategory by mutableStateOf("命令控制台")
     internal var consoleText by mutableStateOf("")
     internal var commandLine by mutableStateOf("")
+    private var delayProgress by mutableStateOf("")
     internal var shell by mutableStateOf("cmd")
     internal var connected by mutableStateOf(false)
 
@@ -116,6 +117,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 Tool("摄像头") { openFeature(MediaActivity::class.java, "camera") },
                 Tool("按键") { openFeature(ControlActivity::class.java, "input") },
                 Tool("消息") { openFeature(ControlActivity::class.java, "message") },
+                Tool("滚动公告") { openFeature(AnnouncementsActivity::class.java) },
                 Tool("剪贴板") { showClipboard() }
             ),
             "文件与设备" to listOf(
@@ -139,6 +141,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
             "录制与自动化" to listOf(
                 Tool("录音 / 录屏") { openFeature(RecordingsActivity::class.java) },
                 Tool("手势回放") { openFeature(GesturesActivity::class.java) },
+                Tool("全局延迟") { openFeature(DelaysActivity::class.java) },
                 Tool("延迟命令") { openFeature(CommandsActivity::class.java) },
                 Tool("电脑音量") { AudioDialog(this).show() }
             )
@@ -175,6 +178,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                     Action("更多", modifier = Modifier.weight(1f)) { showMenu() }
                 }
             }
+            if(delayProgress.isNotBlank())StatusNote(delayProgress,false)
             if (overlayVisible) SectionCard {
                 Note(overlayMessage)
                 ActionRow {
@@ -532,7 +536,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         timeoutMs: Long = 30_000,
         block: (JSONObject) -> Unit
     ) {
-        lifecycleScope.launch {
+        lifecycleScope.launch(com.aicode.lancmd.net.DelayNotice { delayProgress=it }) {
             try {
                 val r = if (cmd in setOf("files", "mkdir", "rm", "rename", "put")) {
                     FileDelay.call(
@@ -543,6 +547,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 block(r)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { log(e.message ?: "请求失败", LogKind.ERROR) }
+            finally {delayProgress=""}
         }
     }
 

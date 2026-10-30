@@ -20,6 +20,8 @@ object ToolNavigator {
         Tool("共享与控制","摄像头共享","查看电脑摄像头画面",R.drawable.ic_camera,MediaActivity::class.java,"camera"),
         Tool("共享与控制","虚拟键盘","组合键、Win 键与文字输入",R.drawable.ic_keyboard,ControlActivity::class.java,"input"),
         Tool("共享与控制","发送消息","自定义标题和内容",R.drawable.ic_message,ControlActivity::class.java,"message"),
+        Tool("共享与控制","滚动公告","跑马灯、全局弹窗、桌面常驻、颜色与动效",R.drawable.ic_message,AnnouncementsActivity::class.java),
+        Tool("录制与自动化","全局延迟","命令／操作默认延迟、待执行任务和取消",R.drawable.ic_history,DelaysActivity::class.java),
         Tool("文件与设备","文件管理","文档、WPS、多选、最后修改日期与占位文件",R.drawable.ic_folder,StorageActivity::class.java),
         Tool("文件与设备","文件密码锁","长期密码锁与按电脑时间自动解锁",R.drawable.ic_lock,FileLocksActivity::class.java),
         Tool("文件与设备","文件搜索","全盘与文件夹索引，名称、路径和通配符搜索",R.drawable.ic_folder,FileSearchActivity::class.java),

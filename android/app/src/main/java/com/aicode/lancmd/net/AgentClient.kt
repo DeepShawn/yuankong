@@ -3,6 +3,8 @@ package com.aicode.lancmd.net
 import android.net.Network
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -115,7 +117,30 @@ class AgentClient(val host: String, val port: Int) {
         return call("hello", p, 90_000)
     }
 
-    suspend fun call(
+    suspend fun call(cmd:String,params:JSONObject=JSONObject(),timeoutMs:Long=30_000):JSONObject {
+        val initial=rawCall(cmd,params,timeoutMs)
+        if(!initial.optBoolean("ok") || !initial.optBoolean("deferred"))return initial
+        val ident=initial.getJSONObject("job").getString("id")
+        val progress=currentCoroutineContext()[DelayNotice]
+        var previous=""
+        while(true) {
+            val response=rawCall("delays",JSONObject().put("action","get").put("job_id",ident),30_000)
+            if(!response.optBoolean("ok"))return response
+            val job=response.getJSONObject("job")
+            when(job.optString("status")) {
+                "completed"->return JSONObject(job.getJSONObject("result").toString()).put("ok",true).put("id",initial.optInt("id"))
+                "failed","cancelled"->return JSONObject().put("ok",false).put("id",initial.optInt("id"))
+                    .put("error",if(job.optString("status")=="cancelled")"延迟操作已取消" else job.optString("error","延迟操作失败"))
+            }
+            val text=if(job.optString("status")=="waiting")"电脑将在 ${job.optInt("remaining")} 秒后执行 · 可在全局延迟中取消"
+                else "电脑正在执行延迟操作…"
+            if(text!=previous && progress!=null)withContext(Dispatchers.Main){progress.update(text)}
+            previous=text
+            delay(500)
+        }
+    }
+
+    private suspend fun rawCall(
         cmd: String,
         params: JSONObject = JSONObject(),
         timeoutMs: Long = 30_000
