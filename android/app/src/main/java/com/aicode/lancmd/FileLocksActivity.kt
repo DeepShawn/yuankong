@@ -1,6 +1,8 @@
 package com.aicode.lancmd
 
 import android.os.Bundle
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.*
 import org.json.JSONObject
 import kotlinx.coroutines.Job
@@ -35,8 +37,10 @@ class FileLocksActivity : MiuixActivity() {
     @Composable private fun Screen() = Page("文件密码锁") {
         SectionCard("锁定一个文件") {
             Field("电脑文件完整路径",path,{path=it})
-            Field("锁定密码（8–128 字符）",password,{password=it.take(128)},password=true)
-            Field("再次输入密码",repeatPassword,{repeatPassword=it.take(128)},password=true)
+            Field("锁定密码（8–128 字符）",password,{password=it.take(128)},password=true,
+                keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password))
+            Field("再次输入密码",repeatPassword,{repeatPassword=it.take(128)},password=true,
+                keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password))
             ChoiceField(listOf("长期锁定 · 密码解锁","定时锁定 · 到时自动解锁"),"锁定方式",if(timed)1 else 0){timed=it==1}
             if(timed) {
                 Note("电脑当前时间：$computerTime")
