@@ -10,11 +10,73 @@ import stat
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from force_delete import FileInUse, NativeForceDelete, identity
 
 MAX_ITEMS = 100
 MAX_ENTRIES = 20000
 RESERVE = 1_000_000_000
+MAX_RESIZE = 500_000_000_000
+SOURCE_STREAM = ":LanCmd.Source"
+
+
+def supports_source_notes(path):
+    if os.name!="nt":return False
+    if any(":" in part for part in path.parts[1:]):raise ValueError("请选择普通文件，不支持数据流路径")
+    from ctypes import wintypes as w
+    kernel=ctypes.WinDLL("kernel32",use_last_error=True)
+    kernel.GetVolumePathNameW.argtypes=[w.LPCWSTR,w.LPWSTR,w.DWORD]
+    kernel.GetVolumeInformationW.argtypes=[w.LPCWSTR,w.LPWSTR,w.DWORD,ctypes.POINTER(w.DWORD),ctypes.POINTER(w.DWORD),ctypes.POINTER(w.DWORD),w.LPWSTR,w.DWORD]
+    volume=ctypes.create_unicode_buffer(32768);flags=w.DWORD()
+    if not kernel.GetVolumePathNameW(str(path),volume,len(volume)) or not kernel.GetVolumeInformationW(volume,None,0,None,None,ctypes.byref(flags),None,0):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return bool(flags.value&0x40000)  # FILE_NAMED_STREAMS (NTFS, some ReFS volumes)
+
+
+def source_record(path):
+    """App provenance note, separate from Windows Zone.Identifier / trust."""
+    if not supports_source_notes(path):raise ValueError("当前磁盘不支持来源说明数据流；请使用支持命名数据流的本地卷（如 NTFS）")
+    try:
+        with open(str(path)+SOURCE_STREAM,"rb") as stream:raw=stream.read(8193)
+    except FileNotFoundError:raw=b""
+    if len(raw)>8192:raise ValueError("来源说明超过大小限制，未覆盖")
+    text=""
+    if raw:
+        try:
+            data=json.loads(raw.decode("utf-8"))
+            if data.get("version")!=1 or not isinstance(data.get("text"),str):raise ValueError()
+            text=data["text"]
+        except (ValueError,UnicodeError,AttributeError) as exc:raise ValueError("来源说明格式损坏，未覆盖") from exc
+    return dict(text=text,source_revision=hashlib.sha256(raw).hexdigest()),raw
+
+
+@contextmanager
+def resize_stream(path, expected):
+    """Open without truncation, reject replacement and concurrent Windows writers."""
+    if os.name == "nt":
+        import msvcrt
+        from ctypes import wintypes as w
+        kernel=ctypes.WinDLL("kernel32",use_last_error=True)
+        kernel.CreateFileW.argtypes=[w.LPCWSTR,w.DWORD,w.DWORD,ctypes.c_void_p,w.DWORD,w.DWORD,w.HANDLE]
+        kernel.CreateFileW.restype=w.HANDLE
+        kernel.CloseHandle.argtypes=[w.HANDLE]
+        handle=kernel.CreateFileW(str(path),0xC0000000,1,None,3,0x00200000,None)
+        if handle==ctypes.c_void_p(-1).value:raise ctypes.WinError(ctypes.get_last_error())
+        try:fd=msvcrt.open_osfhandle(int(handle),os.O_RDWR|os.O_BINARY)
+        except Exception:
+            kernel.CloseHandle(handle);raise
+    else:
+        fd=os.open(path,os.O_RDWR|getattr(os,"O_NOFOLLOW",0))
+    try:
+        opened=os.fstat(fd)
+        if (not stat.S_ISREG(opened.st_mode) or getattr(opened,"st_file_attributes",0)&0x400 or
+                opened.st_nlink!=1 or file_token(opened)!=file_token(expected)):
+            raise ValueError("文件已变化、是链接或存在多个硬链接，未更改大小")
+        with os.fdopen(fd,"r+b",buffering=0) as stream:
+            fd=None
+            yield stream
+    finally:
+        if fd is not None:os.close(fd)
 
 
 def file_token(info):
@@ -226,8 +288,33 @@ class FileJobs:
                 raise ValueError("文件身份已变化，未删除替换后的对象")
         elif file_token(original) != spec["file_id"]:
             raise ValueError("所选文件已变化，请刷新后重新选择")
-        if operation in ("move", "delete", "force_delete") and any(source == p or source in p.parents or p in source.parents for p in self.protected):
-            raise ValueError("不能移动或删除系统、接收端或恢复配置所在路径")
+        if operation in ("move", "delete", "force_delete", "resize", "source") and any(source == p or source in p.parents or p in source.parents for p in self.protected):
+            raise ValueError("不能更改系统、接收端或恢复配置所在路径")
+        if operation=="resize":
+            self._resize(source,original,spec,job)
+            return
+        if operation=="source":
+            if not stat.S_ISREG(original.st_mode):raise ValueError("来源说明仅支持普通文件")
+            with resize_stream(source,original):
+                record,before=source_record(source)
+                if record["source_revision"]!=job["source_revision"]:raise ValueError("来源说明已被修改，请重新读取后保存")
+                self._cancel(job)
+                raw=json.dumps(dict(version=1,text=job["source_text"]),ensure_ascii=False).encode("utf-8")
+                note=str(source)+SOURCE_STREAM
+                try:
+                    with open(note,"wb") as stream:
+                        stream.write(raw);stream.flush();os.fsync(stream.fileno())
+                except OSError as exc:
+                    try:
+                        if before:
+                            with open(note,"wb") as stream:stream.write(before);stream.flush();os.fsync(stream.fileno())
+                        else:
+                            try:os.unlink(note)
+                            except FileNotFoundError:pass
+                    except OSError as rollback:raise ValueError("来源说明写入失败且未确认恢复；文件正文未改动：%s；%s"%(exc,rollback)) from exc
+                    raise
+                spec["notice"]="来源说明已保存；系统安全来源标记保持原样"
+            return
         if operation == "force_delete":
             if not stat.S_ISREG(original.st_mode):
                 raise ValueError("强制删除仅支持普通文件；文件夹请使用普通删除")
@@ -264,6 +351,58 @@ class FileJobs:
                 self._remove_plan(source, plan, job)
             except Exception as exc:
                 raise ValueError("已复制到 %s，但源未完全移除：%s" % (target, str(exc) or "操作已取消"))
+
+    def _resize(self,path,original,spec,job):
+        size=job["data"]["size"]
+        if not stat.S_ISREG(original.st_mode):raise ValueError("只能更改普通文件的实际大小")
+        if size<original.st_size and job["data"].get("confirm_truncate") is not True:
+            raise ValueError("缩小会永久删除尾部数据，须先明确确认；未更改文件")
+        if os.name=="nt":
+            from placeholder_files import NativeBackend
+            if any(":" in part for part in path.parts[1:]):raise ValueError("不支持修改命名数据流大小")
+            NativeBackend().validate(path,size)
+        spec.update(original_size=original.st_size,size=original.st_size,bytes=min(size,original.st_size),total_bytes=size)
+        with resize_stream(path,original) as stream:
+            self._cancel(job)
+            if size==original.st_size:return
+            if size<original.st_size:
+                # Cancellation cannot restore data after the truncation boundary.
+                stream.truncate(size)
+                stream.flush();os.fsync(stream.fileno())
+            else:
+                extra=size-original.st_size
+                if shutil.disk_usage(path.parent).free-extra<RESERVE:
+                    raise ValueError("扩展后须至少保留 1 GB 可用空间，未更改文件")
+                stream.seek(original.st_size)
+                block=bytes(min(4*1024*1024,extra));dirty=0
+                try:
+                    while stream.tell()<size:
+                        self._cancel(job)
+                        amount=min(len(block),size-stream.tell())
+                        if shutil.disk_usage(path.parent).free-amount<RESERVE:
+                            raise ValueError("剩余空间不足 1 GB，已停止扩展")
+                        count=stream.write(block[:amount])
+                        if not count:raise OSError("扩展写入未取得进展")
+                        dirty+=count
+                        spec["bytes"]=stream.tell()
+                        if dirty>=64*1024*1024:
+                            stream.flush();os.fsync(stream.fileno());dirty=0
+                    self._cancel(job)
+                    if dirty:stream.flush();os.fsync(stream.fileno())
+                except Exception as exc:
+                    # The original prefix was never overwritten. Roll back only
+                    # this operation's appended zeros through the same handle.
+                    try:
+                        stream.truncate(original.st_size)
+                        stream.flush();os.fsync(stream.fileno())
+                        spec.update(bytes=original.st_size,extension_rolled_back=True)
+                    except OSError as rollback:
+                        raise ValueError("扩展失败且未确认原大小已恢复，请检查文件：%s；%s"%(exc,rollback)) from exc
+                    raise
+            current=os.fstat(stream.fileno())
+            spec["size"]=current.st_size
+            spec["bytes"]=current.st_size
+            if current.st_size!=size:raise ValueError("未确认文件已调整到目标大小，请检查文件")
 
     def _run(self, job):
         data = job["data"]
@@ -344,11 +483,21 @@ class FileJobs:
                     job["data"]["status"] = "queued"
                     threading.Thread(target=self._run, args=(job,), daemon=True, name="force-delete").start()
                     return {"job": self._public(job)}
-                if action != "create" or q.get("operation") not in ("copy", "move", "delete", "force_delete"):
+                if action != "create" or q.get("operation") not in ("copy", "move", "delete", "force_delete", "resize", "source"):
                     raise ValueError("无效的文件任务")
                 specs = q.get("items")
                 if not isinstance(specs, list) or not 1 <= len(specs) <= MAX_ITEMS:
                     raise ValueError("每批请选择 1–100 项")
+                if q["operation"]=="resize":
+                    if len(specs)!=1 or type(q.get("size")) is not int or not 0<=q["size"]<=MAX_RESIZE:
+                        raise ValueError("大小调整每次仅支持一个文件，范围 0–500 GB 的整数字节数")
+                    if type(q.get("confirm_truncate",False)) is not bool:raise ValueError("缩小确认无效")
+                if q["operation"]=="source":
+                    text=q.get("source_text");revision=q.get("source_revision")
+                    if (len(specs)!=1 or not isinstance(text,str) or len(text)>2000 or
+                            any(ord(c)<32 and c not in "\r\n\t" for c in text) or not isinstance(revision,str) or
+                            len(revision)!=64 or any(c not in "0123456789abcdef" for c in revision)):
+                        raise ValueError("来源说明最多 2000 字，需先读取有效的来源版本")
                 if self.closed or any(not j["done"].is_set() for j in self.jobs.values()):
                     raise ValueError("已有文件任务在运行，请等待或取消")
                 paths = set()
@@ -363,14 +512,16 @@ class FileJobs:
                         raise ValueError("批次包含重复路径")
                     paths.add(normalized)
                 destination = ""
-                if q["operation"] not in ("delete", "force_delete"):
+                if q["operation"] not in ("delete", "force_delete", "resize", "source"):
                     destination = str(checked_path(q.get("destination"), directory=True))
                 completed = [key for key, value in self.jobs.items() if value["done"].is_set()]
                 while len(self.jobs) >= 100 and completed:
                     self.jobs.pop(completed.pop(0))
                 data = dict(id=uuid.uuid4().hex, operation=q["operation"], destination=destination, status="queued", created=time.time(),
                             items=[dict(path=i["path"], file_id=i["file_id"], status="pending") for i in specs])
+                if q["operation"]=="resize":data.update(size=q["size"],confirm_truncate=q.get("confirm_truncate",False))
                 job = dict(owner=state.client_id, cancel=threading.Event(), done=threading.Event(), data=data)
+                if q["operation"]=="source":job.update(source_text=text,source_revision=revision)
                 self.jobs[data["id"]] = job
                 threading.Thread(target=self._run, args=(job,), daemon=True, name="file-batch").start()
                 return {"job": self._public(job)}

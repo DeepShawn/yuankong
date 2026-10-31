@@ -246,6 +246,36 @@ class PlaceholderTest(unittest.TestCase):
         self.assertEqual("completed",result["status"])
         self.assertEqual([4096,8192,10000],flushes)
 
+    def test_successful_close_remains_active_and_never_claims_cleanup_or_completion_early(self):
+        entered,release=threading.Event(),threading.Event()
+        original=self.backend.create
+        def create(path):
+            allocation=original(path);close=allocation.close
+            def blocked():entered.set();release.wait(5);close()
+            allocation.close=blocked
+            return allocation
+        with mock.patch.object(self.backend,"create",side_effect=create):
+            job=self.call(action="create",path=str(self.path),size=128)["job"]
+            try:
+                self.assertTrue(entered.wait(2))
+                item=self.call()["items"][0]
+                self.assertEqual("closing",item["status"])
+                self.assertFalse(item["can_cancel"])
+                self.assertFalse(self.manager.jobs[job["id"]]["done"].is_set())
+                with self.assertRaises(Error):
+                    self.call(action="create",path=str(self.path.with_name("second.dat")),size=128)
+            finally:release.set()
+        self.assertEqual("completed",self.wait(job)["status"])
+
+    def test_native_parent_handle_is_released_even_when_file_close_fails(self):
+        allocation=NativeAllocation.__new__(NativeAllocation)
+        allocation.stream=mock.Mock();allocation.stream.close.side_effect=OSError("close failed")
+        allocation.handle=11;allocation.directory=22;allocation.kernel=mock.Mock()
+        allocation.committed=True
+        with self.assertRaisesRegex(OSError,"close failed"):allocation.close()
+        allocation.kernel.CloseHandle.assert_called_once_with(22)
+        self.assertIsNone(allocation.directory)
+
 
 @unittest.skipUnless(os.name == "nt", "Windows allocation APIs")
 class NativePlaceholderTest(unittest.TestCase):

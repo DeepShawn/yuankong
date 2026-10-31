@@ -126,6 +126,13 @@ def file_request(q, error):
         if q.get("file_id") is not None:
             from file_jobs import file_token, snapshot
             if file_token(snapshot(path)) != q["file_id"]:raise ValueError("所选文件已变化，请刷新后重试")
+        if action=="source_read":
+            from file_jobs import checked_path as ordinary_path,snapshot,file_token,source_record
+            path=ordinary_path(str(path));before=snapshot(path)
+            if not stat.S_ISREG(before.st_mode):raise ValueError("来源说明仅支持普通文件")
+            result,_=source_record(path)
+            if file_token(snapshot(path))!=file_token(before):raise ValueError("文件已变化，请刷新后重新读取来源说明")
+            return dict(result,path=str(path),file_id=file_token(before))
         if action == "mtime":
             value=q.get("modified")
             if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or not 0 <= value <= 4102444800:

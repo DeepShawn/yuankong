@@ -532,7 +532,7 @@ class StorageActivity : MiuixActivity() {
         groups["编辑与属性"] = buildList {
             if (!dir) add(if (office) "手机 WPS 预览 / 编辑" else "编辑文本")
             if (!dir && name.substringAfterLast('.', "").lowercase() in listOf("jpg","jpeg","png","bmp")) add("设为桌面背景")
-            add("最后修改日期"); add("文件属性"); if(!dir)add("文件密码锁")
+            add("最后修改日期"); add("文件属性"); if(!dir){add("更改实际大小");add("文件来源说明");add("文件密码锁")}
         }
         groups["传输与整理"] = buildList {
             if (!dir) add("下载到手机")
@@ -583,6 +583,8 @@ class StorageActivity : MiuixActivity() {
             }
             "文件密码锁" -> if(sourceReady())startActivity(Intent(this,FileLocksActivity::class.java).putExtra("path",selected))
             "最后修改日期" -> modifyDate(item, selected)
+            "更改实际大小" -> modifySize(item, selected)
+            "文件来源说明" -> editSource(item, selected)
             "文件属性" -> WorkspaceDialog.Builder(this).setTitle(item.optString("name")).setMessage(
                 "$selected\n\n${if (item.optBoolean("dir")) "文件夹" else FileTransfer.humanSize(item.optLong("size"))}\n" +
                     "最后修改：${DateFormat.getDateTimeInstance().format(Date(item.optLong("mtime") * 1000))}\n" +
@@ -758,7 +760,7 @@ class StorageActivity : MiuixActivity() {
     }
 
     private fun operationName(operation: String) =
-        when (operation) { "copy" -> "复制"; "move" -> "移动"; "delete" -> "删除"; "force_delete" -> "强制删除"; else -> operation }
+        when (operation) { "copy" -> "复制"; "move" -> "移动"; "delete" -> "删除"; "force_delete" -> "强制删除"; "resize" -> "调整文件大小"; "source" -> "保存来源说明"; else -> operation }
 
     internal fun confirmForceDelete() {
         val job = forceConfirmation?.let { JSONObject(it.toString()) } ?: return
@@ -805,7 +807,8 @@ class StorageActivity : MiuixActivity() {
             val line = when (item.optString("status")) {
                 "completed" -> {
                     success++
-                    "成功 · $label" + (if (item.has("destination")) " → ${item.getString("destination")}" else "")
+                    "成功 · $label" + (if (item.has("destination")) " → ${item.getString("destination")}" else "") +
+                        (if(item.has("size")) " · ${item.optLong("size")} 字节" else "")
                 }
                 "failed" -> { failed++; "失败 · $label：${item.optString("error")}" }
                 "pending_release" -> { pending++; "待句柄释放 · $label：${item.optString("notice")}" }
@@ -1075,6 +1078,78 @@ class StorageActivity : MiuixActivity() {
             Intent(this, OfficeDocumentActivity::class.java)
                 .putExtra("path", selected).putExtra("file_id", version)
         )
+    }
+
+    internal fun editSource(item: JSONObject, selected: String) {
+        if(!sourceReady() || operationsBusy || item.optBoolean("dir"))return
+        task {
+            val features=pinnedCall(origin,"capabilities").optJSONArray("features")
+            check(features!=null && (0 until features.length()).any{features.optString(it)=="file_sources"}){
+                "请完整更新并重启 Windows 3.13.0 或更新版接收端"
+            }
+            val record=pinnedCall(origin,"files",JSONObject().put("action","source_read").put("path",selected).put("file_id",item.getString("file_id")))
+            if(!sourceReady())return@task
+            val base=path
+            val value=dialogInput(text=record.optString("text")).apply {
+                contentDescription="文件来源说明"
+                inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                minLines=3;maxLines=6
+                filters=arrayOf(android.text.InputFilter.LengthFilter(2000))
+            }
+            val dialog=WorkspaceDialog.Builder(this@StorageActivity).setTitle("文件来源说明")
+                .setMessage("$selected\n\n可填写原网址或备注，最多 2000 字。来源说明保存在此文件的命名数据流，需要 NTFS 等受支持的卷；手机传输或复制到不保留数据流的目标时可能丢失。\n\n这是可编辑备注，不是来源真实性证明；Windows 的 Internet 安全来源与信任状态保持原样。")
+                .setView(value).focusInput(value).setNegativeButton("取消",null).setPositiveButton("保存",null).create()
+            dialog.setOnShowListener {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                    if(operationsBusy || !sourceReady())return@setOnClickListener
+                    dialog.dismiss();operationsBusy=true
+                    task {
+                        val result=try {
+                            storageCall("file_jobs",JSONObject().put("action","create").put("operation","source")
+                                .put("source_text",value.text.toString()).put("source_revision",record.getString("source_revision"))
+                                .put("items",JSONArray().put(JSONObject().put("path",selected).put("file_id",record.getString("file_id")))))
+                        } finally {operationsBusy=false}
+                        trackFileJob(result.getJSONObject("job").getString("id"),"source",base)
+                    }
+                }
+            }
+            dialog.show()
+        }
+    }
+
+    internal fun modifySize(item: JSONObject, selected: String) {
+        if (!sourceReady() || operationsBusy || item.optBoolean("dir")) return
+        if(item.optString("file_id").length!=64){status("缺少文件版本，请刷新目录后重试",true);return}
+        val base=path
+        val value=dialogInput(text=item.optLong("size").toString()).apply {
+            contentDescription="目标文件字节数"
+            inputType=android.text.InputType.TYPE_CLASS_NUMBER
+        }
+        val dialog=WorkspaceDialog.Builder(this).setTitle("更改实际文件大小")
+            .setMessage("$selected\n\n当前：${item.optLong("size")} 字节\n请输入 0–500,000,000,000 字节；1 GB = 1,000,000,000 字节。\n\n扩展保留原内容并在末尾补零。缩小会永久删除尾部数据，可能导致文档或程序损坏；此操作不是压缩文件，请先备份。\n\n由 Windows 执行，可在文件任务中查看进度；已完成的缩小无法撤销。")
+            .setView(value).focusInput(value,selectAll=true).setNegativeButton("取消",null).setPositiveButton("确认更改",null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val bytes=value.text.toString().trim().toLongOrNull()
+                if(bytes==null || bytes !in 0L..500_000_000_000L){value.error="请输入 0–500,000,000,000 的整数字节数";return@setOnClickListener}
+                if(operationsBusy || !sourceReady())return@setOnClickListener
+                dialog.dismiss()
+                operationsBusy=true
+                task {
+                    val result=try {
+                        val features=storageCall("capabilities").optJSONArray("features")
+                        check(features!=null && (0 until features.length()).any{features.optString(it)=="file_resize"}){
+                            "请完整更新并重启 Windows 3.13.0 或更新版接收端"
+                        }
+                        storageCall("file_jobs",JSONObject().put("action","create").put("operation","resize")
+                            .put("size",bytes).put("confirm_truncate",bytes<item.optLong("size"))
+                            .put("items",JSONArray().put(JSONObject().put("path",selected).put("file_id",item.getString("file_id")))))
+                    } finally {operationsBusy=false}
+                    trackFileJob(result.getJSONObject("job").getString("id"),"resize",base)
+                }
+            }
+        }
+        dialog.show()
     }
 
     internal fun modifyDate(item: JSONObject, selected: String) {

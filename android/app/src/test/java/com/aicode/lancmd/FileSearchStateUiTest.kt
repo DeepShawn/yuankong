@@ -174,6 +174,73 @@ class FileSearchStateUiTest {
         }
     }
 
+    @Test fun resizeRequiresConfirmationUsesExactBytesAndRetainsFileSearch() {
+        Stub().use {stub ->
+            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val page=controller.get()
+            try {
+                waitFor{page.visible.size==102 && !page.listingBusy}
+                compose.runOnIdle{page.query="readme";page.search()}
+                assertTrue(page.menuGroups(page.visible.single()).values.flatten().contains("更改实际大小"))
+                assertFalse(page.menuGroups(JSONObject().put("dir",true).put("name","Photos")).values.flatten().contains("更改实际大小"))
+                page.act("更改实际大小",page.visible.single());shadowOf(Looper.getMainLooper()).idle()
+                assertFalse(stub.requests.any{it.optString("operation")=="resize"})
+                latest().getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+                page.act("更改实际大小",page.visible.single());shadowOf(Looper.getMainLooper()).idle()
+                val dialog=latest()
+                val input=all(dialog.window!!.decorView).filterIsInstance<EditText>().single()
+                input.setText("500000000001");dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                assertTrue(dialog.isShowing);assertNotNull(input.error)
+                assertFalse(stub.requests.any{it.optString("operation")=="resize"})
+                input.setText("6");dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                waitFor{!page.operationsBusy && !page.listingBusy && page.note.contains("调整文件大小")}
+                val q=stub.requests.single{it.optString("operation")=="resize"}
+                assertEquals(6L,q.getLong("size"));assertTrue(q.getBoolean("confirm_truncate"))
+                assertEquals("C:\\notes\\readme.txt",q.getJSONArray("items").getJSONObject(0).getString("path"))
+                assertEquals("1".repeat(64),q.getJSONArray("items").getJSONObject(0).getString("file_id"))
+                assertEquals("readme",page.query);assertEquals(1,page.visible.size)
+                assertEquals(6L,page.visible.single().getLong("size"))
+            }finally{controller.pause().stop().destroy()}
+        }
+    }
+
+    @Test fun resizeRefusesAReceiverWithoutTheFeature() {
+        Stub().use {stub ->
+            stub.supportsResize=false;stub.install()
+            val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val page=controller.get()
+            try {
+                waitFor{page.visible.size==102 && !page.listingBusy}
+                page.act("更改实际大小",page.visible.single{it.optString("name")=="readme.txt"})
+                shadowOf(Looper.getMainLooper()).idle()
+                latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                waitFor{page.note.contains("完整更新并重启 Windows")}
+                assertFalse(stub.requests.any{it.optString("operation")=="resize"})
+            }finally{controller.pause().stop().destroy()}
+        }
+    }
+
+    @Test fun editableSourceNoteHasItsOwnVersionAndDoesNotWriteBeforeSave() {
+        Stub().use {stub ->
+            stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val page=controller.get()
+            try {
+                waitFor{page.visible.size==102 && !page.listingBusy}
+                compose.runOnIdle{page.query="readme";page.search()}
+                page.act("文件来源说明",page.visible.single())
+                waitFor{(ShadowDialog.getLatestDialog() as? AlertDialog)?.isShowing==true}
+                val dialog=latest()
+                val input=all(dialog.window!!.decorView).filterIsInstance<EditText>().single()
+                input.setText("https://example.com/original\n来源备注")
+                assertFalse(stub.requests.any{it.optString("operation")=="source"})
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                waitFor{!page.operationsBusy && !page.listingBusy && page.note.contains("保存来源说明")}
+                val q=stub.requests.single{it.optString("operation")=="source"}
+                assertEquals("https://example.com/original\n来源备注",q.getString("source_text"))
+                assertEquals("0".repeat(64),q.getString("source_revision"))
+                assertEquals("readme",page.query);assertEquals(1,page.visible.size)
+                assertEquals(10L,page.visible.single().getLong("size"))
+            }finally{controller.pause().stop().destroy()}
+        }
+    }
+
     private class Stub:Closeable {
         val requests=CopyOnWriteArrayList<JSONObject>()
         @Volatile var document="readme.txt"
@@ -182,8 +249,11 @@ class FileSearchStateUiTest {
         @Volatile var failListing=false
         @Volatile var generation=1700000000.0
         @Volatile var total=201
+        @Volatile var supportsResize=true
+        @Volatile var fileSize=10L
+        @Volatile var resizeJob:JSONObject?=null
         private val server=ServerSocket(0);private val client=AgentClient("127.0.0.1",server.localPort)
-        private fun item(name:String,dir:Boolean=false)=JSONObject().put("name",name).put("dir",dir).put("size",10)
+        private fun item(name:String,dir:Boolean=false)=JSONObject().put("name",name).put("dir",dir).put("size",if(name==document)fileSize else 10L)
             .put("mtime",1700000000+revision).put("file_id",(revision%16).toString(16).repeat(64))
             .put("parent","C:\\notes").put("path","C:\\notes\\$name")
         private val thread=Thread {
@@ -194,7 +264,14 @@ class FileSearchStateUiTest {
                     val r=JSONObject().put("id",q.getInt("id")).put("ok",true)
                     when(q.optString("cmd")) {
                         "storage"->r.put("home","C:\\notes").put("drives",JSONArray())
-                        "file_jobs"->r.put("jobs",JSONArray())
+                        "capabilities"->r.put("features",JSONArray().apply{if(supportsResize){put("file_resize");put("file_sources")}})
+                        "file_jobs"->if(q.optString("action")=="create") {
+                            if(q.optString("operation")=="resize")fileSize=q.getLong("size")
+                            revision++
+                            resizeJob=JSONObject().put("id","resize-job").put("operation",q.getString("operation")).put("status","completed").put("finished",1)
+                                .put("items",JSONArray().put(JSONObject(q.getJSONArray("items").getJSONObject(0).toString()).put("status","completed").put("size",fileSize)))
+                            r.put("job",resizeJob)
+                        } else r.put("jobs",JSONArray().apply{resizeJob?.let{put(it)}})
                         "ls"->if(failListing)r.put("ok",false).put("error","测试磁盘忙碌") else r.put("path",q.optString("path"))
                             .put("items",JSONArray().apply{if(q.optString("path")=="C:\\notes") {
                                 put(item("Photos",true));put(item(document))
@@ -202,6 +279,7 @@ class FileSearchStateUiTest {
                             }})
                         "rename"->{document=q.getString("to").substringAfterLast('\\');revision++}
                         "files"->when(q.optString("action")) {
+                            "source_read"->r.put("text","").put("source_revision","0".repeat(64)).put("file_id",(revision%16).toString(16).repeat(64))
                             "mtime"->revision++
                             "text_read"->r.put("text",text).put("revision",revision.toString()).put("encoding","utf-8").put("newline","lf").put("size",text.length)
                             "text_write"->{text=q.getString("text");revision++;r.put("revision",revision.toString()).put("size",text.length)}
