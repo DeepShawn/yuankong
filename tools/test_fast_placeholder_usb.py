@@ -65,6 +65,30 @@ class FastStrategyTest(unittest.TestCase):
         job=self.manager.request(dict(action="create",path=str(self.path),size=4097,mode="fast"),self.owner,fixtures.Error)["job"]
         self.assertEqual("completed",self.wait(job)["status"])
         self.assertEqual(["fast"],self.backend.requested_modes)
+
+    def test_reservation_checkpoints_bound_final_flush_and_do_not_repeat_it(self):
+        flushes=[]
+        class Segments(QuickAllocation):
+            def reserve(self,size,progress,cancelled,**kwargs):
+                for amount in range(1024,size+1,1024):
+                    self.stream.truncate(amount);progress(amount)
+            def flush(self):
+                flushes.append(self.path.stat().st_size);super().flush()
+        self.backend.create=lambda path:Segments(path,self.backend)
+        with mock.patch("placeholder_files.RESERVATION_FLUSH_BYTES",{"stable":4096,"fast":8192}):
+            result=self.wait(self.start(12288))
+        self.assertEqual("completed",result["status"],result)
+        self.assertEqual([4096,8192,12288],flushes)
+        self.assertEqual(12288,result["synced"])
+
+    def test_failed_checkpoint_never_commits_and_removes_partial_allocation(self):
+        self.backend.create=lambda path:QuickAllocation(path,self.backend)
+        with mock.patch.object(QuickAllocation,"flush",side_effect=OSError("USB flush failed")), \
+                mock.patch("placeholder_files.RESERVATION_FLUSH_BYTES",{"stable":1,"fast":1}):
+            result=self.wait(self.start())
+        self.assertEqual("failed",result["status"])
+        self.assertIn("USB flush failed",result["error"])
+        self.assertFalse(self.path.exists())
     def test_partial_unsupported_reservation_is_removed_before_full_stream_fallback(self):
         self.backend.mode="unsupported";result=self.wait(self.start())
         self.assertEqual("completed",result["status"],result);self.assertEqual("stream",result["method"])

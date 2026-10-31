@@ -13,6 +13,8 @@ from unittest import mock
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"windows"))
 from file_jobs import FileJobs,file_token,snapshot,publish_new
+import file_jobs
+from file_actions import file_request
 import lan_command_agent as agent
 
 
@@ -154,6 +156,113 @@ class FileJobsTest(unittest.TestCase):
         path.write_text("changed during download")
         with self.assertRaises(agent.RpcError):agent.cmd_download(dict(action="chunk",sid=opened["sid"]),state)
         self.assertEqual({},state.downloads)
+
+    def resize(self,path,size,confirm=False,spec=None):
+        job=self.call(action="create",operation="resize",items=[spec or self.spec(path)],size=size,confirm_truncate=confirm)["job"]
+        self.assertTrue(self.manager.jobs[job["id"]]["done"].wait(10))
+        return self.call()["jobs"][0]["items"][0]
+
+    def test_resize_preserves_prefix_appends_zeros_and_requires_explicit_truncation_consent(self):
+        path=self.source/"data.bin";path.write_bytes(b"original")
+        result=self.resize(path,37)
+        self.assertEqual("completed",result["status"],result)
+        self.assertEqual(b"original"+bytes(29),path.read_bytes())
+        self.assertEqual(37,result["size"])
+        result=self.resize(path,3)
+        self.assertEqual("failed",result["status"])
+        self.assertEqual(37,path.stat().st_size)
+        result=self.resize(path,3,True)
+        self.assertEqual("completed",result["status"],result)
+        self.assertEqual(b"ori",path.read_bytes())
+        self.assertEqual("completed",self.resize(path,0,True)["status"])
+        self.assertEqual(b"",path.read_bytes())
+
+    def test_resize_refuses_stale_versions_hardlinks_directories_and_protected_paths(self):
+        path=self.source/"data.bin";path.write_bytes(b"keep");old=self.spec(path)
+        path.write_bytes(b"keep new")
+        self.assertEqual("failed",self.resize(path,0,True,old)["status"])
+        self.assertEqual(b"keep new",path.read_bytes())
+        self.manager.protected=[self.source]
+        self.assertEqual("failed",self.resize(path,0,True)["status"])
+        self.manager.protected=[]
+        alias=self.source/"alias.bin";os.link(path,alias)
+        self.assertEqual("failed",self.resize(alias,0,True)["status"])
+        self.assertEqual(b"keep new",path.read_bytes())
+        self.assertEqual("failed",self.resize(self.dest,0,True)["status"])
+
+    def test_resize_validates_size_bounds_and_free_space_before_modifying_file(self):
+        path=self.source/"data.bin";path.write_bytes(b"keep")
+        for size in (-1,500_000_000_001,True,1.5,None):
+            with self.subTest(size=size),self.assertRaises(Error):
+                self.call(action="create",operation="resize",items=[self.spec(path)],size=size)
+        with mock.patch("file_jobs.shutil.disk_usage",return_value=SimpleNamespace(free=1_000_000_001)):
+            result=self.resize(path,20)
+        self.assertEqual("failed",result["status"])
+        self.assertEqual(b"keep",path.read_bytes())
+
+    def test_cancel_during_extension_restores_original_length_and_contents(self):
+        path=self.source/"data.bin";path.write_bytes(b"KEEP")
+        real=file_jobs.resize_stream
+        from contextlib import contextmanager
+        @contextmanager
+        def wrapped(*args):
+            with real(*args) as stream:
+                class Writer:
+                    def __getattr__(self,name):return getattr(stream,name)
+                    def write(self,data):
+                        count=stream.write(data)
+                        next(iter(self_manager.jobs.values()))["cancel"].set()
+                        return count
+                yield Writer()
+        self_manager=self.manager
+        with mock.patch("file_jobs.resize_stream",side_effect=wrapped):
+            result=self.resize(path,4*1024*1024+100)
+        self.assertEqual("cancelled",result["status"],result)
+        self.assertTrue(result["extension_rolled_back"])
+        self.assertEqual(b"KEEP",path.read_bytes())
+
+    @unittest.skipUnless(os.name=="nt","Windows sharing and alternate streams")
+    def test_native_resize_preserves_origin_stream_and_refuses_active_writers(self):
+        path=self.source/"data.bin";path.write_bytes(b"KEEP")
+        marker=Path(str(path)+":Zone.Identifier")
+        marker.write_bytes(b"[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.com/data\r\n")
+        before=marker.read_bytes()
+        self.assertEqual("completed",self.resize(path,20)["status"])
+        self.assertEqual(before,marker.read_bytes())
+        with path.open("r+b",buffering=0):
+            result=self.resize(path,0,True)
+            self.assertEqual("failed",result["status"])
+        self.assertEqual(20,path.stat().st_size)
+        self.assertEqual(before,marker.read_bytes())
+
+    def test_source_note_uses_its_own_revision_and_never_modifies_body_or_security_origin(self):
+        path=self.source/"source.txt";path.write_bytes(b"BODY")
+        marker=Path(str(path)+":Zone.Identifier");marker.write_bytes(b"[ZoneTransfer]\r\nZoneId=3\r\n")
+        before=marker.read_bytes()
+        def save(record,text):
+            job=self.call(action="create",operation="source",items=[self.spec(path)],source_revision=record["source_revision"],source_text=text)["job"]
+            self.assertTrue(self.manager.jobs[job["id"]]["done"].wait(10))
+            return self.call()["jobs"][0]["items"][0]
+        with mock.patch("file_jobs.supports_source_notes",return_value=True):
+            record=file_request(dict(action="source_read",path=str(path)),Error)
+            result=save(record,"https://example.com/file\n手动记录")
+            self.assertEqual("completed",result["status"],result)
+            self.assertEqual("https://example.com/file\n手动记录",file_request(dict(action="source_read",path=str(path)),Error)["text"])
+            self.assertEqual("failed",save(record,"stale edit")["status"])
+        self.assertEqual(b"BODY",path.read_bytes());self.assertEqual(before,marker.read_bytes())
+
+    @unittest.skipUnless(os.name=="nt","Windows named streams")
+    def test_native_source_note_uses_ntfs_stream_without_changing_security_origin(self):
+        path=self.source/"origin.txt";path.write_bytes(b"KEEP")
+        marker=Path(str(path)+":Zone.Identifier");marker.write_bytes(b"[ZoneTransfer]\r\nZoneId=3\r\n")
+        before=marker.read_bytes()
+        record=file_request(dict(action="source_read",path=str(path)),Error)
+        job=self.call(action="create",operation="source",items=[self.spec(path)],source_revision=record["source_revision"],source_text="原始网址 https://example.com")['job']
+        self.assertTrue(self.manager.jobs[job['id']]['done'].wait(10))
+        result=self.call()['jobs'][0]['items'][0]
+        self.assertEqual('completed',result['status'],result)
+        self.assertEqual("原始网址 https://example.com",file_request(dict(action="source_read",path=str(path)),Error)['text'])
+        self.assertEqual(before,marker.read_bytes());self.assertEqual(b"KEEP",path.read_bytes())
 
 
 if __name__=="__main__":unittest.main()

@@ -165,6 +165,19 @@ class PlaceholderUiTest {
             controller.pause().stop().destroy()
         }
     }
+    @Test fun successfulCloseIsActiveWithoutOfferingCancelOrReportingCleanup() {
+        Stub().use {stub ->
+            stub.jobState="closing";stub.install()
+            val controller=Robolectric.buildActivity(PlaceholderFilesActivity::class.java).setup();val page=controller.get()
+            try {
+                waitFor{page.items.any{it.title=="正在关闭已完成文件"} && !page.busy}
+                assertTrue(page.items.single().active);assertFalse(page.items.single().canCancel)
+                stub.jobState="completed";page.refreshJobs()
+                waitFor{page.items.any{it.title=="创建完成"} && !page.busy}
+                assertFalse(page.items.single().active)
+            }finally{controller.pause().stop().destroy()}
+        }
+    }
     @Test fun usbSafeEjectAndForceDisconnectAreSeparateConfirmedActionsWithRestore() {
         Stub().use { stub->
             stub.install();val controller=Robolectric.buildActivity(StorageActivity::class.java).setup();val storage=controller.get()

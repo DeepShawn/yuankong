@@ -23,6 +23,8 @@ ALLOCATION_MAX = 256 * 1024 * 1024
 FLUSH_BYTES = 64 * 1024 * 1024
 STABLE_ALLOCATION_MAX = 32 * 1024 * 1024
 STABLE_WRITE_RATE = 64 * 1024 * 1024
+RESERVATION_FLUSH_BYTES = {"stable": 64 * 1024 * 1024, "fast": 256 * 1024 * 1024}
+RESERVATION_FLUSH_SECONDS = 2.0
 
 
 class WritePacer:
@@ -216,16 +218,19 @@ class NativeAllocation:
         self.committed = True
 
     def close(self):
-        if self.stream is not None:
-            self.stream.close()
-            self.stream = None
-            self.handle = None
-        if self.handle is not None:
-            self.kernel.CloseHandle(self.handle)
-            self.handle = None
-        if self.directory is not None:
-            self.kernel.CloseHandle(self.directory)
-            self.directory = None
+        try:
+            if self.stream is not None:
+                stream, self.stream = self.stream, None
+                # FileIO owns the descriptor/handle, including its error path.
+                self.handle = None
+                stream.close()
+            elif self.handle is not None:
+                self.kernel.CloseHandle(self.handle)
+                self.handle = None
+        finally:
+            if self.directory is not None:
+                self.kernel.CloseHandle(self.directory)
+                self.directory = None
         if not self.committed and not self.pending and self.identity is not None:
             try:
                 current = self.path.lstat()
@@ -251,10 +256,15 @@ class NativeBackend:
             applied=bool(kernel.SetThreadPriority(handle,0x10000))
         except (OSError,AttributeError):
             pass
+        def finish():
+            nonlocal applied
+            # Bounded final flush/close and delete-pending cleanup should not
+            # remain starved behind foreground I/O after bulk creation ends.
+            if applied and kernel.SetThreadPriority(handle,0x20000):applied=False
         try:
-            yield
+            yield finish
         finally:
-            if applied:kernel.SetThreadPriority(handle,0x20000)
+            finish()
 
     def validate(self, path, size):
         from ctypes import wintypes as w
@@ -337,7 +347,7 @@ class PlaceholderFiles:
                     self.jobs.pop(completed.pop(0))
                 rid = uuid.uuid4().hex
                 job = dict(owner=state.client_id, cancel=threading.Event(), done=threading.Event(),
-                           data=dict(id=rid, path=str(path), size=size, mode=mode, written=0, allocated=0, status="queued", created=time.time(), updated=time.time()))
+                           data=dict(id=rid, path=str(path), size=size, mode=mode, written=0, synced=0, allocated=0, status="queued", created=time.time(), updated=time.time()))
                 self.jobs[rid] = job
                 worker = threading.Thread(target=self._run, args=(job, path), name="placeholder-file", daemon=True)
                 job["thread"] = worker
@@ -347,12 +357,21 @@ class PlaceholderFiles:
             raise error(str(exc))
 
     def _run(self, job, path):
-        with getattr(self.backend,"background",nullcontext)():
-            self._execute(job,path)
+        with getattr(self.backend,"background",nullcontext)() as finish:
+            self._execute(job,path,finish if callable(finish) else lambda:None)
 
-    def _execute(self, job, path):
+    def _execute(self, job, path, finish=lambda:None):
         allocation = None
         data = job["data"]
+        flushed = -1
+        flushed_at = time.monotonic()
+        def checkpoint():
+            nonlocal flushed, flushed_at
+            data.update(status="flushing", updated=time.time())
+            allocation.flush()
+            flushed = data["written"]
+            flushed_at = time.monotonic()
+            data.update(synced=flushed, updated=time.time())
         try:
             if job["cancel"].is_set():
                 data["status"] = "cancelled"
@@ -377,6 +396,16 @@ class PlaceholderFiles:
                         data["updated"]=time.time()
                         if data["size"] and self.backend.free(path)<RESERVE_BYTES:
                             raise ValueError("分配后剩余空间不足 1 GB，已取消并清理")
+                        if job["cancel"].is_set():raise FastAllocationCancelled()
+                        # Keep metadata/zeroing work from accumulating until the
+                        # final fsync/CloseHandle on slower USB file systems. Do
+                        # not flush every small allocation (costly on fast disks).
+                        dirty = data["written"] - max(0, flushed)
+                        if (dirty >= RESERVATION_FLUSH_BYTES[data["mode"]] or
+                                (dirty and time.monotonic()-flushed_at >= RESERVATION_FLUSH_SECONDS)):
+                            checkpoint()
+                            if job["cancel"].is_set():raise FastAllocationCancelled()
+                            data["status"]="allocating"
                     reserve(data["size"],progress,job["cancel"].is_set,mode=data["mode"],pause=job["cancel"].wait)
                     info=allocation.inspect()
                     if info["size"]!=data["size"] or info["allocated"]<data["size"]:
@@ -391,7 +420,9 @@ class PlaceholderFiles:
                     if data["size"] and self.backend.free(path)-data["size"]<RESERVE_BYTES:
                         raise ValueError("空间不足，无法回退写入；未完成文件已清理")
                     allocation=self.backend.create(path)
-                    data.update(status="writing",method="stream",written=0)
+                    flushed=-1
+                    flushed_at=time.monotonic()
+                    data.update(status="writing",method="stream",written=0,synced=0)
             stable=data["mode"]=="stable"
             chunk_bytes=min(CHUNK_BYTES,1024*1024) if stable else CHUNK_BYTES
             flush_bytes=min(FLUSH_BYTES,16*1024*1024) if stable else FLUSH_BYTES
@@ -416,15 +447,17 @@ class PlaceholderFiles:
                     if job["cancel"].is_set():
                         data["status"]="cancelled"
                         return
-                    data["status"]="flushing"
-                    allocation.flush()
+                    checkpoint()
                     unflushed=0
                     data.update(status="writing",updated=time.time())
             if job["cancel"].is_set():
                 data["status"]="cancelled"
                 return
-            data["status"] = "verifying"
-            allocation.flush()
+            finish()
+            # A checkpoint that already flushed the last byte needs no second
+            # file-cache flush. Empty files still get one real flush.
+            if flushed != data["written"]:checkpoint()
+            data.update(status="verifying",updated=time.time())
             info = allocation.inspect()
             if (info["size"] != data["size"] or info["allocated"] < data["size"] or
                     info["attributes"] & 6 != 6 or info["attributes"] & (0x200 | 0x800)):
@@ -440,7 +473,7 @@ class PlaceholderFiles:
                 job["committing"]=True
                 data["status"]="committing"
             allocation.commit()
-            data.update(allocated=info["allocated"], status="completed")
+            data.update(allocated=info["allocated"], status="closing", updated=time.time())
         except FastAllocationCancelled:
             data["status"]="cancelled"
         except Exception as exc:
@@ -448,7 +481,9 @@ class PlaceholderFiles:
         finally:
             if allocation is not None:
                 try:
+                    finish()
                     allocation.close()
+                    if data["status"]=="closing":data["status"]="completed"
                 except OSError as exc:
                     data.update(status="failed", error="关闭文件失败，请检查目标路径：" + str(exc)[:1000])
             data["finished"] = time.time()

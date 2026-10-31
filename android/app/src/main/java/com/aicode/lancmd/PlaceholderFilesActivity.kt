@@ -77,6 +77,7 @@ class PlaceholderFilesActivity : MiuixActivity() {
         LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
             if(detailsExpanded)item {SectionCard {
                 Note("两种模式都优先分批预分配真实空间，不支持时逐块写入。稳定模式让行前台；快速模式优先速度。不覆盖已有文件，保留至少 1 GB 可用空间。")
+                Note("分配过程中分批刷新，避免把磁盘收尾集中到最后；分配达到目标后仍需校验与关闭，关闭成功才显示创建完成。")
                 Note("文件带隐藏＋系统属性，安卓文件管理可见并可删除；Windows 显示受保护的系统文件后可见。手机断线继续创建，取消、失败或接收端退出会清理未完成文件。")
             }}
             if(items.isEmpty())item{EmptyNote("本次接收端暂无占位任务。重启后可在目标目录管理已完成文件。")}
@@ -199,7 +200,7 @@ class PlaceholderFilesActivity : MiuixActivity() {
                 val state = item.optString("status")
                 val active = state in listOf(
                     "queued", "checking", "allocating", "writing", "flushing",
-                    "verifying", "cancelling", "cleaning", "committing"
+                    "verifying", "cancelling", "cleaning", "committing", "closing"
                 )
                 val total = item.optLong("size")
                 val written = item.optLong("written")
@@ -215,6 +216,7 @@ class PlaceholderFilesActivity : MiuixActivity() {
                         "cancelling" -> "正在取消，等待磁盘返回并清理"
                         "cleaning" -> "正在关闭文件并清理"
                         "committing" -> "正在完成文件"
+                        "closing" -> "正在关闭已完成文件"
                         "completed" -> "创建完成"
                         "cancelled" -> "已取消并清理"
                         else -> "创建失败"
@@ -222,8 +224,9 @@ class PlaceholderFilesActivity : MiuixActivity() {
                     path = item.getString("path"),
                     modeName = if (!item.has("mode")) null
                     else if (item.optString("mode") == "stable") "稳定模式" else "快速模式",
-                    sizeLine = "已完成 ${gb(written)} GB / ${gb(total)} GB" +
-                        if (state == "completed") " · 实际分配 ${gb(item.optLong("allocated"))} GB" else "",
+                    sizeLine = "已分配 / 写入 ${gb(written)} GB / ${gb(total)} GB" +
+                        if (state == "completed") " · 实际分配 ${gb(item.optLong("allocated"))} GB"
+                        else if(item.has("synced")) " · 已刷新 ${gb(item.optLong("synced"))} GB" else "",
                     progress = if (active && state != "writing") null
                     else if (total == 0L) (if (state == "completed") 1f else 0f)
                     else (written.toDouble() / total).toFloat().coerceIn(0f, 1f),
@@ -231,7 +234,7 @@ class PlaceholderFilesActivity : MiuixActivity() {
                     waitingDisk = active && item.optLong("idle_seconds") >= 5,
                     active = active,
                     canCancel = active &&
-                        item.optBoolean("can_cancel", state !in listOf("cancelling", "cleaning", "committing")),
+                        item.optBoolean("can_cancel", state !in listOf("cancelling", "cleaning", "committing", "closing")),
                     failed = state == "failed"
                 )
             }

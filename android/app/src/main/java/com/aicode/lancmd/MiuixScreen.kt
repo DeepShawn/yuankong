@@ -336,7 +336,7 @@ abstract class MiuixActivity : AppCompatActivity() {
         setPadding(px(20), 0, px(20), 0)
     }
 
-    protected fun task(block: suspend () -> Unit): Job = lifecycleScope.launch {
+    protected fun task(block: suspend () -> Unit): Job = lifecycleScope.launch(com.aicode.lancmd.net.DelayNotice { status(it) }) {
         try { block() }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { status(e.message ?: "操作失败", true) }

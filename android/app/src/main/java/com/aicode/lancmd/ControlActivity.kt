@@ -62,6 +62,10 @@ class ControlActivity : MiuixActivity() {
 
     @Composable
     private fun MessageScreen() = Page("发送消息") {
+        SectionCard {
+            Action("滚动消息／全局弹窗／桌面常驻") { startActivity(android.content.Intent(this@ControlActivity,AnnouncementsActivity::class.java)) }
+            Action("全局命令与操作延迟") { startActivity(android.content.Intent(this@ControlActivity,DelaysActivity::class.java)) }
+        }
         SectionCard("消息内容") {
             Field(label = "标题", value = messageTitle, onValueChange = { messageTitle = it.take(60) })
             Field(

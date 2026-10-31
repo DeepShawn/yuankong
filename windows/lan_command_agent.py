@@ -44,9 +44,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 APP_ID = "LANCMD"
-VERSION = "3.12.0"
-BUILD_VERSION = "3.12.0"
-RELEASE_TAG = "v3.12.0"
+VERSION = "3.13.0"
+BUILD_VERSION = "3.13.0"
+RELEASE_TAG = "v3.13.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1136,6 +1136,8 @@ from gestures import Gestures
 from app_locks import AppLocks
 from app_catalog import AppCatalog
 from file_locks import FileLocks
+from announcements import Announcements
+from global_delays import GlobalDelays
 from app_freeze import AppFreeze
 from wallpaper import Wallpaper
 from registry_editor import RegistryEditor
@@ -1155,6 +1157,7 @@ _connections=weakref.WeakSet()
 _connections_lock=threading.RLock()
 
 def upgrade_busy():
+    if _global_delays.busy():return "请先完成或取消全局延迟任务"
     if _network_management.busy():return "请等待网络更改、蓝牙配对或热点定时任务完成（或取消定时）后更新"
     with _startup_network.lock:
         if _startup_network.job and _startup_network.job["status"] == "running":return "请等待启动与网络设置完成后更新"
@@ -1212,6 +1215,7 @@ def prepare_usb_disconnect(device):
             raise ValueError("接收端或恢复记录位于此 USB 设备，请移到本机磁盘后再断开")
     _placeholders.stop_for_device(device)
     _file_schedule.stop_for_device(device)
+    _global_delays.stop_for_device(device)
     _file_jobs.stop_for_device(device)
     _file_search.stop_for_device(device)
 
@@ -1227,6 +1231,7 @@ _tasks = TaskManager(protected=(_capture_dir,))
 _app_catalog = AppCatalog(_app_locks._target,protected=(_capture_dir,sys.executable,APP_DIR,os.environ.get("SystemRoot",r"C:\Windows")))
 _app_runtime = AppCatalog(_app_locks._target,protected=(_capture_dir,sys.executable,APP_DIR,os.environ.get("SystemRoot",r"C:\Windows")),runtime=True,labels=_app_catalog)
 _file_locks = FileLocks(os.path.join(APP_DIR,"file-locks.json"),protected=(_capture_dir,sys.executable,APP_DIR),worker=False)
+_announcements = Announcements()
 _app_freeze = AppFreeze()
 _wallpaper = Wallpaper(os.path.join(APP_DIR,"wallpapers"))
 _scripts = ScriptRunner()
@@ -1255,7 +1260,7 @@ def remote_capabilities():
     features = ["storage", "file_preview", "zip_extract", "commands", "text_editor"]
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures", "cursor_visibility", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"])
-        features.extend(["app_runtime","file_locks","app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","force_delete","startup_network","network_management","network_device_state","hotspot_client_access","hotspot_adapter_selection","network_password","network_batch","hotspot_timer","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
+        features.extend(["announcements","global_delays","app_runtime","file_locks","app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","force_delete","startup_network","network_management","network_device_state","hotspot_client_access","hotspot_adapter_selection","network_password","network_batch","hotspot_timer","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","file_resize","file_sources","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
         if os.path.isfile(_recordings.executable):
             features.extend(["recordings","panorama_recording","system_audio_recording"])
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1305,6 +1310,7 @@ HANDLERS = {
     "file_jobs": lambda q, st: _file_jobs.request(q,st,RpcError),
     "startup_network": lambda q, st: _startup_network.request(q,RpcError),
     "network": lambda q, st: _network_management.request(q,st.client_id,RpcError),
+    "announcements": lambda q,st: _announcements.request(q,st,RpcError),
     "message": _remote.message,
     "info": lambda q, st: cmd_info(),
     "exec": lambda q, st: run_exec(
@@ -1327,6 +1333,14 @@ HANDLERS = {
 }
 _file_schedule = FileSchedule(lambda command, params, state: HANDLERS[command](params,state))
 HANDLERS["file_schedule"] = lambda q,st: _file_schedule.request(q,st,RpcError)
+
+def execute_delayed(command,params,state):
+    with _updates.operation(command):
+        result=HANDLERS[command](params,state)
+        return result if isinstance(result,dict) else dict(result=result)
+
+_global_delays=GlobalDelays(os.path.join(APP_DIR,"global-delays.json"),execute_delayed)
+HANDLERS["delays"]=lambda q,st:_global_delays.request(q,st,RpcError)
 
 
 
@@ -1520,7 +1534,8 @@ def serve_client(sock, addr, cfg):
                 log.info("%s <- %s", state.client_name or state.peer, cmd)
                 state.touch()
                 with _updates.operation(cmd):
-                    result = handler(req, state)
+                    queued = _global_delays.intercept(cmd,req,state,RpcError)
+                    result = queued if queued is not None else handler(req, state)
                 resp = {"id": rid, "ok": True}
                 resp.update(result if isinstance(result, dict) else {"result": result})
                 write_frame(wf, resp)
@@ -1944,6 +1959,9 @@ USAGE = r"""LanCmd Agent v%s
 
 def main(argv):
     global _cfg_cache
+    if "--announcement-worker" in argv:
+        from announcements import worker_main
+        return worker_main()
     if "--cursor-worker" in argv:
         from cursor_visibility import worker_main
         return worker_main()
@@ -2082,6 +2100,8 @@ def main(argv):
     finally:
         if _updates.draining:_upgrade_exit_ready.wait(45)
         _file_locks.close()
+        _announcements.close()
+        _global_delays.close()
         cleanup_pid()
     return 0
 
