@@ -208,6 +208,7 @@ abstract class MiuixActivity : AppCompatActivity() {
         if(android.os.Build.VERSION.SDK_INT<26 && Themes.tone(this).light)window.navigationBarColor=0xFF172131.toInt()
         AppVisibility.install(application)
         origin
+        EntryMotion.enter(this,savedInstanceState)
     }
 
     /** 用 Compose 作为页面内容，不引入 activity-compose 依赖。 */

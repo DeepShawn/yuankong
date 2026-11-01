@@ -15,10 +15,32 @@ import time
 from types import SimpleNamespace
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'windows'))
-from announcements import Announcements,DEFAULT,validate,motion_frame
+from announcements import Announcements,WorkerProcess,DEFAULT,validate,motion_frame,window_rect
 class Error(Exception):pass
 
 class ModelTest(unittest.TestCase):
+    def test_custom_rectangle_maps_to_work_area_with_offsets_and_dpi_minimum(self):
+        config=validate(dict(text='notice',placement='custom',rect=dict(x=100,y=200,width=500,height=300)))
+        area=dict(x=-1920,y=40,width=1920,height=1040,dpi=144)
+        self.assertEqual(dict(x=-1728,y=248,width=960,height=312),window_rect(config,area))
+        config['rect']=dict(x=900,y=900,width=100,height=100)
+        tiny=dict(x=-320,y=10,width=320,height=240,dpi=192)
+        self.assertEqual(dict(x=-320,y=122,width=320,height=128),window_rect(config,tiny))
+
+    def test_invalid_or_offscreen_custom_rectangles_are_never_accepted(self):
+        good=dict(x=100,y=100,width=400,height=200)
+        for change in ({'x':-1},{'x':700},{'y':900},{'width':9},{'height':0},{'x':True},{'y':1.0},{'unknown':0}):
+            with self.subTest(change=change),self.assertRaises(ValueError):
+                validate(dict(text='notice',placement='custom',rect=dict(good,**change)))
+        with self.assertRaises(ValueError):validate(dict(text='notice',placement='custom'))
+
+    def test_presets_still_fit_the_work_area_and_tiny_displays(self):
+        for area in (dict(x=80,y=24,width=1920,height=1040,dpi=144),dict(x=0,y=0,width=80,height=40,dpi=96)):
+            for mode in ('ticker','popup','sticky'):
+                for position in ('top','center','bottom'):
+                    r=window_rect(validate(dict(text='notice',mode=mode,position=position)),area)
+                    self.assertTrue(area['x']<=r['x']<=area['x']+area['width']-r['width'],r)
+                    self.assertTrue(area['y']<=r['y']<=area['y']+area['height']-r['height'],r)
     def test_all_styles_and_colors_validate_without_executing_text(self):
         config=validate(dict(text='中文 & "hello" <test> 😀\nnext',background='#abcdef'))
         self.assertEqual('#ABCDEF',config['background']);self.assertEqual('left',config['motion'])
@@ -38,6 +60,7 @@ class ModelTest(unittest.TestCase):
 
 class Fake:
     def __init__(self):self.started=[]
+    def layout(self):return dict(x=80,y=24,width=1920,height=1040,dpi=144)
     def run(self,config,report,commands,cancel):
         self.started.append(config);report(dict(status='playing',cycles=0,elapsed=0))
         while not cancel.wait(.01):
@@ -55,6 +78,10 @@ class OwnershipTest(unittest.TestCase):
             time.sleep(.01)
         self.fail('announcement did not settle')
     def call(self,**q):return self.manager.request(q,self.state,Error)
+    def test_layout_query_does_not_start_or_replace_a_notice(self):
+        result=self.call(action='layout')
+        self.assertEqual(1920,result['area']['width']);self.assertEqual([],self.backend.started)
+        self.assertIsNone(self.manager.current)
     def test_replace_pause_resume_stop_and_other_phone_cannot_take_over(self):
         ident=self.call(action='show',config={'text':'one'})['job']['id'];self.wait(lambda:self.call()['job']['status']=='playing')
         other=SimpleNamespace(client_id='other')
@@ -97,8 +124,24 @@ class NativeTest(unittest.TestCase):
                 if value['status']==expected:return value
             self.fail('native state timeout: '+expected)
         try:
-            p.stdin.write(json.dumps(dict(text='本机测试 Native notice',repeats=0,duration=0,prefix='Native notice test',shape='rounded'))+'\n');p.stdin.flush()
+            area=WorkerProcess().layout()
+            config=validate(dict(text='本机测试 Native notice',repeats=0,duration=0,prefix='Native notice test',shape='rounded',
+                                 placement='custom',rect=dict(x=100,y=200,width=500,height=300)))
+            p.stdin.write(json.dumps(config)+'\n');p.stdin.flush()
             ready=wait_status('playing');self.assertGreater(ready.get('width',0),100)
+            expected=window_rect(config,area)
+            self.assertEqual(expected,{k:ready[k] for k in ('x','y','width','height')})
+            from ctypes import wintypes as w
+            user=ctypes.WinDLL('user32');user.FindWindowW.argtypes=[w.LPCWSTR,w.LPCWSTR];user.FindWindowW.restype=w.HWND
+            user.GetWindowRect.argtypes=[w.HWND,ctypes.POINTER(w.RECT)]
+            user.SetThreadDpiAwarenessContext.argtypes=[ctypes.c_void_p];user.SetThreadDpiAwarenessContext.restype=ctypes.c_void_p
+            previous=user.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
+            try:
+                handle=user.FindWindowW(None,'Native notice test');self.assertTrue(handle)
+                actual=w.RECT();self.assertTrue(user.GetWindowRect(handle,ctypes.byref(actual)))
+                self.assertEqual(expected,dict(x=actual.left,y=actual.top,width=actual.right-actual.left,height=actual.bottom-actual.top))
+            finally:
+                if previous:user.SetThreadDpiAwarenessContext(previous)
             p.stdin.write('{"action":"pause"}\n');p.stdin.flush();wait_status('paused')
             p.stdin.write('{"action":"resume"}\n');p.stdin.flush();wait_status('playing')
             p.stdin.close();p.stdin=None

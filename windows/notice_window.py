@@ -7,7 +7,7 @@ import struct
 import threading
 import time
 import uuid
-from announcements import motion_frame
+from announcements import motion_frame,primary_work_area,window_rect
 
 class RectF(c.Structure):_fields_=[('x',c.c_float),('y',c.c_float),('width',c.c_float),('height',c.c_float)]
 class SizeF(c.Structure):_fields_=[('width',c.c_float),('height',c.c_float)]
@@ -142,17 +142,9 @@ class NoticeWindow:
         except AttributeError:
             try:user.SetProcessDPIAware()
             except AttributeError:pass
-        dpi=user.GetDpiForSystem() if hasattr(user,'GetDpiForSystem') else 96;s=dpi/96
-        work=w.RECT();user.SystemParametersInfoW(48,0,c.byref(work),0)
-        screen_width=work.right-work.left;screen_height=work.bottom-work.top
-        width=max(240,int(screen_width*self.config['width']/100))
-        if self.config['mode']=='ticker':height=min(int(max(64,self.config['font_size']*2.2)*s),screen_height//2)
-        elif self.config['mode']=='popup':width=min(width,int(screen_width*.8));height=min(int(360*s),int(screen_height*.6))
-        else:width=min(width,int(480*s));height=min(int(240*s),int(screen_height*.45))
-        width=min(width,screen_width);height=max(64,height)
-        x=work.left+(screen_width-width)//2
-        y=work.top if self.config['position']=='top' else work.top+(screen_height-height)//2 if self.config['position']=='center' else work.bottom-height
-        if self.config['mode']=='sticky':x=work.right-width-int(12*s);y=max(work.top,min(y,work.bottom-height-int(12*s)))
+        area=primary_work_area();s=area['dpi']/96
+        bounds=window_rect(self.config,area)
+        x,y,width,height=(bounds[k] for k in ('x','y','width','height'))
         surface=Surface(width,height,self.config,s)
         start=time.monotonic();paused=None;paused_total=0.;last_report=0.;state='playing';cycles=0
         instance=kernel.GetModuleHandleW(None);name='LanCmdAnnouncement_'+uuid.uuid4().hex
@@ -222,7 +214,7 @@ class NoticeWindow:
                         except (ValueError,AttributeError):pass
                 finally:self.commands.put('eof')
             threading.Thread(target=controls,daemon=True,name='announcement-controls').start()
-            self.emit(dict(status='playing',elapsed=0,cycles=0,width=width,height=height))
+            self.emit(dict(status='playing',elapsed=0,cycles=0,x=x,y=y,width=width,height=height))
             msg=w.MSG()
             while True:
                 result=user.GetMessageW(c.byref(msg),None,0,0)
