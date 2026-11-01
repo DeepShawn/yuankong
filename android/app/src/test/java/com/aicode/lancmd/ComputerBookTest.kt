@@ -9,10 +9,12 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.ConscryptMode
 import java.util.concurrent.Executors
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk=[33],application=Application::class)
+@ConscryptMode(ConscryptMode.Mode.OFF)
 class ComputerBookTest {
     private val ctx get()=RuntimeEnvironment.getApplication()
     private fun target(host:String="192.168.1.2",id:String="pc-one")=Target(host,47823,"Original PC",id)
