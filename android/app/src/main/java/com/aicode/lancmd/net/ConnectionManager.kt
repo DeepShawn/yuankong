@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import com.aicode.lancmd.Prefs
+import com.aicode.lancmd.ComputerBook
 import com.aicode.lancmd.Target
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -253,6 +254,12 @@ object ConnectionManager {
                 continue
             }
 
+            var visitId:String?=null
+            fun endVisit(){
+                val id=visitId?:return
+                visitId=null
+                runCatching{ComputerBook.ended(ctx(),id)}
+            }
             try {
                 val token = Prefs.token(ctx(), usedIp, target.port)
                 Prefs.saveToken(ctx(), usedIp, target.port, hs.optString("token"))
@@ -279,6 +286,8 @@ object ConnectionManager {
                         reconnects = reconnects
                     )
                 )
+                visitId=runCatching{ComputerBook.connected(ctx(),Target(usedIp,target.port,
+                    hs.optString("agent").ifEmpty{target.name},hs.optString("agent_id").ifEmpty{target.agentId}))}.getOrNull()
                 if (reconnects > 0) {
                     event("已恢复连接（第 $reconnects 次重连成功）", LogKind.OK)
                 } else {
@@ -287,6 +296,7 @@ object ConnectionManager {
 
                 startPing(c)
                 awaitDisconnect(c)
+                endVisit()
                 stopPing()
 
                 val wasRunning = running
@@ -305,10 +315,12 @@ object ConnectionManager {
                 event("连接断开，开始自动重连", LogKind.ERROR)
                 waitOrWake(600)
             } catch (e: CancellationException) {
+                endVisit()
                 c?.close()
                 client = null
                 throw e
             } catch (e: Exception) {
+                endVisit()
                 c?.close()
                 client = null
                 fails++
@@ -326,6 +338,8 @@ object ConnectionManager {
                     )
                 )
                 countdown(waitMs, fails)
+            } finally {
+                endVisit()
             }
             } catch (e: CancellationException) {
                 throw e

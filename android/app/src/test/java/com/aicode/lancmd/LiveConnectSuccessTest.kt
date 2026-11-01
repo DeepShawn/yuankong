@@ -81,6 +81,7 @@ class LiveConnectSuccessTest {
 
         assertTrue("应经过 CONNECTING", seen.contains(State.CONNECTING))
         assertTrue("最终应连上: $seen", seen.contains(State.CONNECTED))
+        assertTrue("成功连接应保存本地连接历史",ComputerBook.read(ctx).history.any{it.host.isNotBlank() && it.port==47823})
         assertTrue("不应有未捕获异常: ${crashes.map { it.toString() }}", crashes.isEmpty())
     }
 }
