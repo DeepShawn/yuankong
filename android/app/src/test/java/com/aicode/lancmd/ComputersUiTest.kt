@@ -74,9 +74,11 @@ class ComputersUiTest {
         val c=Robolectric.buildActivity(ComputersActivity::class.java).setup();val p=c.get()
         try{
             waitFor{p.book.history.size==1};p.tab=1
+            val next=ComputerBook.connected(ctx,t,3000);ComputerBook.ended(ctx,next,4000)
+            waitFor{p.book.history.size==2 && p.book.history.first().ended==4000L}
             p.clearHistory();shadowOf(Looper.getMainLooper()).idle()
             latest().getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
-            assertEquals(1,ComputerBook.read(ctx).history.size)
+            assertEquals(2,ComputerBook.read(ctx).history.size)
             p.clearHistory();shadowOf(Looper.getMainLooper()).idle()
             latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
             waitFor{p.book.history.isEmpty()}

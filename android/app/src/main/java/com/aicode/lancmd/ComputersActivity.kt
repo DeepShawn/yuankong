@@ -1,6 +1,7 @@
 package com.aicode.lancmd
 
 import android.os.Bundle
+import android.content.SharedPreferences
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,6 +27,9 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
     private var found by mutableStateOf(setOf<String>())
     private var lastScan by mutableStateOf(0L)
     private var scanJob:Job?=null
+    private var loadJob:Job?=null
+    private val records by lazy{getSharedPreferences(ComputerBook.FILE,MODE_PRIVATE)}
+    private val recordListener=SharedPreferences.OnSharedPreferenceChangeListener{_,key->if(key=="book")reload()}
     internal var discovery:suspend ()->DiscoverResult={withContext(Dispatchers.IO){Discovery.discover(applicationContext)}}
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
@@ -34,9 +38,14 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
     }
     override fun onStart(){
         super.onStart();ConnectionManager.addListener(this)
-        task{book=withContext(Dispatchers.IO){ComputerBook.seed(this@ComputersActivity)}}
+        records.registerOnSharedPreferenceChangeListener(recordListener)
+        reload(importLegacy=true)
     }
-    override fun onStop(){scanJob?.cancel();ConnectionManager.removeListener(this);super.onStop()}
+    override fun onStop(){scanJob?.cancel();loadJob?.cancel();records.unregisterOnSharedPreferenceChangeListener(recordListener);ConnectionManager.removeListener(this);super.onStop()}
+    private fun reload(importLegacy:Boolean=false){
+        loadJob?.cancel()
+        loadJob=task{book=withContext(Dispatchers.IO){if(importLegacy)ComputerBook.seed(this@ComputersActivity) else ComputerBook.read(this@ComputersActivity)}}
+    }
     override fun onSaveInstanceState(out:Bundle){out.putString("query",query);out.putInt("tab",tab);super.onSaveInstanceState(out)}
     override fun onStatus(status:ConnectionManager.Status){current=status}
     override fun onEvent(text:String,kind:ConnectionManager.LogKind){}
@@ -79,7 +88,7 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
                     val c=book.computers.firstOrNull{it.key==v.computerKey}
                     InfoItem(c?.label?:v.reportedName,"${v.host}:${v.port}\n连接：${time(v.started)}\n"+
                         (if(v.ended>0)"结束：${time(v.ended)}" else "结束时间未记录（或仍在连接）"))
-                    Action("删除此条记录"){task{book=withContext(Dispatchers.IO){ComputerBook.removeVisit(this@ComputersActivity,v.id)};status("已删除此条本地记录")}}
+                    Action("删除此条记录"){task{withContext(Dispatchers.IO){ComputerBook.removeVisit(this@ComputersActivity,v.id)};reload();status("已删除此条本地记录")}}
                 }}
             }
             item{SectionCard{Action("清空电脑记录与备注"){clearBook()}}}
@@ -92,7 +101,8 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
             try {
                 val result=discovery()
                 val observed=System.currentTimeMillis()
-                book=withContext(Dispatchers.IO){ComputerBook.discovered(this@ComputersActivity,result.agents,observed)}
+                withContext(Dispatchers.IO){ComputerBook.discovered(this@ComputersActivity,result.agents,observed)}
+                reload()
                 found=result.agents.take(ComputerBook.MAX_COMPUTERS).filter{it.ip.isNotBlank() && it.ip.length<=253 && it.ip.none{c->c.isISOControl()} && it.port in 1..65535}
                     .map{ComputerBook.key(Target(it.ip,it.port,it.name,it.id))}.toSet()
                 lastScan=observed
@@ -108,7 +118,7 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
         dialog.setOnShowListener{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
             val name=input.text.toString()
             if(name.length>40 || name.any{it.isISOControl()}){input.error="最多 40 字，不能包含换行或控制字符";return@setOnClickListener}
-            dialog.dismiss();task{book=withContext(Dispatchers.IO){ComputerBook.rename(this@ComputersActivity,c.target(),name)};status("电脑备注已保存")}
+            dialog.dismiss();task{withContext(Dispatchers.IO){ComputerBook.rename(this@ComputersActivity,c.target(),name)};reload();status("电脑备注已保存")}
         }}
         dialog.show()
     }
@@ -116,7 +126,7 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
         .setMessage("原机名：${c.reportedName}\n地址：${c.host}:${c.port}\n接收端标识：${c.agentId.ifBlank{"旧版未提供；按地址区分"}}\n最近发现：${time(c.lastSeen)}\n最近连接：${time(c.lastConnected)}\n\n发现信息由接收端提供，备注不代表已授权或可信设备。")
         .setPositiveButton("关闭",null).show()}
     internal fun clearHistory(){WorkspaceDialog.Builder(this).setTitle("清空连接历史？").setMessage("只删除本手机的连接历史，保留电脑备注和配对凭据，当前连接继续。")
-        .setNegativeButton("取消",null).setPositiveButton("清空"){_,_->task{book=withContext(Dispatchers.IO){ComputerBook.clearHistory(this@ComputersActivity)};status("连接历史已清空")}}.show()}
+        .setNegativeButton("取消",null).setPositiveButton("清空"){_,_->task{withContext(Dispatchers.IO){ComputerBook.clearHistory(this@ComputersActivity)};reload();status("连接历史已清空")}}.show()}
     private fun clearBook(){WorkspaceDialog.Builder(this).setTitle("清空电脑记录与备注？").setMessage("删除本手机保存的电脑信息、备注和连接历史。配对凭据与当前连接保留，下次刷新会重新列出接收端。")
-        .setNegativeButton("取消",null).setPositiveButton("清空"){_,_->scanJob?.cancel();task{book=withContext(Dispatchers.IO){ComputerBook.clear(this@ComputersActivity)};found=emptySet();status("电脑记录、备注与历史已清空")}}.show()}
+        .setNegativeButton("取消",null).setPositiveButton("清空"){_,_->scanJob?.cancel();task{withContext(Dispatchers.IO){ComputerBook.clear(this@ComputersActivity)};reload();found=emptySet();status("电脑记录、备注与历史已清空")}}.show()}
 }
