@@ -3,7 +3,7 @@
 手机在同一个局域网下直接控制电脑：执行命令、查看屏幕和摄像头、发送消息和按键、管理磁盘文件、锁屏与剪贴板。
 电脑端由本机启动、停止接收服务；手机端开机即自动发现、**不用输连接码**、**掉线自动重连**。
 
-**3.15.0：公告增加手机本地播放、暂停、拖动与四角缩放，确认后按电脑可用区域发送；新增放大预览和精确布局，安卓加入遵循系统设置的进入动画。**
+**3.16.0：Windows 新增由电脑本机确认的卸载、安装文件夹改名与普通文档批量日期修改／恢复工具，保留日志和恢复备份。[使用方法](docs/local-maintenance.md)。**
 
 **3.14.0：新增局域网接收端电脑列表、手机备注名和本地连接历史，可搜索与清理；发现、备注与历史查看不切换当前连接。**
 
@@ -67,9 +67,9 @@
 
 1.9.0：触屏输入暂停、桌面程序管理、文件打开/解压/预览、顺序延迟命令列表，以及全屏等比显示和虚拟键盘更新。
 
-- [下载 Android 3.15.0 APK](https://github.com/DeepShawn/yuankong/releases/download/v3.15.0/LanCmd-3.15.0.apk)
-- [下载 Windows 3.15.0 接收端](https://github.com/DeepShawn/yuankong/releases/download/v3.15.0/LanCmd-Windows-3.15.0.zip)
-- 新功能与限制见 [3.15.0 说明](docs/releases/v3.15.0.md)。
+- [下载 Android 3.16.0 APK](https://github.com/DeepShawn/yuankong/releases/download/v3.16.0/LanCmd-3.16.0.apk)
+- [下载 Windows 3.16.0 接收端](https://github.com/DeepShawn/yuankong/releases/download/v3.16.0/LanCmd-Windows-3.16.0.zip)
+- 新功能与限制见 [3.16.0 说明](docs/releases/v3.16.0.md)。
 - 首页「更多」进入录制与手势板，详见 [2.2.0 说明](docs/releases/v2.2.0.md)。录制遵循系统隐私权限和设备指示，不自动更改系统隐私设置。
 - 首页「U盘锁 / 设备」查看 USB 存储和 USB MTP/PTP 手机。可移动磁盘支持锁定、只读和恢复原策略；便携设备支持锁定和恢复。管理员接收端可修改策略或安全弹出设备，标准权限可查看。
 - 新增「远程桌面」卡片，点击画面控制电脑：单击、双击、长按右键、拖动、双指滚动。
