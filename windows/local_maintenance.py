@@ -364,8 +364,16 @@ def dates(paths, modified, session, protected):
                 if handle.snapshot() != {k: entry[k] for k in ("identity", "size", "mtime_ns")}:
                     raise ValueError("文档在选择后已变化，未修改")
                 handle.set(modified)
-                if handle.snapshot()["mtime_ns"] != modified:
-                    raise ValueError("文件系统未保存精确日期，请检查恢复记录")
+                applied = handle.snapshot()["mtime_ns"]
+                if applied != modified:
+                    # FAT-style time rounding is not a successful exact edit.
+                    # Journal what was observed before undoing that partial change.
+                    entry["applied_mtime_ns"] = applied
+                    save(record, data)
+                    handle.set(entry["mtime_ns"])
+                    if handle.snapshot()["mtime_ns"] != entry["mtime_ns"]:
+                        raise ValueError("文件系统不支持目标时间精度，原日期尚未确认恢复；请保留恢复记录")
+                    raise ValueError("文件系统不支持目标时间精度，已恢复原日期；请选择可表示的时间")
                 entry["status"] = "applied"
         except (OSError, ValueError) as exc:
             entry.update(status="failed", error=str(exc))
@@ -383,7 +391,9 @@ def restore_dates(record, protected):
     if any(not isinstance(entry, dict) or not isinstance(entry.get("path"), str) or
            not isinstance(entry.get("identity"), list) or len(entry["identity"]) != 2 or
            any(type(v) is not int for v in entry["identity"]) or type(entry.get("size")) is not int or
-           type(entry.get("mtime_ns")) is not int for entry in data["entries"]):
+           type(entry.get("mtime_ns")) is not int or
+           ("applied_mtime_ns" in entry and (type(entry["applied_mtime_ns"]) is not int or
+            not 0 <= entry["applied_mtime_ns"] < 4102444800 * 10**9)) for entry in data["entries"]):
         raise ValueError("日期恢复条目损坏，未修改任何文件")
     for entry in data["entries"]:
         if entry.get("status") == "restored":
@@ -398,7 +408,7 @@ def restore_dates(record, protected):
                     raise ValueError("文档身份或内容大小已变化，未覆盖")
                 if current["mtime_ns"] == entry["mtime_ns"]:
                     entry["status"] = "restored"
-                elif current["mtime_ns"] == data["modified"]:
+                elif current["mtime_ns"] == entry.get("applied_mtime_ns", data["modified"]):
                     handle.set(entry["mtime_ns"])
                     if handle.snapshot()["mtime_ns"] != entry["mtime_ns"]:
                         raise ValueError("未确认原日期已恢复")

@@ -217,6 +217,19 @@ class LocalMaintenanceTest(unittest.TestCase):
             m.dates([path], 1700000000000000000, self.session, [])
         self.assertEqual(before, path.stat().st_mtime_ns)
 
+    def test_filesystem_date_rounding_rolls_back_and_retains_recovery(self):
+        path = self.doc()
+        before = path.stat().st_mtime_ns
+        actual = m.DocumentHandle.set
+        def rounded(handle, modified):
+            return actual(handle, modified // 2000000000 * 2000000000)
+        with mock.patch.object(m.DocumentHandle, "set", rounded):
+            record, result = m.dates([path], 1700000001000000000, self.session, [])
+        self.assertEqual(before, path.stat().st_mtime_ns)
+        self.assertEqual("failed", result["entries"][0]["status"])
+        self.assertEqual(1700000000000000000, result["entries"][0]["applied_mtime_ns"])
+        self.assertEqual("restored", m.restore_dates(record, [])["entries"][0]["status"])
+
     def test_protected_and_executable_files_not_timestamped(self):
         data = self.root / "file.txt"
         data.write_text("protected")
