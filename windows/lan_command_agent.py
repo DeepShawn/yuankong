@@ -44,9 +44,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 APP_ID = "LANCMD"
-VERSION = "3.13.0"
-BUILD_VERSION = "3.13.0"
-RELEASE_TAG = "v3.13.0"
+VERSION = "3.14.0"
+BUILD_VERSION = "3.14.0"
+RELEASE_TAG = "v3.14.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）

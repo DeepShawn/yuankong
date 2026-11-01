@@ -16,6 +16,7 @@ import com.google.android.material.button.MaterialButton
 object ToolNavigator {
     data class Tool(val group:String,val title:String,val detail:String,val icon:Int,val target:Class<*>,val kind:String="")
     val tools=listOf(
+        Tool("连接与记录","局域网电脑","接收端列表、备注名与本地连接历史",R.drawable.ic_desktop,ComputersActivity::class.java),
         Tool("共享与控制","远程桌面","屏幕、鼠标、触控与键盘",R.drawable.ic_desktop,DesktopActivity::class.java),
         Tool("共享与控制","摄像头共享","查看电脑摄像头画面",R.drawable.ic_camera,MediaActivity::class.java,"camera"),
         Tool("共享与控制","虚拟键盘","组合键、Win 键与文字输入",R.drawable.ic_keyboard,ControlActivity::class.java,"input"),

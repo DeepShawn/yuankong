@@ -81,7 +81,7 @@ object Discovery {
             }
         }
 
-        return DiscoverResult(found.values.toList(), vpnActive, physical.size)
+        return DiscoverResult(synchronized(lock){found.values.toList()}, vpnActive, physical.size)
     }
 
     // ------------------------------------------------------------ 逐网络探测

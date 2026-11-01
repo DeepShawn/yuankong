@@ -173,6 +173,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 if(latencyText.isNotBlank())RowItem(deviceName.ifBlank{getString(R.string.status_idle)},listOf(deviceSub,latencyText).filter{it.isNotBlank()}.joinToString(" · ")){pingOnce()}
                 else InfoItem(deviceName.ifBlank { getString(R.string.status_idle) }, deviceSub)
                 ActionRow {
+                    Action("电脑", modifier = Modifier.weight(1f)) { startActivity(Intent(this@MainActivity,ComputersActivity::class.java)) }
                     Action("工具库", modifier = Modifier.weight(1f)) { ToolNavigator.show(this@MainActivity) }
                     Action("外观主题", modifier = Modifier.weight(1f)) { ThemeDialog(this@MainActivity).show() }
                     Action("更多", modifier = Modifier.weight(1f)) { showMenu() }
@@ -679,6 +680,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
 
     internal fun showMenu() {
         val entries = linkedMapOf<String, () -> Unit>(
+            "局域网电脑与历史" to { startActivity(Intent(this,ComputersActivity::class.java)) },
             "全部工具 · 搜索" to { ToolNavigator.show(this) },
             "立即重连" to { ConnectionManager.retryNow() },
             "手动输入电脑地址" to { manualDialog() },
@@ -823,17 +825,20 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     private fun renderInner(s: Status) {
         if (!alive()) return
         connected = s.state == State.CONNECTED
+        val stored=Prefs.target(this)?.takeIf{it.host==s.host && it.port==s.port}
+        val label=ComputerBook.displayName(this,Target(s.host,s.port,s.name,stored?.agentId.orEmpty()))
         when (s.state) {
             State.CONNECTED -> {
-                deviceName = s.name.ifEmpty { "已连接" }
+                deviceName = label.ifEmpty { "已连接" }
                 deviceSub = "${s.host}:${s.port}" + if (s.paired) "  ·  免确认直连" else "  ·  已配对"
+                if(label!=s.name && s.name.isNotBlank())deviceSub+=" · 原机名：${s.name}"
                 latencyText = if (s.latencyMs >= 0) "${s.latencyMs}ms" else "在线"
                 overlayVisible = false
                 firewallHelpVisible = false
                 if (!firewallChecked) { firewallChecked = true; checkFirewall() }
             }
             State.CONNECTING -> {
-                deviceName = s.name.ifEmpty { "连接中…" }
+                deviceName = label.ifEmpty { "连接中…" }
                 deviceSub = "正在连接 ${s.host}:${s.port}"
                 latencyText = ""
                 showOverlay("正在连接 ${s.name.ifEmpty { s.host }}…", busy = true)

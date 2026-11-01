@@ -53,6 +53,7 @@
         <activity android:name=".AppsActivity" android:exported="false" />
         <activity android:name=".AnnouncementsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".DelaysActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".ComputersActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".CommandsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".RecordingsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".GesturesActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
