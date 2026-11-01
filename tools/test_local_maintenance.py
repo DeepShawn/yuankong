@@ -139,16 +139,23 @@ class LocalMaintenanceTest(unittest.TestCase):
         self.assertEqual(set(self.names) | {m.MANIFEST}, set(m.load(self.session / "installation.json")["moved"]))
 
     def test_uninstall_copy_failure_restores_files_and_startup(self):
-        real = shutil.copy2
+        real = m.copy_exclusive
         def failing(source, destination, *args, **kwargs):
             if Path(source) == self.root / "LanCmdAgent.exe":
                 raise OSError("disk full")
             return real(source, destination, *args, **kwargs)
-        with mock.patch.object(m.shutil, "copy2", side_effect=failing), self.assertRaises(OSError):
+        with mock.patch.object(m, "copy_exclusive", side_effect=failing), self.assertRaises(OSError):
             m.uninstall(self.root, self.session, self.startup, lambda: None)
         m.manifest(self.root)
         self.assertEqual(self.startup.original, self.startup.value)
         self.assertEqual("rolled_back", m.load(self.session / "installation.json")["status"])
+
+    def test_recovery_copy_does_not_overwrite_new_files(self):
+        source, destination = self.doc(), self.doc("newer.txt")
+        destination.write_bytes(b"new data")
+        with self.assertRaises(FileExistsError):
+            m.copy_exclusive(source, destination)
+        self.assertEqual(b"new data", destination.read_bytes())
 
     def test_running_or_pending_guard_precedes_any_install_change(self):
         def refuse():

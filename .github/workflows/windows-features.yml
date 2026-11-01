@@ -163,5 +163,5 @@ jobs:
         run: |
           $package = @(Get-ChildItem dist/LanCmd-Windows-*.zip)
           if ($package.Count -ne 1) { throw 'Expected exactly one Windows ZIP' }
-          python tools/check_windows_package.py $package[0].FullName
+          python -X utf8 tools/check_windows_package.py $package[0].FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -47,6 +47,16 @@ def digest(path):
     return result.hexdigest()
 
 
+def copy_exclusive(source, target):
+    """Rollback must never overwrite a file created after maintenance started."""
+    ordinary(Path(target).parent, directory=True)
+    with Path(source).open("rb") as reader, Path(target).open("xb") as writer:
+        shutil.copyfileobj(reader, writer)
+        writer.flush()
+        os.fsync(writer.fileno())
+    shutil.copystat(source, target, follow_symlinks=False)
+
+
 def save(path, data):
     """Write the recovery/audit record before changing its corresponding file."""
     path = Path(path)
@@ -239,7 +249,7 @@ def uninstall(root, session, startup, check):
                     raise ValueError("文件在卸载期间发生变化，未删除：" + name)
             target.parent.mkdir(parents=True, exist_ok=True)
             # Cross-volume copy completes and is verified before the source is removed.
-            shutil.copy2(source, target)
+            copy_exclusive(source, target)
             if digest(source) != digest(target):
                 raise ValueError("备份校验失败，保留原文件：" + name)
             plan["moved"].append(name)
@@ -257,12 +267,16 @@ def uninstall(root, session, startup, check):
         conflicts = []
         for name in reversed(plan["moved"]):
             source, target = backup / name, root / name
-            if target.exists():
-                if digest(target) != digest(source):
+            if os.path.lexists(target):
+                try:
+                    ordinary(target)
+                    if digest(target) != digest(source):
+                        conflicts.append(str(target))
+                except (OSError, ValueError):
                     conflicts.append(str(target))
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
+            copy_exclusive(source, target)
         if registered:
             startup.change(None, before)
         plan.update(status="rollback_conflict" if conflicts else "rolled_back", conflicts=conflicts)
@@ -534,6 +548,8 @@ def stage(root):
 
 def interactive(root, session):
     root, session = Path(root), Path(session)
+    if within(session, root):
+        raise ValueError("维护工具必须运行在安装目录之外，请双击原目录的本机维护.cmd")
     manifest(root)
     state = Path(os.environ["APPDATA"]) / "LanCmd"
     process = WindowsProcesses()
