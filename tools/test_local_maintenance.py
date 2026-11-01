@@ -157,7 +157,7 @@ class LocalMaintenanceTest(unittest.TestCase):
             m.uninstall(self.root, self.session, self.startup, refuse)
         m.manifest(self.root)
         self.assertFalse((self.session / "installation.json").exists())
-        for name in ("app-locks.json", "file-locks.json", "usb-disconnects.json", "device-policy.json"):
+        for name in ("app-locks.json", "file-locks.json", "usb-disconnects.json", "device-policy.json", "file-jobs.json"):
             file = self.state / name
             file.write_text('{"record":{}}')
             with self.subTest(name=name), self.assertRaises(ValueError):

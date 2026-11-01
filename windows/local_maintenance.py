@@ -83,7 +83,7 @@ def within(path, root):
 def manifest(root):
     root = Path(root).absolute()
     ordinary(root, directory=True)
-    if root.parent == root or root.parent.parent == root.parent:
+    if root.parent == root:
         raise ValueError("安装目录不能位于磁盘根目录")
     for key in ("SystemRoot", "WINDIR", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "ProgramData", "ProgramFiles", "ProgramFiles(x86)"):
         if os.environ.get(key):
@@ -120,7 +120,7 @@ def manifest(root):
 def recovery_check(state):
     """Never strand persisted restrictions by removing the code to undo them."""
     state = Path(state)
-    for name in ("app-locks.json", "file-locks.json", "device-policy.json", "usb-disconnects.json"):
+    for name in ("app-locks.json", "file-locks.json", "device-policy.json", "usb-disconnects.json", "file-jobs.json"):
         path = state / name
         if not path.exists():
             continue
@@ -128,7 +128,7 @@ def recovery_check(state):
         if not isinstance(data, dict):
             raise ValueError("恢复记录损坏，请保留并检查：" + str(path))
         if data:
-            raise ValueError("请先恢复并移除锁定／设备策略记录，再维护：" + str(path))
+            raise ValueError("请先恢复并清理锁定、设备策略或文件任务暂存记录，再维护：" + str(path))
     pending = state / "upgrade/upgrade-status.json"
     if pending.exists():
         data = load(pending)
