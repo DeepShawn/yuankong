@@ -93,7 +93,8 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
                 val result=discovery()
                 val observed=System.currentTimeMillis()
                 book=withContext(Dispatchers.IO){ComputerBook.discovered(this@ComputersActivity,result.agents,observed)}
-                found=result.agents.filter{it.ip.isNotBlank() && it.port in 1..65535}.map{ComputerBook.key(Target(it.ip,it.port,it.name,it.id))}.toSet()
+                found=result.agents.take(ComputerBook.MAX_COMPUTERS).filter{it.ip.isNotBlank() && it.ip.length<=253 && it.ip.none{c->c.isISOControl()} && it.port in 1..65535}
+                    .map{ComputerBook.key(Target(it.ip,it.port,it.name,it.id))}.toSet()
                 lastScan=observed
                 status("本次发现 ${found.size} 台接收端"+(if(result.vpnActive)"；检测到 VPN，已使用现有局域网发现方式" else ""))
             }finally{scanning=false}

@@ -26,7 +26,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 @ConscryptMode(ConscryptMode.Mode.OFF)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ComputersUiTest {
-    private val ctx get()=RuntimeEnvironment.getApplication<Application>()
+    private val ctx get()=RuntimeEnvironment.getApplication()
     @Before fun before(){disconnect();ctx.getSharedPreferences(ComputerBook.FILE,0).edit().clear().commit();Prefs.forget(ctx)}
     @After fun after()=disconnect()
     private fun disconnect(){ConnectionManager.stop();runBlocking{(ConnectionManager::class.java.getDeclaredField("loopJob").apply{isAccessible=true}.get(ConnectionManager) as? Job)?.join()};shadowOf(Looper.getMainLooper()).idle()}

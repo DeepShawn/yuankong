@@ -14,7 +14,7 @@ import java.util.concurrent.Executors
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk=[33],application=Application::class)
 class ComputerBookTest {
-    private val ctx get()=RuntimeEnvironment.getApplication<Application>()
+    private val ctx get()=RuntimeEnvironment.getApplication()
     private fun target(host:String="192.168.1.2",id:String="pc-one")=Target(host,47823,"Original PC",id)
     private fun agent(host:String="192.168.1.2",id:String="pc-one")=AgentInfo(host,"Original PC",47823,"Windows",false,id)
     @Before fun before(){ctx.getSharedPreferences(ComputerBook.FILE,0).edit().clear().commit();Prefs.forget(ctx)}
@@ -70,6 +70,8 @@ class ComputerBookTest {
         try{ComputerBook.rename(ctx,target(),"lost");fail("Corruption must not silently overwrite history")}catch(_:IllegalStateException){}
         assertEquals("broken",ctx.getSharedPreferences(ComputerBook.FILE,0).getString("book",null))
         assertTrue(ComputerBook.clear(ctx).computers.isEmpty())
+        Prefs.saveTarget(ctx,target())
+        assertTrue("Explicit clearing must not repeat legacy target migration",ComputerBook.seed(ctx).computers.isEmpty())
     }
     @Test fun invalidNamesAndAddressesAreRejected(){
         for(alias in listOf("x".repeat(41),"line\nbreak","bad\u0000name")){

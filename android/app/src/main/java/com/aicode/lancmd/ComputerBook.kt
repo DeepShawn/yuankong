@@ -62,7 +62,7 @@ object ComputerBook {
         val hs=JSONArray(s.history.sortedByDescending{it.started}.take(MAX_HISTORY).map{v->JSONObject().put("id",v.id).put("key",v.computerKey)
             .put("host",v.host).put("port",v.port).put("name",v.reportedName).put("started",v.started).put("ended",v.ended)})
         check(prefs(ctx).edit().putString("book",JSONObject().put("version",1).put("computers",cs).put("history",hs).toString())
-            .putString("aliases",aliases.toString()).commit()){"保存本地电脑记录失败"}
+            .putString("aliases",aliases.toString()).putBoolean("seeded",true).commit()){"保存本地电脑记录失败"}
     }
     /** Small independent map for labels on the home screen; no connection state mutation. */
     fun displayName(ctx:Context,t:Target):String=runCatching{JSONObject(prefs(ctx).getString("aliases","{}")!!).optString(key(t)).ifBlank{t.name.ifBlank{t.host}}}
@@ -77,7 +77,7 @@ object ComputerBook {
         return Snapshot(s.computers.filter{it.key!=k && it.key!=previous?.key}+entry,history) to entry
     }
     @Synchronized fun seed(ctx:Context):Snapshot {
-        val s=read(ctx);if(s.computers.isNotEmpty())return s
+        val s=read(ctx);if(s.computers.isNotEmpty() || prefs(ctx).getBoolean("seeded",false))return s
         val target=Prefs.target(ctx) ?: return s
         val result=upsert(s,target).first;save(ctx,result);return result
     }
