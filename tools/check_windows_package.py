@@ -165,6 +165,64 @@ class PackagedStartupTest(unittest.TestCase):
         self.assertIn(("LanCmd Agent v" + self.display_version).encode(), result.stdout)
         self.assertNotIn(b"Traceback", result.stderr)
 
+    def test_local_maintenance_runs_outside_install_with_shipped_runtime(self):
+        spec = importlib.util.spec_from_file_location("shipped_maintenance", self.package / "local_maintenance.py")
+        maintenance = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(maintenance)
+        cache = self.folder / ("maintenance-cache-" + uuid.uuid4().hex)
+        cache.mkdir()
+        with mock.patch.dict(os.environ, LOCALAPPDATA=str(cache)), mock.patch.object(maintenance.subprocess, "Popen") as spawn:
+            maintenance.stage(self.package)
+        command = spawn.call_args.args[0]
+        helper = Path(command[4])
+        # -I must work with only the copied runtime, after the install disappears.
+        self.assertNotEqual(self.package, helper.parent)
+        script = (
+            "import importlib.util,sys,json;from pathlib import Path;"
+            "s=importlib.util.spec_from_file_location('maintenance',sys.argv[1]);"
+            "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
+            "p=Path(sys.argv[2])/'document.txt';p.write_text('preserve content');"
+            "old=p.stat().st_mtime_ns;record,result=m.dates([p],1700000000000000000,Path(sys.argv[2]),[]);"
+            "assert result['entries'][0]['status']=='applied',result;"
+            "restored=m.restore_dates(record,[]);assert restored['entries'][0]['status']=='restored',restored;"
+            "assert p.stat().st_mtime_ns==old;assert p.read_text()=='preserve content';"
+            "print(json.dumps({'independent_runtime':True,'native_dates_restored':True}))"
+        )
+        result = subprocess.run([command[0], "-I", "-X", "utf8", "-c", script, str(helper), str(helper.parent)],
+                                cwd=self.folder, env=self.env, capture_output=True, timeout=20)
+        self.assertEqual(0, result.returncode, result.stderr.decode("utf-8", "replace"))
+        self.assertTrue(json.loads(result.stdout)["native_dates_restored"])
+
+    def test_local_maintenance_stops_only_verified_packaged_receiver(self):
+        spec = importlib.util.spec_from_file_location("maintenance_processes", self.package / "local_maintenance.py")
+        maintenance = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(maintenance)
+        ready = self.state / "maintenance-ready.json"
+        env = dict(self.env, LANCMD_UPGRADE_READY=str(ready), LANCMD_UPGRADE_NONCE=uuid.uuid4().hex)
+        receiver = subprocess.Popen([str(self.package / "python/pythonw.exe"),
+                                     str(self.package / "lan_command_agent.py")], cwd=self.folder, env=env)
+        try:
+            deadline = time.monotonic() + 20
+            while not ready.exists():
+                self.assertIsNone(receiver.poll(), "Receiver exited before maintenance test")
+                if time.monotonic() > deadline:
+                    self.fail("Packaged receiver did not become ready for maintenance")
+                time.sleep(.1)
+            processes = maintenance.WindowsProcesses()
+            self.assertIn(receiver.pid, processes.running(self.package))
+            processes.stop_receiver(self.package, self.state / "LanCmd")
+            self.assertEqual(0, receiver.wait(timeout=10))
+            self.assertNotIn(receiver.pid, processes.running(self.package))
+            # A stale or changed PID must never terminate an unrelated process.
+            pid_file = self.state / "LanCmd/agent.pid"
+            pid_file.write_text(str(os.getpid()))
+            with self.assertRaises(ValueError):
+                processes.stop_receiver(self.package, self.state / "LanCmd")
+        finally:
+            if receiver.poll() is None:
+                receiver.terminate()
+                receiver.wait(timeout=10)
+
     def test_gui_launcher_starts_real_receiver_and_accepts_phone_connection(self):
         ready = self.state / "healthy.json"
         nonce = uuid.uuid4().hex
