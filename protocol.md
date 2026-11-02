@@ -356,3 +356,68 @@ Android internal Activity transitions preserve pinned sharing sessions and send 
 能力新增 `placeholders_fast,usb_connection_fallback`。占位任务新增状态 allocating、method=preallocate|stream；written 表示已处理/预分配字节，完成时仍返回核实的 allocated。快速路径按最多16GiB分段设置 FileAllocationInfo 与 FileEndOfFileInfo，不调用 SetFileValidData 或稀疏接口；仅明确不支持或分配量未确认时清理并回退流式写入。磁盘满与权限失败直接报错，保留原取消及清理行为。
 
 USB 恢复记录新增 config_restore 布尔值，表示兼容停用可能留下的配置必须恢复。记录先于任何设备变更持久化。兼容路径仅 DiskDrive 类，DIF_PROPERTYCHANGE 作用于当前硬件配置，设置 DI_QUIETINSTALL。驱动要求重启而状态未确认时返回错误并保留记录；restore_connection 对 config_restore=true 的记录始终恢复配置，即使运行时设备仍启用，重启仍待完成时不删除记录。
+
+
+## 3.17.0 应用快捷控制、自我维护与公网联机
+
+`capabilities.features` 新增 `app_control, app_control_bind, app_hidden, dates_batch,
+self_manage, self_rename, self_delete, tunnel`。以下命令全部要求已握手，均为 Windows 专用。
+
+### app_control
+
+- `action=list`：返回 `windows[]`（`handle,pid,title,name,path,visible,minimized,profile`）、
+  `profiles[]`（`id,label,actions[{id,label,keys}]`）与 `hidden[]`
+  （`handle,pid,title,name,path,hidden_at`）。`profile` 为空表示不在预设表里。
+- `action=act, handle, pid, name, mode=message|input, keys?`：`name` 为预设动作
+  （`page_next,page_prev,first,last,pen,eraser,marker,select,blackboard,save,undo,bold,
+  find,slideshow,exit`），`keys` 给出时按自定义组合键解析并覆盖预设。
+  `mode=message` 用 `PostMessage` 投递，`mode=input` 先切前台再用 `SendInput`。
+  返回 `handle,pid,name,action,mode,keys`。
+- `action=focus, handle, pid`：还原（必要时）并切到前台。
+- `action=send, handle, pid, text, enter=true`：切前台 → 写剪贴板 → `Ctrl+V` → 可选回车，
+  结束后尽量还原原剪贴板文本；`text` 1–2000 字符。
+- `action=hide, handle, pid`：`ShowWindow(SW_HIDE)`，进程继续运行；返回 `handle,hidden`。
+  最多 64 个；记录写入 `%APPDATA%\LanCmd\app-control-hidden.json`，接收端退出、升级或自我维护前自动
+  `restore_all`，被强制结束时下次启动按 `handle+pid` 核对后恢复。
+- `action=show, handle` / `action=hidden` / `action=restore_all`：恢复或列举隐形窗口。
+- `action=bind, profile, name, keys`：写 `%APPDATA%\LanCmd\app-control.json` 覆盖预设，
+  返回合并后的 `profiles`。按键名与 `input` 命令一致（`CTRL/ALT/SHIFT/WIN/F1–F12/
+  PAGEDOWN/...`，字母数字直接写）。
+
+### dates_batch
+
+- `action=preview, paths[], recursive, mask, include_self`：返回 `count,bytes,sample[]`。
+- `action=apply, paths[], recursive, mask, include_self, time` 或 `start,end`：逐个文件
+  先写恢复记录再改 mtime；固定时间精确匹配，区间内按序号散列取秒。返回
+  `id,applied,failed,target,errors[]`。文件系统不能精确保存时自动恢复原值并计为失败。
+- `action=records` / `record,id` / `delete_record,id`：列举、查看与删除恢复记录。
+- `action=restore, id`：仅当身份、大小与当前 mtime 等于本次写入值时还原原日期，
+  返回 `restored,skipped,errors[]`。
+- 限制：单次最多 100 个路径、20000 个文件；拒绝磁盘根目录、UNC、系统与程序目录、
+  符号链接与目录联接；`include_self` 允许把接收端安装目录纳入范围。
+
+### self_manage
+
+- `action=status`：返回 `root,config,pid,journal_dir,pending[]`（未留下完成记录的维护计划）。
+- `action=rename, name, confirm=RENAME`：校验同父目录、保留名、目标不存在后，
+  写计划 → 回包 → 1.2 秒后本进程 `os._exit`；助手等待退出、结束本目录其他进程、
+  改名、改写属于本目录的 `Run` 值、从新路径重启。返回 `accepted,journal,target`。
+- `action=delete, keep_config, confirm=DELETE`：结束自启动项（仅本目录）、递归删除安装目录，
+  `keep_config=false` 时一并删除 `%APPDATA%\LanCmd`。
+- 计划文件 `%LOCALAPPDATA%\LanCmdMaintenance\plan-<时间>.json`，执行日志同目录
+  `remote-<时间>.jsonl`（`started/terminated/renamed/startup_repointed/relaunched/
+  deleted/failed/abort` 等事件）。助手脚本与载荷写在 `%TEMP%\LanCmdSelf`，
+  执行结束自行删除。
+
+### tunnel
+
+- `action=status`：`running,connected,pid,uptime,endpoint,failures,last_error,log[],
+  providers[],config`（`config.token` 返回 `********`）。
+- `action=save` 其余字段 `provider,server_addr,server_port,token,proxy,remote_port,
+  local_port,config_text,tls,auto_start,enabled`：校验后保存并（原运行中则重启）生效。
+- `action=start|stop|restart`：启动需存在 `frpc`（配置路径、接收端目录或 `frp/` 子目录），
+  按 `frpc -v` 选择 TOML（≥0.52）或 INI；输出写入 `%APPDATA%\LanCmd\tunnel.log`，
+  异常退出退避重启，连续 6 次失败后停止。
+- `action=probe`：ChmlFrp v2 `GET {api}/nodeinfo?token&node`，
+  返回 `node,ip,port,state,version,area,endpoint`；自建 frps 不支持查询。
+- 手机连接方式不变：用 `节点地址:远端端口` 作为手动地址握手。

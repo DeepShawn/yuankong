@@ -1,5 +1,15 @@
 # 更新记录
 
+## 3.17.0
+
+- 新增「应用快捷控制」：按进程识别希沃白板、WPS Office 与 QQ，提供翻页、首末页、画笔／橡皮／荧光笔／黑板、保存、撤销、加粗、查找、开始／退出放映等按钮；可在后台 PostMessage 或切前台 SendInput 两种方式发送，支持自定义组合键，以及向聊天窗口粘贴发送消息（发送后尽量还原原剪贴板）。预设键位可在 `%APPDATA%\LanCmd\app-control.json` 覆盖。
+- 新增窗口隐形：选中窗口 `SW_HIDE` 后从电脑桌面与任务栏消失，进程继续运行，手机端仍可操作；手机可选「恢复显示」或全部恢复，接收端停止／升级／自我维护前自动恢复，最多 64 个。隐藏记录写入 `%APPDATA%\LanCmd\app-control-hidden.json`，接收端重启时按句柄与 PID 核对并自动恢复上次未恢复的窗口；程序已退出或句柄被复用的记录直接丢弃。
+- 新增手机端「接收端自我维护」：安装文件夹改名（先结束本进程与本目录其他进程、同父目录改名、改写精确匹配的自启动项、从新路径重启）、自我删除（结束自启动项、递归删目录，可选保留 `%APPDATA%\LanCmd`，需输入 `DELETE` 确认）、批量修改最后修改日期。均由 `%TEMP%\LanCmdSelf` 下的独立助手执行，计划先写 `%LOCALAPPDATA%\LanCmdMaintenance`，每步追加 jsonl。
+- 批量日期支持路径列表、通配符、递归、固定时间或区间散列取秒，并可包含接收端自身目录；每个文件先写恢复记录再修改，文件系统不能精确保存时自动恢复原日期；恢复时核对身份、大小与本次写入值，后来被编辑或替换的文件跳过。拒绝磁盘根、网络路径、系统／程序目录、符号链接与目录联接，单次最多 20000 个文件。
+- 新增「公网联机」（frp）：填节点地址／端口／令牌／隧道名／远端端口生成配置，或直接粘贴 ChmlFrp 面板配置；按 `frpc -v` 自动选 TOML（0.52+）或 INI；调用 ChmlFrp v2 `nodeinfo` 校验节点与令牌；异常退出退避重启，日志写入 `tunnel.log`；可随接收端启动自动拨号。手机用首页「手动输入电脑地址」填 `节点地址:远端端口`。
+- `capabilities.features` 增加 `app_control,app_control_bind,app_hidden,dates_batch,self_manage,self_rename,self_delete,tunnel`；新增模块 `app_control.py,dates_batch.py,self_manage.py,tunnel.py`，须整包更新。双端 3.17.0，Android versionCode 61，保留原签名与 miuix／KernelSU 外观。
+- 新增 `tools/test_remote_tools.py`：日期批量与恢复、助手脚本真实执行改名／删除／自清理、frp 配置渲染与校验、应用预设与按键解析、覆盖表持久化。
+
 ## 3.16.0
 
 - Windows 新增独立、可见的“本机维护.cmd”，由电脑管理员启动，先确认停止当前安装的接收端、等待恢复工作进程退出，再在电脑确认维护。没有远程接口、自动确认或无人值守操作模式。

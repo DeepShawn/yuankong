@@ -118,6 +118,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 Tool("按键") { openFeature(ControlActivity::class.java, "input") },
                 Tool("消息") { openFeature(ControlActivity::class.java, "message") },
                 Tool("滚动公告") { openFeature(AnnouncementsActivity::class.java) },
+                Tool("应用快捷控制") { openFeature(AppControlActivity::class.java) },
                 Tool("剪贴板") { showClipboard() }
             ),
             "文件与设备" to listOf(
@@ -136,7 +137,9 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 Tool("桌面背景") { openFeature(WallpaperActivity::class.java) },
                 Tool("本地升级") { openFeature(UpgradeActivity::class.java) },
                 Tool("启动与网络") { openFeature(StartupNetworkActivity::class.java) },
-                Tool("网络与蓝牙") { openFeature(NetworkManagementActivity::class.java) }
+                Tool("网络与蓝牙") { openFeature(NetworkManagementActivity::class.java) },
+                Tool("公网联机") { openFeature(TunnelActivity::class.java) },
+                Tool("自我维护") { openFeature(SelfManageActivity::class.java) }
             ),
             "录制与自动化" to listOf(
                 Tool("录音 / 录屏") { openFeature(RecordingsActivity::class.java) },

@@ -44,9 +44,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 APP_ID = "LANCMD"
-VERSION = "3.16.0"
-BUILD_VERSION = "3.16.0"
-RELEASE_TAG = "v3.16.0"
+VERSION = "3.17.0"
+BUILD_VERSION = "3.17.0"
+RELEASE_TAG = "v3.17.0"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -1152,6 +1152,10 @@ from file_search import FileSearch
 from local_upgrade import LocalUpgrade
 from startup_network import StartupNetwork, WindowsStartupNetwork
 from network_management import NetworkManagement, WindowsNetwork
+from app_control import AppControl
+from dates_batch import BatchDates
+from self_manage import SelfManage
+from tunnel import Tunnel
 import weakref
 _connections=weakref.WeakSet()
 _connections_lock=threading.RLock()
@@ -1199,6 +1203,8 @@ def upgrade_stop():
             try:state.close_transfers()
             except Exception:log.exception("升级前释放连接资源失败")
         _app_freeze.close()
+        _tunnel.stop()
+        _app_control.close()
     finally:
         cleanup_pid()
         _upgrade_exit_ready.set()
@@ -1254,6 +1260,21 @@ _updates=LocalUpgrade(_capture_dir,os.path.join(APP_DIR,"upgrade"),BUILD_VERSION
 _startup_network=StartupNetwork(_capture_dir,WindowsStartupNetwork(_capture_dir,is_admin,
     lambda:(load_cfg()["port"],load_cfg()["discovery_port"]),_netsh),log)
 _network_management=NetworkManagement(WindowsNetwork(os.path.join(APP_DIR,'hotspot-blocks.json')))
+_app_control=AppControl(APP_DIR,RpcError,log)
+_dates=BatchDates(APP_DIR,_capture_dir,RpcError,log)
+_tunnel=Tunnel(os.path.join(APP_DIR,"tunnel.json"),_capture_dir,RpcError,log,local_port=DEF_TCP_PORT)
+
+
+def _self_stop():
+    """Self-maintenance is about to run: release everything this process holds."""
+    for step in (_app_control.close,_tunnel.stop,cleanup_pid):
+        try:step()
+        except Exception:log.exception("自我维护前释放资源失败")
+    log.warning("自我维护：本进程退出，改由助手继续（改名会重新启动，删除后不会）")
+    os._exit(0)
+
+
+_self_manage=SelfManage(_capture_dir,APP_DIR,os.getpid(),RpcError,log,stopper=_self_stop)
 
 
 def remote_capabilities():
@@ -1261,6 +1282,7 @@ def remote_capabilities():
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures", "cursor_visibility", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"])
         features.extend(["announcements","announcement_layout","global_delays","app_runtime","file_locks","app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","force_delete","startup_network","network_management","network_device_state","hotspot_client_access","hotspot_adapter_selection","network_password","network_batch","hotspot_timer","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","file_resize","file_sources","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
+        features.extend(["app_control","app_control_bind","app_hidden","dates_batch","self_manage","self_rename","self_delete","tunnel"])
         if os.path.isfile(_recordings.executable):
             features.extend(["recordings","panorama_recording","system_audio_recording"])
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1310,6 +1332,10 @@ HANDLERS = {
     "file_jobs": lambda q, st: _file_jobs.request(q,st,RpcError),
     "startup_network": lambda q, st: _startup_network.request(q,RpcError),
     "network": lambda q, st: _network_management.request(q,st.client_id,RpcError),
+    "app_control": lambda q, st: _app_control.request(q,st),
+    "dates_batch": lambda q, st: _dates.request(q,st,RpcError),
+    "self_manage": lambda q, st: _self_manage.request(q,st),
+    "tunnel": lambda q, st: _tunnel.request(q,st),
     "announcements": lambda q,st: _announcements.request(q,st,RpcError),
     "message": _remote.message,
     "info": lambda q, st: cmd_info(),
@@ -2089,6 +2115,21 @@ def main(argv):
 
     threading.Thread(target=_check_firewall_async, daemon=True, name="fwcheck").start()
     _startup_network.boot()
+    if IS_WIN:
+        # A previous run may have been killed while windows were hidden.
+        try:
+            _app_control.recover()
+        except Exception:
+            log.exception("恢复上次隐形的窗口失败")
+    if _tunnel.cfg.get("enabled") and _tunnel.cfg.get("auto_start"):
+        def _tunnel_boot():
+            try:
+                _tunnel.start()
+            except Exception as exc:
+                log.warning("公网穿透未能自动启动：%s", exc)
+                if console:
+                    print("公网穿透未能自动启动：%s" % exc)
+        threading.Thread(target=_tunnel_boot, daemon=True, name="tunnel").start()
     if IS_WIN:_file_locks.start()
 
     sup = Supervisor(cfg)
@@ -2105,6 +2146,8 @@ def main(argv):
         _file_locks.close()
         _announcements.close()
         _global_delays.close()
+        _tunnel.stop()
+        _app_control.close()
         cleanup_pid()
     return 0
 
