@@ -50,7 +50,14 @@ def parse_time(text):
             continue
     else:
         raise ValueError("时间格式应为 YYYY-MM-DD HH:MM:SS")
-    seconds = int(moment.timestamp())
+    if not 1970 <= moment.year <= 2099:
+        raise ValueError("时间须在 1970–2099 年之间")
+    try:
+        # timestamp() on Windows raises OSError for dates mktime refuses, so the
+        # range is checked first and the conversion failure is reported as input.
+        seconds = int(moment.timestamp())
+    except (OSError, OverflowError, ValueError):
+        raise ValueError("电脑无法把该时间当作本地时间处理")
     if not TIME_MIN <= seconds < TIME_MAX:
         raise ValueError("时间须在 1970–2099 年之间")
     return seconds * 10**9

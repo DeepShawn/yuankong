@@ -314,14 +314,20 @@ class HelperRunTest(unittest.TestCase):
                                 capture_output=True, timeout=120)
         return result, script, data
 
+    def events(self):
+        return [json.loads(line) for line in self.journal.read_text(encoding="utf-8").splitlines()
+                if line.strip()]
+
     def test_rename_moves_folder_and_cleans_up(self):
         target = str(Path(self.temp.name) / "改名后")
         result, script, data = self.run_helper(target=target)
         self.assertEqual(0, result.returncode, result.stderr.decode("utf-8", "replace"))
         self.assertTrue(Path(target).is_dir())
         self.assertFalse(self.root.exists())
-        events = [json.loads(line) for line in self.journal.read_text(encoding="utf-8").splitlines()]
-        self.assertEqual("renamed", events[-1]["event"])
+        events = [item["event"] for item in self.events()]
+        self.assertIn("renamed", events)
+        self.assertNotIn("failed", events)
+        self.assertNotIn("abort", events)
         self.assertFalse(script.exists())
         self.assertFalse(data.exists())
 
@@ -335,8 +341,9 @@ class HelperRunTest(unittest.TestCase):
         self.assertFalse(self.root.exists())
         self.assertFalse(config.exists())
         self.assertFalse(script.exists())
-        events = [json.loads(line) for line in self.journal.read_text(encoding="utf-8").splitlines()]
-        self.assertEqual("deleted", events[-1]["event"])
+        events = [item["event"] for item in self.events()]
+        self.assertIn("deleted", events)
+        self.assertNotIn("failed", events)
 
     def test_keep_config_keeps_the_folder(self):
         config = Path(self.temp.name) / "config"
