@@ -116,6 +116,14 @@ class DiagnosticTest(unittest.TestCase):
         for action in ("delete","rename","apply","restore"):
             with self.subTest(action=action),self.assertRaises(ValueError):
                 self.manager.request(dict(action=action),ValueError)
+    def test_failed_refresh_keeps_previous_snapshot_and_reports_the_failure(self):
+        self.manager.snapshot=dict(pending=[],items=[dict(id="previous",files=1)],warnings=[],partial=False)
+        with mock.patch.object(self.manager,"scan",side_effect=PermissionError("read denied")):
+            self.manager._worker()
+        result=self.manager.request({},ValueError)
+        self.assertFalse(result["loading"]);self.assertTrue(result["partial"])
+        self.assertEqual("previous",result["items"][0]["id"])
+        self.assertIn("read denied",result["warnings"][0])
     def test_scan_entry_limit_reports_partial_instead_of_reading_everything(self):
         self.manager.MAX_SCAN=3
         for index in range(8):(self.records/(str(index)+".json")).write_text('{"entries":[]}')
