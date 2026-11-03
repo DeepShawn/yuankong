@@ -195,7 +195,6 @@ class SeewoSurface:
             "GdipDeletePen": ([pointer], integer),
             "GdipCreateLineBrush": ([c.POINTER(PointF), c.POINTER(PointF), w.DWORD, w.DWORD,
                                      integer, c.POINTER(pointer)], integer),
-            "GdipDeleteLineBrush": ([pointer], integer),
             "GdipCreateFontFamilyFromName": ([w.LPCWSTR, pointer, c.POINTER(pointer)], integer),
             "GdipGetGenericFontFamilySansSerif": ([c.POINTER(pointer)], integer),
             "GdipDeleteFontFamily": ([pointer], integer),
@@ -329,7 +328,7 @@ class SeewoSurface:
             self.gp.GdipFillRectangle(graphics, brush, float(icon["x"]), float(icon["y"]),
                                       float(icon["width"]), float(icon["height"]))
         finally:
-            self.gp.GdipDeleteLineBrush(brush)
+            self.gp.GdipDeleteBrush(brush)
 
         cone, arcs = seewo.glyph(icon["width"] * 0.78)
         offset_x = icon["x"] + icon["width"] * 0.11
@@ -455,7 +454,7 @@ class SeewoSurface:
                 self.gp.GdipFillRectangle(self.graphics, brush, float(strip["x"]), float(top),
                                           float(strip["width"]), float(bottom - top))
             finally:
-                self.gp.GdipDeleteLineBrush(brush)
+                self.gp.GdipDeleteBrush(brush)
 
     def present(self, hwnd, x, y, opacity):
         """Push the finished DIB to the layered window."""
