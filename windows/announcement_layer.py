@@ -76,6 +76,69 @@ def coverage(x, y, width, height, radius, supersample=4):
     return int(round(255 * hits / (supersample * supersample)))
 
 
+
+def alpha_mask(width, height, bar, radius, pad):
+    """Coverage mask for the bar plus a soft ring for the shadow.
+
+    Row slices fill the straight parts, so only the corners and the ring need a
+    per-pixel loop: a 1920-wide bar costs a few milliseconds instead of a second.
+    """
+    mask = bytearray(width * height)
+    for y in range(height):
+        row = y * width
+        local_y = y - bar["y"]
+        if 0 <= local_y < bar["height"]:
+            start = bar["x"]
+            end = bar["x"] + bar["width"]
+            if 0 <= start and end <= width:
+                mask[row + start:row + end] = b"\xff" * (end - start)
+            else:
+                for x in range(max(0, start), min(width, end)):
+                    mask[row + x] = 255
+            if local_y < radius or local_y >= bar["height"] - radius:
+                for x in range(max(0, start), min(width, start + radius)):
+                    mask[row + x] = coverage(x - start, local_y, bar["width"], bar["height"], radius)
+                for x in range(max(0, end - radius), min(width, end)):
+                    mask[row + x] = coverage(x - start, local_y, bar["width"], bar["height"], radius)
+            continue
+        if -pad <= local_y < bar["height"] + pad:
+            for x in range(max(0, bar["x"] - pad), min(width, bar["x"] + bar["width"] + pad)):
+                local_x = x - bar["x"]
+                distance_x = -local_x if local_x < 0 else (local_x - bar["width"] + 1 if local_x >= bar["width"] else 0)
+                distance_y = -local_y if local_y < 0 else local_y - bar["height"] + 1
+                distance = max(distance_x, distance_y)
+                falloff = max(0.0, 1.0 - distance / max(1, pad))
+                mask[row + x] = int(round(seewo.SHADOW_ALPHA * falloff ** 1.8))
+    return mask
+
+
+def premultiplied_layer(mask, width, height, bar):
+    """Premultiplied BGRA for the gradient bar over a black, fading shadow."""
+    layer = bytearray(width * height * 4)
+    top = int(seewo.TOP_COLOR[1:], 16)
+    bottom = int(seewo.BOTTOM_COLOR[1:], 16)
+    for y in range(height):
+        row = y * width
+        local_y = y - bar["y"]
+        if 0 <= local_y < bar["height"]:
+            t = local_y / max(1, bar["height"] - 1)
+            red = int(((top >> 16) & 255) * (1 - t) + ((bottom >> 16) & 255) * t)
+            green = int(((top >> 8) & 255) * (1 - t) + ((bottom >> 8) & 255) * t)
+            blue = int((top & 255) * (1 - t) + (bottom & 255) * t)
+        else:
+            red = green = blue = 0
+        for x in range(width):
+            alpha = mask[row + x]
+            if not alpha:
+                continue
+            index = (row + x) * 4
+            layer[index] = blue * alpha // 255
+            layer[index + 1] = green * alpha // 255
+            layer[index + 2] = red * alpha // 255
+            layer[index + 3] = alpha
+    return layer
+
+
 class Dib:
     """A 32-bpp top-down DIB plus the memory DC that GDI+ draws into."""
 
@@ -244,48 +307,8 @@ class SeewoSurface:
         """Shadow, bar, icon, prefix, divider and close glyph — drawn exactly once."""
         spec = self.spec
         bar = spec["bar"]
-        radius = spec["radius"]
-        pad = spec["pad"]
-        mask = bytearray(self.width * self.height)
-        for y in range(self.height):
-            row = y * self.width
-            local_y = y - bar["y"]
-            for x in range(self.width):
-                local_x = x - bar["x"]
-                inside = 0 <= local_x < bar["width"] and 0 <= local_y < bar["height"]
-                if inside:
-                    mask[row + x] = coverage(local_x, local_y, bar["width"], bar["height"], radius)
-                    continue
-                if -pad <= local_x < bar["width"] + pad and -pad <= local_y < bar["height"] + pad:
-                    distance_x = -local_x if local_x < 0 else (local_x - bar["width"] + 1 if local_x >= bar["width"] else 0)
-                    distance_y = -local_y if local_y < 0 else (local_y - bar["height"] + 1 if local_y >= bar["height"] else 0)
-                    distance = max(distance_x, distance_y)
-                    falloff = max(0.0, 1.0 - distance / max(1, pad))
-                    mask[row + x] = int(round(seewo.SHADOW_ALPHA * falloff ** 1.8))
-
-        layer = bytearray(self.width * self.height * 4)
-        top = int(seewo.TOP_COLOR[1:], 16)
-        bottom = int(seewo.BOTTOM_COLOR[1:], 16)
-        for y in range(self.height):
-            row = y * self.width
-            local_y = y - bar["y"]
-            if 0 <= local_y < bar["height"]:
-                t = local_y / max(1, bar["height"] - 1)
-                red = int(((top >> 16) & 255) * (1 - t) + ((bottom >> 16) & 255) * t)
-                green = int(((top >> 8) & 255) * (1 - t) + ((bottom >> 8) & 255) * t)
-                blue = int((top & 255) * (1 - t) + (bottom & 255) * t)
-            else:
-                red = green = blue = 0
-            for x in range(self.width):
-                alpha = mask[row + x]
-                if not alpha:
-                    continue
-                index = (row + x) * 4
-                layer[index] = blue * alpha // 255
-                layer[index + 1] = green * alpha // 255
-                layer[index + 2] = red * alpha // 255
-                layer[index + 3] = alpha
-        self.dib.replace(layer)
+        self.mask = alpha_mask(self.width, self.height, bar, spec["radius"], spec["pad"])
+        self.dib.replace(premultiplied_layer(self.mask, self.width, self.height, bar))
 
         graphics = c.c_void_p()
         self.check(self.gp.GdipCreateFromHDC(self.dib.dc, c.byref(graphics)))
@@ -298,9 +321,8 @@ class SeewoSurface:
 
         # Text and glyphs may have written alpha bytes; the mask is authoritative.
         raw = bytearray(self.dib.buffer)
-        raw[3::4] = mask
+        raw[3::4] = self.mask
         self.layer = raw
-        self.mask = mask
         self.dib.replace(self.layer)
 
     def _paint_static(self, graphics):

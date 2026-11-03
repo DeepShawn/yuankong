@@ -213,6 +213,60 @@ class ParityTest(unittest.TestCase):
             self.assertIn('put("%s"' % field, source, field)
 
 
+class LayerTest(unittest.TestCase):
+    """The alpha mask is pure Python, so its shape is checked on every platform."""
+
+    def setUp(self):
+        from announcement_layer import alpha_mask, premultiplied_layer
+        self.area = dict(x=0, y=0, width=1920, height=1040, dpi=96)
+        self.spec = seewo.layout(self.area, config(style="seewo"))
+        self.bar = self.spec["bar"]
+        width, height = self.spec["window"]["width"], self.spec["window"]["height"]
+        self.width, self.height = width, height
+        self.mask = alpha_mask(width, height, self.bar, self.spec["radius"], self.spec["pad"])
+        self.layer = premultiplied_layer(self.mask, width, height, self.bar)
+
+    def alpha(self, x, y):
+        return self.mask[y * self.width + x]
+
+    def test_margin_is_transparent_and_the_bar_is_opaque(self):
+        self.assertEqual(0, self.alpha(0, 0))
+        self.assertEqual(0, self.alpha(self.width - 1, self.height - 1))
+        self.assertEqual(255, self.alpha(self.width // 2, self.bar["y"] + self.bar["height"] // 2))
+
+    def test_shadow_ring_fades_outwards(self):
+        column = [self.alpha(self.width // 2, self.bar["y"] - distance)
+                  for distance in range(1, self.spec["pad"])]
+        self.assertEqual(sorted(column, reverse=True), column)
+        self.assertTrue(all(0 < value < 255 for value in column), column)
+
+    def test_rounded_corners_have_partial_coverage(self):
+        radius = self.spec["radius"]
+        partial = [self.alpha(x, y)
+                   for y in range(self.bar["y"], self.bar["y"] + radius + 2)
+                   for x in range(self.bar["x"], self.bar["x"] + radius + 2)
+                   if 0 < self.alpha(x, y) < 255]
+        self.assertGreaterEqual(len(partial), 4)
+        self.assertEqual(0, self.alpha(self.bar["x"], self.bar["y"]))
+
+    def test_layer_is_premultiplied_and_mirrors(self):
+        for index in range(0, len(self.layer), 4):
+            for channel in range(3):
+                self.assertLessEqual(self.layer[index + channel], self.layer[index + 3])
+        middle = self.bar["y"] + self.bar["height"] // 2
+        left = self.alpha(self.bar["x"] + 400, middle)
+        right = self.alpha(self.bar["x"] + self.bar["width"] - 401, middle)
+        self.assertEqual(left, right)
+
+    def test_gradient_is_brighter_at_the_top(self):
+        middle = self.width // 2
+        top = self.layer[(self.bar["y"] + 3) * self.width * 4 + middle * 4:
+                         (self.bar["y"] + 3) * self.width * 4 + middle * 4 + 3]
+        bottom = self.layer[(self.bar["y"] + self.bar["height"] - 4) * self.width * 4 + middle * 4:
+                            (self.bar["y"] + self.bar["height"] - 4) * self.width * 4 + middle * 4 + 3]
+        self.assertGreater(top[0] + top[1] + top[2], bottom[0] + bottom[1] + bottom[2])
+
+
 @unittest.skipUnless(os.name == "nt", "UpdateLayeredWindow and GDI+")
 class NativeSeewoTest(unittest.TestCase):
     def test_layered_bar_has_transparent_margin_rounded_corners_and_text(self):
