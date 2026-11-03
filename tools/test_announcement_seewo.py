@@ -310,10 +310,14 @@ class NativeSeewoTest(unittest.TestCase):
     def tearDown(self):
         self.surface.close()
 
-    def pixels(self):
+    def pixels(self, elapsed=None):
+        # At t=0 the body is still outside the track (it enters from the right),
+        # so sample the middle of the first pass unless told otherwise.
+        if elapsed is None:
+            elapsed = self.surface.durations[0] / 2
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "band.bmp"
-            self.surface.paint(0.0)
+            self.surface.paint(elapsed)
             self.surface.save_bmp(path)
             data = path.read_bytes()
         header = 54
@@ -336,6 +340,14 @@ class NativeSeewoTest(unittest.TestCase):
         top = pixel(self.surface.width // 2, 1)
         bottom = pixel(self.surface.width // 2, self.surface.height - 2)
         self.assertGreaterEqual(bottom[0] + bottom[1] + bottom[2], top[0] + top[1] + top[2])
+
+    def test_entry_instant_shows_only_the_lead_in(self):
+        # Nothing of the body is inside the track at t=0: it starts at the right edge.
+        pixel = self.pixels(0.0)
+        white = sum(1 for y in range(0, self.surface.height, 3)
+                    for x in range(self.surface.spec["viewport"]["x"] + 4, self.surface.width, 3)
+                    if min(pixel(x, y)[:3]) > 200)
+        self.assertEqual(0, white, "the body has not entered yet")
 
     def test_blue_glyph_and_white_text_are_drawn(self):
         pixel = self.pixels()
