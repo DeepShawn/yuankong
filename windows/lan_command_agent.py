@@ -44,9 +44,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 APP_ID = "LANCMD"
-VERSION = "3.18.4"
-BUILD_VERSION = "3.18.4"
-RELEASE_TAG = "v3.18.4"
+VERSION = "3.18.5"
+BUILD_VERSION = "3.18.5"
+RELEASE_TAG = "v3.18.5"
 DEF_TCP_PORT = 47823
 DEF_UDP_PORT = 47824
 MAX_LINE = 64 * 1024 * 1024  # 单帧上限 64MB（含 base64 文件）
@@ -641,6 +641,7 @@ def _read_directory(path):
                     "dir": is_dir,
                     "size": 0 if is_dir else st.st_size,
                     "mtime": int(st.st_mtime),
+                    "readonly": bool(getattr(st, "st_file_attributes", 0) & 1),
                     "hidden": bool(getattr(st, "st_file_attributes", 0) & 2),
                     "system": bool(getattr(st, "st_file_attributes", 0) & 4),
                     "file_id": file_token(entry_info),
@@ -1155,6 +1156,7 @@ from network_management import NetworkManagement, WindowsNetwork
 from app_control import AppControl
 from dates_batch import BatchDates
 from self_manage import SelfManage
+from maintenance_diagnostics import MaintenanceDiagnostics
 from tunnel import Tunnel
 import weakref
 _connections=weakref.WeakSet()
@@ -1275,6 +1277,8 @@ def _self_stop():
 
 
 _self_manage=SelfManage(_capture_dir,APP_DIR,os.getpid(),RpcError,log,stopper=_self_stop)
+_maintenance_diagnostics=MaintenanceDiagnostics(_capture_dir,_dates.folder,
+    Path(os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~"))/"LanCmdMaintenance",os.getpid())
 
 
 def remote_capabilities():
@@ -1282,7 +1286,7 @@ def remote_capabilities():
     if IS_WIN:
         features.extend(["message", "input", "pointer", "audio", "local_input", "devices", "apps", "file_open", "touch_pause", "gestures", "cursor_visibility", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"])
         features.extend(["announcements","announcement_layout","global_delays","app_runtime","file_locks","app_locks","app_catalog","app_freeze","app_freeze_jobs","app_close","force_delete","startup_network","network_management","network_device_state","hotspot_client_access","hotspot_adapter_selection","network_password","network_batch","hotspot_timer","wallpaper","local_upgrade","registry","tasks","browser","scripts","privacy_devices","placeholders","file_jobs","file_resize","file_sources","usb_connection","file_schedule","office_documents","privacy_device_recovery","file_search","placeholders_fast","placeholders_modes","usb_connection_fallback"])
-        features.extend(["app_control","app_control_bind","app_hidden","dates_batch","self_manage","self_rename","self_delete","tunnel"])
+        features.extend(["app_control","app_control_bind","app_hidden","dates_batch","self_manage","self_rename","self_delete","tunnel","file_properties_readonly","maintenance_diagnostics"])
         if os.path.isfile(_recordings.executable):
             features.extend(["recordings","panorama_recording","system_audio_recording"])
         if os.path.isfile(_remote.backend.capture_exe):
@@ -1335,6 +1339,7 @@ HANDLERS = {
     "app_control": lambda q, st: _app_control.request(q,st),
     "dates_batch": lambda q, st: _dates.request(q,st,RpcError),
     "self_manage": lambda q, st: _self_manage.request(q,st),
+    "maintenance_diagnostics": lambda q, st: _maintenance_diagnostics.request(q,RpcError),
     "tunnel": lambda q, st: _tunnel.request(q,st),
     "announcements": lambda q,st: _announcements.request(q,st,RpcError),
     "message": _remote.message,

@@ -121,6 +121,9 @@ def extract_zip(source, destination):
 
 def file_request(q, error):
     try:
+        if q.get("action") in ("properties", "readonly"):
+            from file_properties import properties
+            return properties(q)
         path = checked_path(q.get("path"))
         action = q.get("action")
         if q.get("file_id") is not None:

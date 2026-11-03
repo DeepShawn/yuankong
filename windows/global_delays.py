@@ -23,7 +23,7 @@ def category(command,q):
         return 'command' if action=='add' and not any('delay' in i for i in q.get('items',[]) if isinstance(i,dict)) else None
     if command in ('put','rm','mkdir','rename','lock','power','kill','message'):return 'operation'
     choices={
-        'files':{'open','extract','mtime','text_write','text_create'},
+        'files':{'open','extract','mtime','text_write','text_create','readonly'},
         'file_jobs':{'create'},'placeholders':{'create'},'apps':{'activate','minimize','close'},
         'browser':{'open'},'registry':{'set','delete_value','create_key','delete_key'},'wallpaper':{'set'},
         'devices':{'policy','eject','force_disconnect'},'privacy_devices':{'set_enabled','mute'},

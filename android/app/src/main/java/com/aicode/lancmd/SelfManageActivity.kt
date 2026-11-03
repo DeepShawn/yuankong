@@ -8,6 +8,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import org.json.JSONArray
 import org.json.JSONObject
+import com.aicode.lancmd.net.AgentClient
+import com.aicode.lancmd.net.ConnectionManager
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
+import java.io.IOException
 
 /**
  * 接收端自我维护：安装文件夹改名、自我删除、批量修改最后修改日期。
@@ -25,7 +33,11 @@ class SelfManageActivity : MiuixActivity() {
     internal var pending by mutableStateOf<List<String>>(emptyList())
     internal var records by mutableStateOf<List<Record>>(emptyList())
     internal var busy by mutableStateOf(false)
-    internal var supported by mutableStateOf(true)
+    internal var supported by mutableStateOf(false)
+    internal var diagnosticLoading by mutableStateOf(false)
+    private var diagnosticReady by mutableStateOf(false)
+    private var diagnosticJob:Job?=null
+    private var diagnosticClient:AgentClient?=null
 
     internal var paths by mutableStateOf("")
     internal var mask by mutableStateOf("*")
@@ -41,17 +53,9 @@ class SelfManageActivity : MiuixActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
-        status("批量日期可改接收端自己的文件；改名与删除会先停止接收端，完成后按需重新启动")
+        status("维护状态将独立读取；读取失败时可取消、重试或返回，不会自动执行维护")
         content { Screen() }
-        task {
-            val caps = pinnedCall(origin, "capabilities").optJSONArray("features")
-            supported = caps != null && (0 until caps.length()).any { caps.optString(it) == "self_manage" }
-            if (!supported) {
-                status("请完整更新 Windows 接收端后使用自我维护", true)
-                return@task
-            }
-            load()
-        }
+        load()
     }
 
     @Composable
@@ -63,6 +67,7 @@ class SelfManageActivity : MiuixActivity() {
                 Note("上一次改名或删除没有留下完成记录：先查看电脑上的 LanCmdMaintenance 日志，再决定是否重试。")
             }
             Action("刷新状态", enabled = !busy) { load() }
+            if(diagnosticLoading)Action("取消状态读取"){cancelDiagnostics()}
         }
         SectionCard("批量修改最后修改日期") {
             Field("路径（每行一个文件或文件夹）", paths, { paths = it }, singleLine = false, maxLines = 4)
@@ -77,8 +82,8 @@ class SelfManageActivity : MiuixActivity() {
                 Field("目标时间", time, { time = it })
             }
             ActionRow {
-                Action("预览匹配文件", enabled = !busy, modifier = Modifier.weight(1f)) { preview() }
-                Action("执行修改", enabled = !busy, primary = true, modifier = Modifier.weight(1f)) { confirmApply() }
+                Action("预览匹配文件", enabled = !busy && diagnosticReady, modifier = Modifier.weight(1f)) { preview() }
+                Action("执行修改", enabled = !busy && diagnosticReady, primary = true, modifier = Modifier.weight(1f)) { confirmApply() }
             }
             Note("时间格式 YYYY-MM-DD HH:MM:SS，按电脑本地时间。每个文件都会先写入恢复记录再修改；文件系统不能精确保存时自动恢复原日期。")
         }
@@ -88,19 +93,19 @@ class SelfManageActivity : MiuixActivity() {
                 InfoItem("${record.target.ifBlank { record.id }}",
                     "共 ${record.files} 个 · 已改 ${record.applied} · 已恢复 ${record.restored} · 失败 ${record.failed}")
                 ActionRow {
-                    Action("恢复原日期", enabled = !busy, modifier = Modifier.weight(1f)) { restore(record) }
-                    Action("删除记录", enabled = !busy, modifier = Modifier.weight(1f)) { dropRecord(record) }
+                    Action("恢复原日期", enabled = !busy && diagnosticReady, modifier = Modifier.weight(1f)) { restore(record) }
+                    Action("删除记录", enabled = !busy && diagnosticReady, modifier = Modifier.weight(1f)) { dropRecord(record) }
                 }
             }
         }
         SectionCard("安装文件夹改名") {
             Field("新文件夹名称", newName, { newName = it })
-            Action("改名并重新启动接收端", enabled = !busy && newName.isNotBlank(), primary = true) { confirmRename() }
+            Action("改名并重新启动接收端", enabled = !busy && diagnosticReady && newName.isNotBlank(), primary = true) { confirmRename() }
             Note("新名称只能在同一个父目录内；改名前会先结束接收端和本目录里的其他进程，成功后更新当前用户自启动项。")
         }
         SectionCard("自我删除") {
             SelectionRow("保留配置和日志", "只删程序文件，保留 %APPDATA%\\LanCmd 里的记录", keepConfig, { keepConfig = it })
-            Action("删除接收端", enabled = !busy) { confirmDelete() }
+            Action("删除接收端", enabled = !busy && diagnosticReady) { confirmDelete() }
             Note("需要输入 DELETE 确认。删除后手机连接会断开，需要重新解压发布包才能再次使用；日期与改名记录也会随配置一起删除，除非保留配置。")
         }
     }
@@ -108,18 +113,67 @@ class SelfManageActivity : MiuixActivity() {
     private fun load() {
         if (busy) return
         busy = true
-        task {
+        diagnosticLoading=true;diagnosticReady=false
+        status("正在读取维护状态，最多等待 8 秒；可以取消或返回")
+        diagnosticJob=task {
+            var feature:AgentClient?=null
             try {
-                val info = pinnedCall(origin, "self_manage")
-                directory = info.optString("root")
-                val list = info.optJSONArray("pending") ?: JSONArray()
-                pending = (0 until list.length()).map { index ->
-                    val item = list.getJSONObject(index)
-                    "${item.optString("operation")} · ${item.optString("plan")}"
+                withTimeout(8000) {
+                    val source=origin?:throw IOException("当前未连接电脑")
+                    val client=AgentClient(source.host,source.port)
+                    feature=client;diagnosticClient=client
+                    ConnectionManager.connectFeatureClient(client,source)
+                    suspend fun query(command:String,params:JSONObject=JSONObject()):JSONObject {
+                        check(command in setOf("capabilities","maintenance_diagnostics"))
+                        if(source.closed || ConnectionManager.sessionClient()!==source)throw IOException("电脑连接已改变，请重新打开此页")
+                        val response=client.call(command,params,2000)
+                        if(!response.optBoolean("ok"))throw IOException(response.optString("error","状态读取失败"))
+                        if(source.closed || ConnectionManager.sessionClient()!==source)throw IOException("电脑连接已改变，请重新打开此页")
+                        return response
+                    }
+                    val caps=query("capabilities").optJSONArray("features")
+                    supported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="maintenance_diagnostics"}
+                    if(!supported)throw IOException("请完整更新 Windows 接收端以使用限时状态诊断")
+                    var first=true
+                    while(true) {
+                        val info=query("maintenance_diagnostics",JSONObject().put("refresh",first));first=false
+                        directory=info.optString("root")
+                        val list=info.optJSONArray("pending")?:JSONArray()
+                        pending=(0 until list.length()).map {index->
+                            val item=list.getJSONObject(index)
+                            "${item.optString("operation")} · ${item.optString("plan")}"
+                        }
+                        val history=info.optJSONArray("items")?:JSONArray()
+                        records=(0 until history.length()).map {index->
+                            val item=history.getJSONObject(index)
+                            Record(item.optString("id"),item.optString("target"),item.optInt("files"),item.optInt("applied"),item.optInt("restored"),item.optInt("failed"))
+                        }
+                        if(!info.optBoolean("loading")) {
+                            val warnings=info.optJSONArray("warnings")?:JSONArray()
+                            diagnosticReady=!info.optBoolean("partial")
+                            status(if(warnings.length()>0)(0 until warnings.length()).joinToString("；"){warnings.optString(it)}
+                                else "维护状态已读取，记录仅作诊断；未执行维护操作",warnings.length()>0)
+                            break
+                        }
+                        delay(250)
+                    }
                 }
-                refreshRecords()
-            } finally { busy = false }
+            } catch(e:TimeoutCancellationException) {
+                status("状态读取超时；主连接未关闭，可以刷新重试",true)
+            } catch(e:CancellationException) {throw e}
+            catch(e:Exception) {status("状态读取失败：${e.message}；可以刷新重试",true)}
+            finally {feature?.close();diagnosticClient=null;diagnosticLoading=false;busy=false}
         }
+    }
+
+    internal fun cancelDiagnostics() {
+        diagnosticJob?.cancel();diagnosticClient?.close()
+        status("已取消状态读取，可以刷新重试")
+    }
+
+    override fun onStop() {
+        if(diagnosticLoading){diagnosticJob?.cancel();diagnosticClient?.close()}
+        super.onStop()
     }
 
     private suspend fun refreshRecords() {
