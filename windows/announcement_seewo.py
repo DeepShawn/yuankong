@@ -140,32 +140,44 @@ def static(viewport_width, run_width):
     return run_width <= viewport_width
 
 
-def offset(elapsed, speed_px, viewport_width, run_width, gap):
-    """Leftward travel for one scrolling line; returns (offset, cycles).
-
-    The line enters from the right edge, leaves at the left, waits ``gap`` and
-    comes back.  A short line never moves.
-    """
-    if static(viewport_width, run_width):
-        return 0.0, 0
-    elapsed = max(0.0, float(elapsed))
-    period = max(1.0, viewport_width + run_width + gap)
-    travel = elapsed * speed_px
-    return viewport_width - (travel % period), int(travel // period)
+def static_cycle(elapsed):
+    """A still message counts a cycle every 5 s so ``repeats`` can end it."""
+    return int(max(0.0, elapsed) / 5.0)
 
 
 def positions(elapsed, speed_px, viewport_width, run_width, gap):
-    """Every copy of the line that can be on screen right now, plus the cycle."""
+    """Where every visible copy of the line sits, plus the completed cycles.
+
+    The first pass starts **visible** at the left edge (that is what the
+    reference shows and what a teacher expects after pressing send), scrolls
+    out, waits ``gap``, then re-enters from the right for the following passes.
+    A short line never moves.
+    """
     if static(viewport_width, run_width):
-        return [0.0], 0
-    x, cycles = offset(elapsed, speed_px, viewport_width, run_width, gap)
-    period = viewport_width + run_width + gap
+        return [0.0], static_cycle(elapsed)
+    elapsed = max(0.0, float(elapsed))
+    travel = elapsed * speed_px
+    if travel < run_width:
+        return [-travel], 0
+    ahead = travel - run_width
+    if ahead < gap:
+        return [], 1
+    ahead -= gap
+    period = max(1.0, viewport_width + run_width + gap)
+    x = viewport_width - (ahead % period)
+    cycles = 1 + int(ahead // period)
     copies = [x]
     if x + run_width < viewport_width:
         copies.append(x + period)      # the previous copy is still leaving
     if x > 0:
         copies.append(x - period)      # the next copy is already entering
     return [value for value in copies if value <= viewport_width and value + run_width > 0], cycles
+
+
+def offset(elapsed, speed_px, viewport_width, run_width, gap):
+    """Left edge of the leading copy, for callers that need one number."""
+    copies, cycles = positions(elapsed, speed_px, viewport_width, run_width, gap)
+    return (copies[0] if copies else viewport_width), cycles
 
 
 def glyph(size):

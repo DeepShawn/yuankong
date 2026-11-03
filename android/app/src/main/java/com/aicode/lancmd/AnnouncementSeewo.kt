@@ -116,15 +116,25 @@ internal object SeewoBar {
         )
     }
 
-    /** 短消息不动，长消息从右侧进场；返回值是每条副本的偏移与已完成圈数。 */
+    /** 静止消息每 5 秒算一圈，供播放次数使用。 */
+    fun staticCycle(elapsed: Float) = (elapsed.coerceAtLeast(0f) / 5f).toInt()
+
+    /**
+     * 每条可见副本的位置与已完成圈数。第一遍**从左边开始显示**（和参考图一致，
+     * 老师点了发送就应当立刻看到），滚出去后空一段间隔，之后的每一遍从右侧进场。
+     * 短于视口的消息不动。
+     */
     fun positions(elapsed: Float, speedPx: Float, viewportWidth: Float, runWidth: Float,
                   gap: Float): Pair<List<Float>, Int> {
-        if (runWidth <= viewportWidth) return listOf(0f) to 0
-        val time = elapsed.coerceAtLeast(0f)
+        if (runWidth <= viewportWidth) return listOf(0f) to staticCycle(elapsed)
+        val travel = elapsed.coerceAtLeast(0f) * speedPx
+        if (travel < runWidth) return listOf(-travel) to 0
+        var ahead = travel - runWidth
+        if (ahead < gap) return emptyList<Float>() to 1
+        ahead -= gap
         val period = (viewportWidth + runWidth + gap).coerceAtLeast(1f)
-        val travel = time * speedPx
-        val x = viewportWidth - travel % period
-        val cycles = (travel / period).toInt()
+        val x = viewportWidth - (ahead % period)
+        val cycles = 1 + (ahead / period).toInt()
         val copies = mutableListOf(x)
         if (x + runWidth < viewportWidth) copies.add(x + period)
         if (x > 0) copies.add(x - period)
