@@ -13,6 +13,10 @@ import threading
 import time
 import uuid
 
+# The helper subprocesses run with -I, which drops the script directory from
+# sys.path; sibling modules must still import.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import announcement_seewo as seewo
 
 MODES=('ticker','popup','sticky')
