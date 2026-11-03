@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -107,6 +108,25 @@ class PackagedStartupTest(unittest.TestCase):
                 self.assertEqual(self.version, capabilities['build_version'])
                 for feature in ("storage", "local_upgrade", "app_freeze", "file_search", "force_delete", "startup_network", "network_management", "network_device_state", "hotspot_client_access", "hotspot_adapter_selection", "network_password", "network_batch", "hotspot_timer", "panorama_recording", "system_audio_recording", "app_runtime", "file_locks", "file_resize", "file_sources", "announcements", "announcement_layout", "global_delays", "cursor_visibility_verified", "cursor_visibility_input_queue", "native_touch", "native_touch_hold"):
                     self.assertIn(feature, capabilities["features"])
+                for feature in ('file_properties_readonly','maintenance_diagnostics'):
+                    self.assertIn(feature,capabilities['features'])
+                document=self.folder/('readonly-'+uuid.uuid4().hex+'.txt')
+                document.write_bytes(b'ordinary document')
+                modified=document.stat().st_mtime_ns
+                try:
+                    before=call('files',action='properties',path=str(document))
+                    after=call('files',action='readonly',path=str(document),file_id=before['file_id'],
+                               expected_attributes=before['attributes'],readonly=True,delay_override=0)
+                    self.assertTrue(after['readonly'])
+                    self.assertEqual(before['attributes']&~(1|128),after['attributes']&~(1|128))
+                    self.assertEqual(modified,document.stat().st_mtime_ns)
+                    reverted=call('files',action='readonly',path=str(document),file_id=after['file_id'],
+                                  expected_attributes=after['attributes'],readonly=False,delay_override=0)
+                    self.assertFalse(reverted['readonly'])
+                finally:
+                    os.chmod(document,stat.S_IREAD|stat.S_IWRITE);document.unlink()
+                diagnostic=call('maintenance_diagnostics')
+                self.assertIn('loading',diagnostic);self.assertIn('warnings',diagnostic)
                 area=call('announcements',action='layout')['area']
                 self.assertGreater(area['width'],0);self.assertGreater(area['height'],0)
                 self.assertTrue(48<=area['dpi']<=768)

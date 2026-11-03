@@ -71,6 +71,8 @@ class StorageActivity : MiuixActivity() {
     internal var listingBusy by mutableStateOf(false)
     private var listingMessage by mutableStateOf("正在读取磁盘与目录…")
     internal var operationsBusy by mutableStateOf(false)
+    internal var propertyRecord by mutableStateOf<JSONObject?>(null)
+    internal var propertyReadonly by mutableStateOf(false)
     internal var transferText by mutableStateOf("")
     /** 批量操作的逐项结果，和旧版顶部的「展开逐项结果」一致。 */
     internal var results by mutableStateOf<List<String>>(emptyList())
@@ -214,6 +216,26 @@ class StorageActivity : MiuixActivity() {
 
     @Composable
     private fun Screen() = FixedPage("电脑存储") {
+        propertyRecord?.let { record ->
+            androidx.compose.ui.window.Dialog(onDismissRequest={propertyRecord=null}) {
+                Column(Modifier.fillMaxWidth().heightIn(max=560.dp).verticalScroll(rememberScrollState())) {
+                    SectionCard("文件属性") {
+                        InfoItem(record.optString("name"),record.optString("path"))
+                        Note(if(record.optBoolean("dir"))"文件夹" else FileTransfer.humanSize(record.optLong("size")))
+                        SelectionRow("只读",record.optString("notice"),propertyReadonly,{propertyReadonly=it},
+                            enabled=!operationsBusy && record.optBoolean("editable"))
+                        SelectionRow("隐藏（仅查看）",checked=record.optBoolean("hidden"),onCheckedChange={},enabled=false)
+                        SelectionRow("系统（仅查看）",checked=record.optBoolean("system"),onCheckedChange={},enabled=false)
+                        if(!record.optBoolean("editable"))Note("系统、接收端和恢复记录的属性仅可查看。")
+                        ActionRow {
+                            Action("取消",modifier=Modifier.weight(1f)){propertyRecord=null}
+                            Action("保存只读属性",enabled=!operationsBusy && record.optBoolean("editable") && propertyReadonly!=record.optBoolean("readonly"),
+                                primary=true,modifier=Modifier.weight(1f)){saveReadonly(record,propertyReadonly)}
+                        }
+                    }
+                }
+            }
+        }
         if (transferText.isNotBlank()) SectionCard {
             Note(transferText)
             if (forceConfirmation != null) Action("查看占用并确认", enabled = !forceConfirmSending) { confirmForceDelete() }
@@ -300,6 +322,7 @@ class StorageActivity : MiuixActivity() {
                     append(" · ").append(date)
                     if (item.optBoolean("hidden")) append(" · 隐藏")
                     if (item.optBoolean("system")) append(" · 系统")
+                    if (item.optBoolean("readonly")) append(" · 只读")
                 }
                 if (multi) SelectionRow(
                     title = name,
@@ -585,12 +608,7 @@ class StorageActivity : MiuixActivity() {
             "最后修改日期" -> modifyDate(item, selected)
             "更改实际大小" -> modifySize(item, selected)
             "文件来源说明" -> editSource(item, selected)
-            "文件属性" -> WorkspaceDialog.Builder(this).setTitle(item.optString("name")).setMessage(
-                "$selected\n\n${if (item.optBoolean("dir")) "文件夹" else FileTransfer.humanSize(item.optLong("size"))}\n" +
-                    "最后修改：${DateFormat.getDateTimeInstance().format(Date(item.optLong("mtime") * 1000))}\n" +
-                    "隐藏：${item.optBoolean("hidden")} · 系统：${item.optBoolean("system")}"
-            ).setPositiveButton("修改最后修改日期") { _, _ -> modifyDate(item, selected) }
-                .setNegativeButton("关闭", null).show()
+            "文件属性" -> readProperties(item,selected)
             "编辑文本" -> task {
                 checkSource()
                 startActivity(Intent(this@StorageActivity, TextEditorActivity::class.java).putExtra("path", selected))
@@ -608,6 +626,38 @@ class StorageActivity : MiuixActivity() {
             "重命名" -> renameOrCreate(item)
             "删除" -> deleteItem(item, selected)
             "强制删除" -> beginFileOperation("force_delete", listOf(JSONObject(item.toString())))
+        }
+    }
+
+    internal fun readProperties(item:JSONObject,selected:String) {
+        if(!sourceReady() || operationsBusy)return
+        task {
+            val features=pinnedCall(origin,"capabilities",timeout=6000).optJSONArray("features")
+            check(features!=null && (0 until features.length()).any{features.optString(it)=="file_properties_readonly"}){
+                "此接收端不支持只读属性编辑，请完整更新并重启 Windows 接收端"
+            }
+            val result=pinnedCall(origin,"files",JSONObject().put("action","properties").put("path",selected)
+                .apply{item.optString("file_id").takeIf{it.isNotBlank()}?.let{put("file_id",it)}},timeout=6000)
+            if(!sourceReady())return@task
+            propertyReadonly=result.getBoolean("readonly")
+            propertyRecord=result.put("name",item.optString("name"))
+        }
+    }
+
+    internal fun saveReadonly(record:JSONObject,readonly:Boolean) {
+        if(!sourceReady() || operationsBusy || !record.optBoolean("editable"))return
+        propertyRecord=null
+        val base=path
+        operationsBusy=true
+        task {
+            try {
+                val result=storageCall("files",JSONObject().put("action","readonly").put("path",record.getString("path"))
+                    .put("file_id",record.getString("file_id")).put("expected_attributes",record.getInt("attributes"))
+                    .put("readonly",readonly))
+                val message=if(result.getBoolean("readonly"))"已设为只读" else "已取消只读"
+                status(message)
+                if(path==base)load(base,message)
+            }finally{operationsBusy=false}
         }
     }
 

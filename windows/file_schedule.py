@@ -54,7 +54,7 @@ class FileSchedule:
                 if len(self.jobs) < 50:break
                 if value["done"].is_set():del self.jobs[key]
             params=copy.deepcopy(params)
-            if params.get("path") and (command in ("rm","rename","scripts") or command=="files" and params.get("action") in ("open","extract","mtime","preview")):
+            if params.get("path") and (command in ("rm","rename","scripts") or command=="files" and params.get("action") in ("open","extract","mtime","preview","readonly")):
                 from file_jobs import file_token,snapshot
                 try:params.setdefault("file_id",file_token(snapshot(Path(params["path"]))))
                 except OSError:pass
