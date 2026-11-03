@@ -12,7 +12,7 @@ import org.json.JSONObject
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
-internal fun announcementDefaults()=JSONObject().put("text","").put("prefix","消息提醒").put("mode","ticker").put("motion","left")
+internal fun announcementDefaults()=JSONObject().put("text","").put("prefix","消息提醒").put("mode","ticker").put("motion","left").put("style","classic")
     .put("position","top").put("shape","rectangle").put("background","#081424").put("foreground","#FFFFFF").put("accent","#56B5F1")
     .put("font","Microsoft YaHei UI").put("font_size",28).put("bold",true).put("speed",90).put("opacity",92).put("width",100).put("duration",0).put("repeats",5)
     .put("placement","preset").put("rect",JSONObject.NULL)
@@ -69,6 +69,7 @@ class AnnouncementPreview(context:Context):View(context) {
         for(i in 1..3){val x=stage.left+stage.width()*i/4;val y=stage.top+stage.height()*i/4;canvas.drawLine(x,stage.top,x,stage.bottom,p);canvas.drawLine(stage.left,y,stage.right,y,p)}
         val b=AnnouncementGeometry.bounds(config,area);val scale=stage.width()/area.width;val box=boxOnView();val s=area.scale.toFloat()
         val elapsed=playback.elapsed(SystemClock.elapsedRealtime())/1000f
+        if(SeewoBar.isSeewo(config)){drawSeewo(canvas,box,scale);finishFrame();return}
         val motion=if(playback.state in listOf("stopped","completed"))"static" else config.optString("motion")
         textPaint.typeface=Typeface.create(if(config.optString("font")=="SimSun")"serif" else "sans-serif",if(config.optBoolean("bold",true))Typeface.BOLD else Typeface.NORMAL)
         textPaint.textSize=config.optInt("font_size",28).coerceIn(16,96)*s
@@ -112,13 +113,117 @@ class AnnouncementPreview(context:Context):View(context) {
         canvas.restore();canvas.restore();canvas.restore()
         p.style=Paint.Style.STROKE;p.strokeWidth=1.5f*unit;p.color=0xff3ee0b5.toInt();canvas.drawRect(box,p);p.style=Paint.Style.FILL
         if(resizeMode)for((x,y) in corners(box))canvas.drawRoundRect(x-5*unit,y-5*unit,x+5*unit,y+5*unit,2*unit,2*unit,p)
+        finishFrame()
+    }
+
+    /** 播放到时长或次数上限就停下，并按 33 ms 继续下一帧。 */
+    private fun finishFrame() {
         if(isAttachedToWindow && visibility==VISIBLE && playback.state=="playing")postInvalidateDelayed(33)
     }
+    /**
+     * “希沃样式”绘制，顺序与 Windows 的 SeewoSurface 相同：
+     * 阴影 → 圆角渐变条 → 顶部高光 → 喇叭徽标 → 前缀 → 分隔线 → 关闭 → 滚动正文（两端淡出）。
+     */
+    private fun drawSeewo(canvas:Canvas,box:RectF,scale:Float) {
+        val bar=SeewoBar.layout(area,config)
+        val elapsed=playback.elapsed(SystemClock.elapsedRealtime())/1000f
+        val paused=playback.state in listOf("stopped","completed")
+        val alpha=(255*config.optInt("opacity",SeewoBar.OPACITY)/100f).toInt().coerceAtLeast(25)
+        canvas.save();canvas.translate(box.left,box.top);canvas.scale(scale,scale)
+        canvas.saveLayerAlpha(null,alpha)
+        val paint=Paint(Paint.ANTI_ALIAS_FLAG)
+        for((rect,a,radius) in SeewoBar.shadowRects(bar)){
+            paint.color=Color.argb(a.toInt(),0,0,0)
+            canvas.drawRoundRect(rect,radius.toFloat(),radius.toFloat(),paint)
+        }
+        val shape=Path().apply{addRoundRect(RectF(bar.x,bar.y,bar.x+bar.width,bar.y+bar.height),bar.radius,bar.radius,Path.Direction.CW)}
+        paint.shader=LinearGradient(0f,bar.y,0f,bar.y+bar.height,Color.parseColor(SeewoBar.TOP_COLOR),
+            Color.parseColor(SeewoBar.BOTTOM_COLOR),Shader.TileMode.CLAMP)
+        canvas.drawPath(shape,paint);paint.shader=null
+        paint.color=Color.argb(0x3C,0x5E,0x9F,0xD0);paint.strokeWidth=1f
+        canvas.drawLine(bar.x+bar.radius,bar.y+1f,bar.x+bar.width-bar.radius,bar.y+1f,paint)
+
+        val badge=Path().apply{addRoundRect(bar.icon,bar.iconRadius,bar.iconRadius,Path.Direction.CW)}
+        paint.shader=LinearGradient(0f,bar.icon.top,0f,bar.icon.bottom,Color.parseColor("#57BEF9"),
+            Color.parseColor("#1D7BC8"),Shader.TileMode.CLAMP)
+        canvas.drawPath(badge,paint);paint.shader=null
+        val (cone,arcs)=SeewoBar.speaker(bar.icon.width()*0.78f)
+        val speaker=Path();speaker.moveTo(bar.icon.left+bar.icon.width()*0.11f+cone[0],bar.icon.top+bar.icon.height()*0.11f+cone[1])
+        var index=2
+        while(index<cone.size){speaker.lineTo(bar.icon.left+bar.icon.width()*0.11f+cone[index],bar.icon.top+bar.icon.height()*0.11f+cone[index+1]);index+=2}
+        speaker.close();paint.color=Color.WHITE;canvas.drawPath(speaker,paint)
+        paint.style=Paint.Style.STROKE;paint.strokeWidth=maxOf(1.2f,bar.icon.width()/20f);paint.color=Color.argb(0xE6,255,255,255)
+        for((centreX,centreY,radius) in arcs){
+            val arc=Path();arc.addArc(RectF(centreX-radius,centreY-radius,centreX+radius,centreY+radius),-55f,110f)
+            canvas.drawPath(arc,paint)
+        }
+        paint.style=Paint.Style.FILL
+
+        if(bar.prefix!=null){
+            textPaint.color=Color.parseColor(SeewoBar.ACCENT)
+            textPaint.textSize=bar.prefixSize
+            textPaint.typeface=Typeface.create("sans-serif",Typeface.BOLD)
+            val metrics=textPaint.fontMetrics
+            val baseline=bar.y+bar.height/2f-(metrics.ascent+metrics.descent)/2f
+            val column=bar.prefix
+            if(column!=null){
+                canvas.save();canvas.clipRect(column)
+                canvas.drawText(config.optString("prefix"),column.left,baseline,textPaint);canvas.restore()
+            }
+            bar.divider?.let{paint.color=Color.argb(SeewoBar.DIVIDER_ALPHA,255,255,255);canvas.drawRect(it,paint)}
+        }
+        paint.color=Color.parseColor(SeewoBar.CLOSE_COLOR)
+        paint.strokeWidth=maxOf(1.4f,bar.closeSize/12f)
+        val arm=bar.closeSize/2f
+        val cx=bar.close.centerX();val cy=bar.close.centerY()
+        canvas.drawLine(cx-arm/2f,cy-arm/2f,cx+arm/2f,cy+arm/2f,paint)
+        canvas.drawLine(cx+arm/2f,cy-arm/2f,cx-arm/2f,cy+arm/2f,paint)
+
+        val message=config.optString("text").ifBlank{"请在下方输入公告内容"}.lines().joinToString("   ")
+        textPaint.color=Color.parseColor(SeewoBar.TEXT_COLOR)
+        textPaint.textSize=bar.textSize
+        val width=textPaint.measureText(message)
+        val metrics=textPaint.fontMetrics
+        val textBaseline=bar.viewport.centerY()-(metrics.ascent+metrics.descent)/2f
+        val (scrolled,cycles)=SeewoBar.offset(elapsed,
+            config.optInt("speed",SeewoBar.SPEED.toInt()).toFloat()*area.scale.toFloat(),
+            bar.viewport.width(),width,bar.gap)
+        // 停止或播放完毕时居中显示，和经典样式一致，便于编辑时看全文。
+        val offsetX=if(paused)((bar.viewport.width()-width)/2f).coerceAtMost(bar.viewport.width()) else scrolled
+        if(!paused&&((config.optInt("duration")>0&&elapsed>=config.optInt("duration"))||
+                (config.optInt("repeats")>0&&cycles>=config.optInt("repeats")))){
+            playback.finish(SystemClock.elapsedRealtime());onPlaybackState?.invoke(playback.state)
+        }
+        canvas.save();canvas.clipRect(bar.viewport)
+        canvas.drawText(message,bar.viewport.left+offsetX,textBaseline,textPaint)
+        // 两端淡出：按纵向分段取当前渐变色，与 Windows 的分段渐变一致。
+        val bands=8
+        val bandHeight=bar.viewport.height()/bands
+        for((strip,left) in SeewoBar.fadeRects(bar.viewport,bar.fade)){
+            for(band in 0 until bands){
+                val top=bar.viewport.top+band*bandHeight
+                val bottom=if(band==bands-1)bar.viewport.bottom else top+bandHeight
+                val colour=SeewoBar.gradientColor(((top+bottom)/2f-bar.y)/maxOf(1f,bar.height))
+                paint.shader=LinearGradient(if(left)strip.left else strip.right,0f,if(left)strip.right else strip.left,0f,
+                    intArrayOf(Color.argb(255,Color.red(colour),Color.green(colour),Color.blue(colour)),
+                        Color.argb(0,Color.red(colour),Color.green(colour),Color.blue(colour))),null,Shader.TileMode.CLAMP)
+                canvas.drawRect(strip.left,top,strip.right,bottom,paint)
+            }
+            paint.shader=null
+        }
+        canvas.restore()
+        canvas.restore();canvas.restore()
+
+        paint.style=Paint.Style.STROKE;paint.strokeWidth=1.5f*unit;paint.color=0xff3ee0b5.toInt()
+        canvas.drawRect(box,paint);paint.style=Paint.Style.FILL
+        if(resizeMode)for((x,y) in corners(box))canvas.drawRoundRect(x-5*unit,y-5*unit,x+5*unit,y+5*unit,2*unit,2*unit,paint)
+    }
+
     private fun corners(b:RectF)=listOf(b.left to b.top,b.right to b.top,b.left to b.bottom,b.right to b.bottom)
     override fun onTouchEvent(event:MotionEvent):Boolean {
         when(event.actionMasked){
             MotionEvent.ACTION_DOWN->{
-                if(event.pointerCount!=1 || stageRect().isEmpty)return false
+                if(event.pointerCount!=1 || stageRect().isEmpty || SeewoBar.isSeewo(config))return false
                 val box=boxOnView()
                 if(resizeMode){
                     val nearest=corners(box).mapIndexed{i,p->i+1 to hypot(event.x-p.first,event.y-p.second)}.minBy{it.second}

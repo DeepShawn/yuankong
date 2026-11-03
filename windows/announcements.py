@@ -13,12 +13,16 @@ import threading
 import time
 import uuid
 
+import announcement_seewo as seewo
+
 MODES=('ticker','popup','sticky')
 MOTIONS=('left','right','up','down','bounce','static','fade')
 FONTS=('Microsoft YaHei UI','Microsoft YaHei','SimHei','SimSun','Segoe UI')
 DEFAULT=dict(text='',prefix='消息提醒',mode='ticker',motion='left',position='top',shape='rectangle',
              background='#081424',foreground='#FFFFFF',accent='#56B5F1',font='Microsoft YaHei UI',
-             font_size=28,bold=True,speed=90,opacity=92,width=100,duration=0,repeats=5,placement='preset',rect=None)
+             font_size=28,bold=True,speed=90,opacity=92,width=100,duration=0,repeats=5,placement='preset',rect=None,
+             style='classic')
+STYLES=('classic','seewo')
 
 
 def validate(value):
@@ -28,6 +32,11 @@ def validate(value):
         text=result[key]
         if not isinstance(text,str) or len(text)>limit or '\0' in text or any(ord(c)<32 and c not in '\r\n\t' for c in text):raise ValueError('公告文字或前缀无效')
     if not result['text'].strip():raise ValueError('请输入公告内容')
+    if result['style']=='seewo':
+        # The Seewo bar is a fixed design: the phone may change the text, the
+        # prefix and when it stops, never the geometry or the palette.
+        result=lock_seewo(result)
+    else:result['style']='classic'
     for key,choices in (('mode',MODES),('motion',MOTIONS),('position',('top','center','bottom')),('shape',('rectangle','rounded','pill')),('font',FONTS)):
         if result[key] not in choices:raise ValueError('公告样式选项无效：'+key)
     for key,lower,upper in (('font_size',16,96),('speed',20,400),('opacity',30,100),('width',30,100),('duration',0,3600),('repeats',0,100)):
@@ -48,8 +57,16 @@ def validate(value):
     return result
 
 
+def lock_seewo(result):
+    """Rewrite every style-owned field so an old draft cannot deform the bar."""
+    for key,value in seewo.LOCKED.items():result[key]=value
+    result['style']='seewo';result['placement']='preset';result['rect']=None
+    return result
+
+
 def window_rect(config,area):
     """Integer permille of the primary work area; mirrored by the phone editor."""
+    if config.get('style')=='seewo':return seewo.window_rect(area)
     width,height,dpi=area['width'],area['height'],area['dpi']
     if (any(type(area[k])is not int for k in ('x','y','width','height','dpi')) or
             not 1<=width<=32768 or not 1<=height<=32768 or not 48<=dpi<=768 or
@@ -89,11 +106,11 @@ def primary_work_area():
     return dict(x=rect.left,y=rect.top,width=rect.right-rect.left,height=rect.bottom-rect.top,dpi=dpi)
 
 
-def motion_frame(motion,width,height,text_width,text_height,elapsed,speed):
+def motion_frame(motion,width,height,text_width,text_height,elapsed,speed,gap=32):
     """Pixel positions based on elapsed time, never frame count or wall clock."""
     elapsed=max(0,elapsed);center_y=(height-text_height)/2
     if motion in ('left','right'):
-        distance=width+text_width+32;travel=elapsed*speed;cycle=int(travel/distance);offset=travel%distance
+        distance=width+text_width+gap;travel=elapsed*speed;cycle=int(travel/distance);offset=travel%distance
         return ((width-offset) if motion=='left' else (-text_width+offset),center_y,cycle,1.)
     if motion in ('up','down'):
         distance=height+text_height+24;travel=elapsed*speed;cycle=int(travel/distance);offset=travel%distance

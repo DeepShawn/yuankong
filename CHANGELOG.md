@@ -1,5 +1,13 @@
 # 更新记录
 
+## 3.18.0
+
+- 滚动公告新增锁定的「希沃样式」：顶部居中、92% 宽、56 逻辑像素高、圆角 10、#12324F→#071522 竖向渐变、30 像素蓝色徽标内嵌白色喇叭、20 号 #8FD8FF 前缀 + 分隔线、22 号白色粗体正文以 132 逻辑像素／秒左移、两端 20 像素淡出、右上角 × 关闭。只有正文、前缀、播放次数与秒数可改，其余字段由 `validate()` 强制重写，旧草稿无法把外观改花。
+- Windows 公告窗口改用 `CreateDIBSection` + `UpdateLayeredWindow` 逐像素 alpha：静态层（阴影、渐变、徽标、前缀、分隔线、×）缓存一次，每帧只重画滚动文字并从蒙版恢复 alpha 通道，阴影与抗锯齿圆角不再依赖窗口 region。经典样式保持原路径不变。
+- 新增 `windows/announcement_seewo.py`（唯一尺寸表）与 `windows/announcement_layer.py`（分层表面），安卓 `AnnouncementSeewo.kt` 为同一张表的镜像；`tools/test_announcement_seewo.py` 解析两边常量并断言一致，另含锁定、几何、位移、配色与 Windows 光栅用例。
+- 新增离线校对工具 `tools/render_announcement_preview.py`，用同一张表渲染 PNG（`--desktop 1920x1080` 可贴在模拟桌面上），便于和一体机截图对比。
+- 双端 3.18.0，Android versionCode 62，保留原签名与 miuix／KernelSU 外观。
+
 ## 3.17.0
 
 - 新增「应用快捷控制」：按进程识别希沃白板、WPS Office 与 QQ，提供翻页、首末页、画笔／橡皮／荧光笔／黑板、保存、撤销、加粗、查找、开始／退出放映等按钮；可在后台 PostMessage 或切前台 SendInput 两种方式发送，支持自定义组合键，以及向聊天窗口粘贴发送消息（发送后尽量还原原剪贴板）。预设键位可在 `%APPDATA%\LanCmd\app-control.json` 覆盖。

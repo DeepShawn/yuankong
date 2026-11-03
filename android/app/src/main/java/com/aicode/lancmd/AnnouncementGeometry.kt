@@ -17,6 +17,8 @@ internal object AnnouncementGeometry {
     }
     fun fromJson(r:JSONObject)=Box(r.getInt("x"),r.getInt("y"),r.getInt("width"),r.getInt("height"))
     fun bounds(c:JSONObject,a:Area):Box {
+        // “希沃样式”是锁定设计：位置与尺寸只由尺寸表决定，不接受自定义矩形。
+        if(SeewoBar.isSeewo(c))return SeewoBar.window(a)
         val s=a.scale
         if(c.optString("placement")=="custom") {
             val r=fromJson(c.getJSONObject("rect"));require(r.valid())

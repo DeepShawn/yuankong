@@ -67,6 +67,7 @@ cp announcements.py notice_window.py global_delays.py local_upgrade.py touch_inj
 cp local_maintenance.py 本机维护.cmd "$PKG/"
 cp network_management.py native_wifi.py hotspot_access.py network_winrt.ps1 "$PKG/"
 cp app_control.py dates_batch.py self_manage.py tunnel.py "$PKG/"
+cp announcement_seewo.py announcement_layer.py "$PKG/"
 mkdir -p "$PKG/upgrade"
 cp upgrade/README.txt "$PKG/upgrade/"
 python3 - "$PKG" "$BUILD_VER" "$VER" <<'PY'

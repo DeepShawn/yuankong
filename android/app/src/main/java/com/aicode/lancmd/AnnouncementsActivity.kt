@@ -69,6 +69,20 @@ class AnnouncementsActivity:MiuixActivity() {
         }
     }
     internal fun change(key:String,value:Any){config=JSONObject(config.toString()).put(key,value);preview.config=config}
+
+    /** 希沃样式是锁定设计：切换时只保留正文与前缀，其余字段由尺寸表接管。 */
+    internal fun applySeewo(on:Boolean) {
+        val text=config.optString("text")
+        val prefix=config.optString("prefix").ifBlank{"消息通知"}
+        val duration=config.optInt("duration")
+        val repeats=config.optInt("repeats")
+        val next=if(on)SeewoBar.preset(prefix) else announcementDefaults().put("prefix",prefix)
+        next.put("text",text).put("duration",duration).put("repeats",repeats)
+        config=next
+        preview.config=config
+        status(if(on)"已切换到希沃样式：位置、尺寸、配色与滚动速度不可再单独调整"
+               else "已退出希沃样式，可自由调整外观")
+    }
     internal fun preset(index:Int) {
         val text=config.optString("text")
         config=announcementDefaults().put("text",text)
@@ -102,6 +116,9 @@ class AnnouncementsActivity:MiuixActivity() {
             androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize()) {
                 item {
                     if(tab==0)SectionCard("内容与预设") {
+                        SelectionRow("希沃样式（锁定外观）","与教室一体机的消息通知条一致：深蓝圆角条、喇叭徽标、浅蓝前缀、白色滚动词、顶端柔和淡出",
+                            SeewoBar.isSeewo(config),{applySeewo(it)})
+                        if(SeewoBar.isSeewo(config))Note("已锁定的项目：顶部位置、92% 宽度、56 逻辑像素高度、圆角 10、飞书蓝渐变、22 号粗体正文与 132 像素／秒匀速左移。可改的只有正文、前缀、播放次数与秒数。")
                         ActionRow {listOf("经典跑马灯","全局弹窗","桌面常驻").forEachIndexed{i,label->Action(label,modifier=Modifier.weight(1f)){preset(i)}}}
                         Field("消息前缀（可留空）",config.optString("prefix"),{change("prefix",it.take(30))})
                         Field("公告内容",config.optString("text"),{change("text",it.take(2000))},singleLine=false,maxLines=6)
@@ -109,7 +126,16 @@ class AnnouncementsActivity:MiuixActivity() {
                             change("mode",listOf("ticker","popup","sticky")[it])}
                         Note("经典预设参考公开校园通知样式；不附加 LanCmd 字样。草稿与样式在手机保存，不会自动重新发送。")
                     }
-                    if(tab==1)SectionCard("位置与尺寸") {
+                    if(tab==1 && SeewoBar.isSeewo(config))SectionCard("位置与尺寸") {
+                        InfoItem("希沃样式固定布局",boxLabel())
+                        Note("位置、宽度与高度由希沃样式尺寸表决定，与教室一体机保持一致；如需自由摆放请先在「内容与预设」里关闭希沃样式。")
+                        Action("退出希沃样式",modifier=Modifier.fillMaxWidth()){applySeewo(false)}
+                    }
+                    if(tab==2 && SeewoBar.isSeewo(config))SectionCard("颜色与形状") {
+                        InfoItem("希沃样式固定配色","深蓝渐变 #12324F → #071522 · 前缀 #8FD8FF · 正文 #FFFFFF")
+                        Note("背景、前缀色、字号、字体与形状都属于希沃样式的锁定项，避免改完后不再像学校的通知条。")
+                    }
+                    if(tab==1 && !SeewoBar.isSeewo(config))SectionCard("位置与尺寸") {
                         InfoItem("当前布局",boxLabel())
                         ChoiceField(listOf("顶部","居中","底部"),"恢复预设位置",listOf("top","center","bottom").indexOf(config.optString("position")).coerceAtLeast(0)){
                             presetPosition(listOf("top","center","bottom")[it])}
@@ -121,7 +147,7 @@ class AnnouncementsActivity:MiuixActivity() {
                         Action("读取电脑尺寸",enabled=layoutSupported && !busy && !areaLoading){task{readArea()}}
                         Note("使用电脑主屏的可用区域，不覆盖任务栏。尺寸至少为 160 × 64 个 Windows 逻辑像素；窗口和关闭按钮始终留在可用区域内。")
                     }
-                    if(tab==2)SectionCard("颜色与形状") {
+                    if(tab==2 && !SeewoBar.isSeewo(config))SectionCard("颜色与形状") {
                         for((key,label) in listOf("background" to "背景颜色","foreground" to "文字颜色","accent" to "图标／前缀颜色"))Field("$label（#RRGGBB）",config.optString(key),{change(key,it.uppercase().take(7))})
                         ActionRow {listOf("深蓝" to "#081424","蓝色" to "#1769AA","红色" to "#A62B36","米白" to "#FFF8E1").forEach{(name,color)->Action(name,modifier=Modifier.weight(1f)){change("background",color);change("foreground",if(name=="米白")"#2A303B" else "#FFFFFF")}}}
                         ChoiceField(listOf("直角横条","圆角矩形","胶囊"),"形状",listOf("rectangle","rounded","pill").indexOf(config.optString("shape")).coerceAtLeast(0)){change("shape",listOf("rectangle","rounded","pill")[it])}
@@ -131,9 +157,11 @@ class AnnouncementsActivity:MiuixActivity() {
                         SuperSwitch(checked=config.optBoolean("bold"),onCheckedChange={change("bold",it)},title="粗体")
                     }
                     if(tab==3)SectionCard("播放与延迟") {
-                        ChoiceField(listOf("向左滚动","向右滚动","向上滚动","向下滚动","往返移动","静止显示","淡入淡出"),"流动方式",listOf("left","right","up","down","bounce","static","fade").indexOf(config.optString("motion")).coerceAtLeast(0)){
-                            change("motion",listOf("left","right","up","down","bounce","static","fade")[it])}
-                        numeric("速度（20–400 像素／秒，按系统缩放）","speed")
+                        if(!SeewoBar.isSeewo(config)) {
+                            ChoiceField(listOf("向左滚动","向右滚动","向上滚动","向下滚动","往返移动","静止显示","淡入淡出"),"流动方式",listOf("left","right","up","down","bounce","static","fade").indexOf(config.optString("motion")).coerceAtLeast(0)){
+                                change("motion",listOf("left","right","up","down","bounce","static","fade")[it])}
+                            numeric("速度（20–400 像素／秒，按系统缩放）","speed")
+                        } else Note("希沃样式固定为向左匀速滚动（132 逻辑像素／秒，无播放时长上限时循环播放）。")
                         numeric("播放次数（0 不限，最多 100）","repeats");numeric("显示秒数（0 不限，最多 3600）","duration")
                         Field("本条延迟秒数（留空跟随全局，0 立即）",overrideDelay,{overrideDelay=it.filter(Char::isDigit).take(5)})
                         Note("次数和时长先到者结束；静止／淡入淡出每 5 秒算一次。暂停不计播放时长。手机断线后继续，接收端退出会结束公告；修改样式后点发送／更新才应用到电脑。")

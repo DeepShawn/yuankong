@@ -421,3 +421,23 @@ self_manage, self_rename, self_delete, tunnel`。以下命令全部要求已握�
 - `action=probe`：ChmlFrp v2 `GET {api}/nodeinfo?token&node`，
   返回 `node,ip,port,state,version,area,endpoint`；自建 frps 不支持查询。
 - 手机连接方式不变：用 `节点地址:远端端口` 作为手动地址握手。
+
+## 3.18.0 公告的希沃样式
+
+`announcements` 的 `config` 新增 `style`：
+
+- `"classic"`（默认）：沿用原有字段，位置、尺寸、配色、字体、动效全部可调。
+- `"seewo"`：锁定的一体机通知条。接收端在 `validate()` 里强制重写
+  `mode=ticker, motion=left, position=top, shape=rounded, bold=true,
+  font=Microsoft YaHei UI, background=#12324F, foreground=#FFFFFF,
+  accent=#8FD8FF, width=100, font_size=22, speed=132, opacity=96`，
+  并把 `placement` 设为 `preset`、`rect` 清空；自定义位置一律忽略。
+
+可编辑字段仅剩 `text`、`prefix`、`duration`、`repeats`。`prefix` 为空时不画徽标列与分隔线，
+正文视口左移。手机端切换样式时发送 `style=seewo` 加上上表的值；关闭时发 `style=classic`。
+
+样式对应的窗口矩形：宽 `min(1760, 可用宽−48) + 16`、高 `72`、顶部偏移 `12`，全部按
+`dpi/96` 取整；矩形含 8 像素透明阴影留白，`GetWindowRect` 与手机显示的框一致。
+
+尺寸表的唯一来源是 `windows/announcement_seewo.py`，安卓镜像在
+`AnnouncementSeewo.kt`；`tools/test_announcement_seewo.py` 断言两侧常量一致。
