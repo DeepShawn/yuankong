@@ -17,8 +17,13 @@ Measured layout (640x360 reference, therefore "mock units"):
     y=184..201  text ink      <- 18 units: ~18.7 px font, regular weight
 
 There is no rounded corner, no shadow, no badge box, no divider and no close
-button: the bar is a flat full-bleed band.  The prefix ("消息提醒：") is part of
-the same single line as the body and scrolls with it.
+button: the bar is a flat full-bleed band.
+
+Behaviour is a 跑马灯: the line always moves left — short messages included —
+and several messages take turns.  Each message starts aligned with the left
+edge (a teacher who presses send must read it at once), travels left until it
+has fully left the viewport, holds for ``gap``, and then the next message takes
+over.  When it is the only message the cycle simply repeats.
 """
 import unicodedata
 
@@ -38,6 +43,11 @@ GAP_EM = 3.0
 
 MIN_BAR = 36           # never thinner than this, whatever the screen
 MIN_FONT = 12
+
+MAX_MESSAGES = 30      # a phone cannot flood the bar
+MAX_MESSAGE = 500      # per message, characters
+MIN_SECONDS = 4.0      # a very short message still gets its moment
+WIDTH_SLACK = 1.05     # estimate slack so a real glyph is never cut by a millisecond
 
 # ---------------------------------------------------------------------- colours
 TOP_COLOR = "#020914"
@@ -135,49 +145,60 @@ def gradient_colour(fraction):
     return "#%02X%02X%02X" % tuple(parts)
 
 
-def static(viewport_width, run_width):
-    """A message that fits sits still at the left edge, like the reference."""
-    return run_width <= viewport_width
+def messages(config):
+    """The lines to take turns; an empty list falls back to the single text."""
+    items = []
+    for value in (config.get("messages") or [])[:MAX_MESSAGES]:
+        if not isinstance(value, str):
+            continue
+        text = " ".join(value.split())
+        if text:
+            items.append(text[:MAX_MESSAGE])
+    if not items:
+        text = " ".join(str(config.get("text") or "").split())
+        if text:
+            items = [text[:MAX_MESSAGE]]
+    return items
 
 
-def static_cycle(elapsed):
-    """A still message counts a cycle every 5 s so ``repeats`` can end it."""
-    return int(max(0.0, elapsed) / 5.0)
+def runs(config, font):
+    """Estimated advance of every line (prefix included), from the same table."""
+    prefix = prefix_text(config)
+    return [advance(prefix + item, font) for item in messages(config)]
 
 
-def positions(elapsed, speed_px, viewport_width, run_width, gap):
-    """Where every visible copy of the line sits, plus the completed cycles.
+def durations(config, font, speed_px, gap):
+    """Seconds per message: travel to the left edge plus the hold.
 
-    The first pass starts **visible** at the left edge (that is what the
-    reference shows and what a teacher expects after pressing send), scrolls
-    out, waits ``gap``, then re-enters from the right for the following passes.
-    A short line never moves.
+    The estimate is used, not the measured glyph run, so the schedule is the
+    same on the phone and on Windows; ``WIDTH_SLACK`` keeps a slightly wider
+    real line from being cut off mid-glyph.
     """
-    if static(viewport_width, run_width):
-        return [0.0], static_cycle(elapsed)
+    pace = max(1.0, float(speed_px))
+    return [max(MIN_SECONDS, (run * WIDTH_SLACK + gap) / pace) for run in runs(config, font)]
+
+
+def locate(elapsed, durations):
+    """Which message is on now, how far into it, and how many full rounds ran."""
+    if not durations:
+        return 0, 0.0, 0
+    total = sum(durations)
     elapsed = max(0.0, float(elapsed))
-    travel = elapsed * speed_px
-    if travel < run_width:
-        return [-travel], 0
-    ahead = travel - run_width
-    if ahead < gap:
-        return [], 1
-    ahead -= gap
-    period = max(1.0, viewport_width + run_width + gap)
-    x = viewport_width - (ahead % period)
-    cycles = 1 + int(ahead // period)
-    copies = [x]
-    if x + run_width < viewport_width:
-        copies.append(x + period)      # the previous copy is still leaving
-    if x > 0:
-        copies.append(x - period)      # the next copy is already entering
-    return [value for value in copies if value <= viewport_width and value + run_width > 0], cycles
+    rounds = int(elapsed // total) if total > 0 else 0
+    local = max(0.0, elapsed - rounds * total)
+    for index, duration in enumerate(durations):
+        # A microsecond of slack absorbs float drift in the running total, so a
+        # boundary time always lands on the next message instead of the previous
+        # one's last instant (which paints an empty band).
+        if local < duration - 1e-6:
+            return index, local, rounds
+        local -= duration
+    return len(durations) - 1, durations[-1], rounds
 
 
-def offset(elapsed, speed_px, viewport_width, run_width, gap):
-    """Left edge of the leading copy, for callers that need one number."""
-    copies, cycles = positions(elapsed, speed_px, viewport_width, run_width, gap)
-    return (copies[0] if copies else viewport_width), cycles
+def offset(local, speed_px, run_width):
+    """Left edge of the line inside the viewport: 0 until it has scrolled out."""
+    return -min(max(0.0, float(local)) * speed_px, float(run_width))
 
 
 def glyph(size):
@@ -199,4 +220,4 @@ def preset(prefix=DEFAULT_PREFIX):
                 shape="rectangle", bold=False, font="Microsoft YaHei UI",
                 background=TOP_COLOR, foreground=TEXT, accent=ACCENT, width=100,
                 font_size=18, speed=150, opacity=100,
-                placement="preset", rect=None, prefix=prefix)
+                placement="preset", rect=None, prefix=prefix, messages=[])

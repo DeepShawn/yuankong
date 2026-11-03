@@ -25,7 +25,7 @@ FONTS=('Microsoft YaHei UI','Microsoft YaHei','SimHei','SimSun','Segoe UI')
 DEFAULT=dict(text='',prefix='消息提醒',mode='ticker',motion='left',position='top',shape='rectangle',
              background='#081424',foreground='#FFFFFF',accent='#56B5F1',font='Microsoft YaHei UI',
              font_size=28,bold=True,speed=90,opacity=92,width=100,duration=0,repeats=5,placement='preset',rect=None,
-             style='classic')
+             style='classic',messages=[])
 STYLES=('classic','seewo')
 
 
@@ -35,7 +35,21 @@ def validate(value):
     for key,limit in (('text',2000),('prefix',30)):
         text=result[key]
         if not isinstance(text,str) or len(text)>limit or '\0' in text or any(ord(c)<32 and c not in '\r\n\t' for c in text):raise ValueError('公告文字或前缀无效')
-    if not result['text'].strip():raise ValueError('请输入公告内容')
+    if not isinstance(result['messages'],list) or len(result['messages'])>seewo.MAX_MESSAGES:
+        raise ValueError('公告消息列表无效')
+    items=[]
+    for value in result['messages']:
+        if not isinstance(value,str) or len(value)>seewo.MAX_MESSAGE:
+            raise ValueError('每条公告消息须为 1–%d 个字符'%seewo.MAX_MESSAGE)
+        if '\0' in value or any(ord(c)<32 and c not in '\r\n\t' for c in value):
+            raise ValueError('公告消息包含不可见字符')
+        text=' '.join(value.split())
+        if text:items.append(text)
+    result['messages']=items
+    if not result['text'].strip() and not items:raise ValueError('请输入公告内容')
+    if items:
+        # 列表优先；第一条同时写进 text，旧接收端（不认识 messages）仍能显示。
+        result['text']=items[0]
     if result['style']=='seewo':
         # The Seewo bar is a fixed design: the phone may change the text, the
         # prefix and when it stops, never the geometry or the palette.

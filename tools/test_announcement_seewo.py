@@ -111,49 +111,77 @@ class GeometryTest(unittest.TestCase):
 
 
 class MotionTest(unittest.TestCase):
-    def test_short_message_never_moves(self):
-        self.assertTrue(seewo.static(1000, 900))
-        self.assertEqual(([0.0], 2), seewo.positions(12.0, 100, 1000, 900, 60))
-        self.assertEqual(0.0, seewo.offset(12.0, 100, 1000, 900, 60)[0])
+    def schedule(self, items, viewport=1729.0):
+        font = seewo.font_size(AREA)
+        speed = seewo.speed(AREA)
+        gap = round(font * seewo.GAP_EM)
+        config = validate(dict(style="seewo", messages=items))
+        return config, font, speed, gap, seewo.durations(config, font, speed, gap)
 
-    def test_long_message_starts_visible_then_loops(self):
-        width, run, gap, speed = 1000.0, 2000.0, 60.0, 100.0
-        # The first pass is on screen immediately, then scrolls out to the left.
-        self.assertEqual(([0.0], 0), seewo.positions(0, speed, width, run, gap))
-        self.assertEqual(([-100.0], 0), seewo.positions(1, speed, width, run, gap))
-        # Gap: nothing visible while the line is fully outside.
-        self.assertEqual(([], 1), seewo.positions((run + 30) / speed, speed, width, run, gap))
-        # The next pass re-enters from the right edge.
-        x, cycles = seewo.positions((run + gap) / speed, speed, width, run, gap)
-        self.assertEqual([width], x)
-        self.assertEqual(1, cycles)
-        for elapsed in (0, 0.5, 7.3, 123.4):
-            copies, _ = seewo.positions(elapsed, speed, width, run, gap)
-            for value in copies:
-                self.assertGreaterEqual(value, -run)
-                self.assertLessEqual(value, width)
+    def test_every_message_scrolls_even_a_short_one(self):
+        _, font, speed, gap, durations = self.schedule(["集合"])
+        run = seewo.advance("消息提醒：集合", font)
+        self.assertLess(run, 1729.0)
+        _, local, _ = seewo.locate(0.0, durations)
+        self.assertEqual(0.0, seewo.offset(local, speed, run))
+        # One second later it has moved left: a 跑马灯 never stands still.
+        self.assertLess(seewo.offset(1.0, speed, run), 0)
+        self.assertGreater(seewo.offset(1.0, speed, run), -run)
 
-    def test_positions_stay_in_range_and_only_blank_in_the_gap(self):
-        width, run, gap, speed = 500.0, 800.0, 60.0, 100.0
-        period = width + run + gap
-        blank = 0
-        samples = 600
-        for step in range(samples):
-            elapsed = step / 4.0
-            copies, cycles = seewo.positions(elapsed, speed, width, run, gap)
-            travel = elapsed * speed
-            if not copies:
-                blank += 1
-                # The band is only empty when the whole line is off screen,
-                # which is exactly the repeat gap of every pass.
-                self.assertGreaterEqual(travel, run, elapsed)
-                continue
-            for value in copies:
-                self.assertLessEqual(value, width, elapsed)
-                self.assertGreater(value + run, 0, elapsed)
-            self.assertGreaterEqual(cycles, 0)
-        # ~one gap per period: 60 / 1360 of the time, measured over 150 s.
-        self.assertAlmostEqual(blank / samples, gap / period, delta=0.06)
+    def test_offset_stops_at_the_edge_and_never_overshoots(self):
+        run, speed = 300.0, 130.0
+        self.assertEqual(0.0, seewo.offset(0, speed, run))
+        self.assertAlmostEqual(-130.0, seewo.offset(1, speed, run))
+        self.assertAlmostEqual(-run, seewo.offset(99, speed, run))
+        self.assertEqual(-run, seewo.offset(99, speed, run))
+
+    def test_messages_take_turns_in_order(self):
+        items = ["第一条", "第二条更长一些的内容", "第三条"]
+        _, _, _, _, durations = self.schedule(items)
+        self.assertEqual(3, len(durations))
+        seen = []
+        moment = 0.0
+        for duration in durations:
+            index, local, rounds = seewo.locate(moment, durations)
+            self.assertEqual(len(seen), index)
+            self.assertEqual(0, rounds)
+            self.assertAlmostEqual(0.0, local, delta=1e-6)
+            seen.append(index)
+            moment += duration
+        self.assertEqual([0, 1, 2], seen)
+        # After the last one the first takes over again and the round counter ticks.
+        index, local, rounds = seewo.locate(moment, durations)
+        self.assertEqual(0, index)
+        self.assertAlmostEqual(0.0, local, delta=1e-6)
+        self.assertEqual(1, rounds)
+
+    def test_durations_are_shared_between_platforms(self):
+        # Fixed by the estimate table, not by the local font's real metrics.
+        _, font, speed, gap, durations = self.schedule(["通知"])
+        run = seewo.advance("消息提醒：通知", font)
+        expected = max(seewo.MIN_SECONDS, (run * seewo.WIDTH_SLACK + gap) / speed)
+        self.assertAlmostEqual(expected, durations[0], delta=1e-6)
+        self.assertGreaterEqual(durations[0], seewo.MIN_SECONDS)
+
+    def test_locate_survives_edge_times(self):
+        _, _, _, _, durations = self.schedule(["a", "b"])
+        for elapsed in (0, -5, 1e-9, sum(durations), sum(durations) * 3 + 0.5, 1e6):
+            index, local, rounds = seewo.locate(elapsed, durations)
+            self.assertIn(index, (0, 1))
+            self.assertGreaterEqual(local, 0)
+            self.assertLess(local, max(durations) + 1e-6)
+            self.assertGreaterEqual(rounds, 0)
+
+    def test_single_message_loops_itself(self):
+        config, font, speed, gap, durations = self.schedule(["只有一条通知"])
+        self.assertEqual(1, len(durations))
+        run = seewo.advance("消息提醒：只有一条通知", font)
+        first = seewo.locate(0.1, durations)
+        again = seewo.locate(durations[0] + 0.1, durations)
+        self.assertEqual(0, first[0])
+        self.assertEqual(0, again[0])       # same message, second round
+        self.assertEqual(1, again[2])
+        self.assertAlmostEqual(first[1], again[1], delta=1e-6)
 
     def test_speed_is_proportional_to_the_font(self):
         small = seewo.speed(dict(AREA, height=520))
@@ -165,6 +193,38 @@ class MotionTest(unittest.TestCase):
         self.assertEqual((300, 15.0, 0, 1.0), motion_frame("left", 300, 60, 200, 30, 0, 100, 32))
         self.assertNotEqual(motion_frame("left", 300, 60, 200, 30, 10, 100, 32),
                             motion_frame("left", 300, 60, 200, 30, 10, 100, 64))
+
+
+class MessagesTest(unittest.TestCase):
+    def test_list_wins_and_text_is_the_fallback(self):
+        both = validate(dict(style="seewo", text="单条", messages=["第一条", "第二条"]))
+        self.assertEqual(["第一条", "第二条"], seewo.messages(both))
+        self.assertEqual("第一条", both["text"])       # mirrored for older receivers
+        single = validate(dict(style="seewo", text="只有 text"))
+        self.assertEqual(["只有 text"], seewo.messages(single))
+
+    def test_blank_and_whitespace_entries_are_dropped(self):
+        config = validate(dict(style="seewo", messages=["  第一条  ", "", "   ", "第二条\n换行"]))
+        self.assertEqual(["第一条", "第二条 换行"], seewo.messages(config))
+        self.assertEqual(["只有一条"], seewo.messages(validate(dict(style="seewo", messages=["只有一条"]))))
+
+    def test_limits_are_enforced(self):
+        with self.assertRaises(ValueError):
+            validate(dict(style="seewo", messages=["x" * 501]))
+        with self.assertRaises(ValueError):
+            validate(dict(style="seewo", messages=["a"] * (seewo.MAX_MESSAGES + 1)))
+        many = validate(dict(style="seewo", messages=["a"] * seewo.MAX_MESSAGES))
+        self.assertEqual(seewo.MAX_MESSAGES, len(seewo.messages(many)))
+
+    def test_only_messages_is_enough(self):
+        config = validate(dict(style="seewo", messages=["第一条", "第二条"]))
+        self.assertEqual("第一条", config["text"])
+        self.assertTrue(config["text"].strip())
+
+    def test_prefix_is_not_part_of_the_list(self):
+        config = validate(dict(style="seewo", prefix="校园通知", messages=["内容"]))
+        self.assertEqual(["内容"], seewo.messages(config))
+        self.assertEqual("校园通知：", seewo.prefix_text(config))
 
 
 class ColourTest(unittest.TestCase):

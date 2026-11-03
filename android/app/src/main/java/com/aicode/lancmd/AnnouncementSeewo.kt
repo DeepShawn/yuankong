@@ -20,8 +20,11 @@ import kotlin.math.roundToInt
  * x=100 文字左    ← 图标后 8 单位
  * ```
  *
- * 没有圆角、阴影、徽标底框、分隔线和关闭按钮：整条是通栏的纯色带，
- * 前缀「消息提醒：」和正文在同一行里一起滚动。
+ * 没有圆角、阴影、徽标底框、分隔线和关闭按钮：整条是通栏的纯色带。
+ *
+ * 行为是跑马灯：文字始终向左滚动（短消息也滚），多条消息轮巡播放。
+ * 每条都从左侧对齐开始（老师按下发送就该立刻读到），向左移出视口后停顿
+ * 一个间隔，再由下一条接上；只有一条时就循环它自己。
  */
 internal object SeewoBar {
     const val BAR_HEIGHT = 52f / 360f
@@ -38,6 +41,11 @@ internal object SeewoBar {
 
     const val MIN_BAR = 36
     const val MIN_FONT = 12
+
+    const val MAX_MESSAGES = 30
+    const val MAX_MESSAGE = 500
+    const val MIN_SECONDS = 4f
+    const val WIDTH_SLACK = 1.05f
 
     const val TOP_COLOR = "#020914"
     const val BOTTOM_COLOR = "#040E1C"
@@ -116,30 +124,53 @@ internal object SeewoBar {
         )
     }
 
-    /** 静止消息每 5 秒算一圈，供播放次数使用。 */
-    fun staticCycle(elapsed: Float) = (elapsed.coerceAtLeast(0f) / 5f).toInt()
-
-    /**
-     * 每条可见副本的位置与已完成圈数。第一遍**从左边开始显示**（和参考图一致，
-     * 老师点了发送就应当立刻看到），滚出去后空一段间隔，之后的每一遍从右侧进场。
-     * 短于视口的消息不动。
-     */
-    fun positions(elapsed: Float, speedPx: Float, viewportWidth: Float, runWidth: Float,
-                  gap: Float): Pair<List<Float>, Int> {
-        if (runWidth <= viewportWidth) return listOf(0f) to staticCycle(elapsed)
-        val travel = elapsed.coerceAtLeast(0f) * speedPx
-        if (travel < runWidth) return listOf(-travel) to 0
-        var ahead = travel - runWidth
-        if (ahead < gap) return emptyList<Float>() to 1
-        ahead -= gap
-        val period = (viewportWidth + runWidth + gap).coerceAtLeast(1f)
-        val x = viewportWidth - (ahead % period)
-        val cycles = 1 + (ahead / period).toInt()
-        val copies = mutableListOf(x)
-        if (x + runWidth < viewportWidth) copies.add(x + period)
-        if (x > 0) copies.add(x - period)
-        return copies.filter { it <= viewportWidth && it + runWidth > 0 } to cycles
+    /** 要轮播的每一条；列表为空时退回单条 text。 */
+    fun messages(config: JSONObject): List<String> {
+        val items = ArrayList<String>()
+        val array = config.optJSONArray("messages")
+        if (array != null) {
+            for (index in 0 until minOf(array.length(), MAX_MESSAGES)) {
+                val text = array.optString(index).replace(Regex("\\s+"), " ").trim()
+                if (text.isNotEmpty()) items.add(text.take(MAX_MESSAGE))
+            }
+        }
+        if (items.isEmpty()) {
+            val text = config.optString("text").replace(Regex("\\s+"), " ").trim()
+            if (text.isNotEmpty()) items.add(text.take(MAX_MESSAGE))
+        }
+        return items
     }
+
+    /** 每条消息的估算宽度（含前缀），与 Windows 的 runs() 同一公式。 */
+    fun runs(config: JSONObject, font: Float): List<Float> {
+        val prefix = prefixText(config)
+        return messages(config).map { advance(prefix + it, font) }
+    }
+
+    /** 每条消息的时长：滚到左边缘 + 停顿；两端用同一份估算，时刻表一致。 */
+    fun durations(config: JSONObject, font: Float, speedPx: Float, gap: Float): List<Float> {
+        val pace = speedPx.coerceAtLeast(1f)
+        return runs(config, font).map { maxOf(MIN_SECONDS, (it * WIDTH_SLACK + gap) / pace) }
+    }
+
+    /** 当前是第几条、已经播了多久、跑完几轮。 */
+    fun locate(elapsed: Float, durations: List<Float>): Triple<Int, Float, Int> {
+        if (durations.isEmpty()) return Triple(0, 0f, 0)
+        val total = durations.sum().coerceAtLeast(0.0001f)
+        val time = elapsed.coerceAtLeast(0f)
+        val rounds = (time / total).toInt()
+        var local = (time - rounds * total).coerceAtLeast(0f)
+        for ((index, duration) in durations.withIndex()) {
+            // 1 微秒容差：浮点累计误差不会把边界时刻算成上一条的最后一瞬。
+            if (local < duration - 1e-6f) return Triple(index, local, rounds)
+            local -= duration
+        }
+        return Triple(durations.size - 1, durations.last(), rounds)
+    }
+
+    /** 行在视口内的左边缘：从 0 开始向左，滚出后停住等间隔。 */
+    fun offset(local: Float, speedPx: Float, runWidth: Float): Float =
+        -minOf(local.coerceAtLeast(0f) * speedPx, runWidth)
 
     /** 描边喇叭：左侧小方箱 + 锥形 + 两道声波弧，坐标与 Windows 的 glyph() 相同。 */
     data class Glyph(val body: FloatArray, val arcs: List<FloatArray>)
@@ -163,6 +194,7 @@ internal object SeewoBar {
         .put("background", TOP_COLOR).put("foreground", TEXT_COLOR).put("accent", ACCENT)
         .put("width", 100).put("font_size", 18).put("speed", 150).put("opacity", 100)
         .put("placement", "preset").put("rect", JSONObject.NULL).put("prefix", prefix)
+        .put("messages", org.json.JSONArray())
 }
 
 internal fun announcementSeewoDefaults() = announcementDefaults().apply {

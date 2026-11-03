@@ -156,26 +156,27 @@ class AnnouncementPreview(context:Context):View(context) {
         textPaint.textSize=band.font
         textPaint.isFakeBoldText=config.optBoolean("bold",false)
         val prefix=SeewoBar.prefixText(config)
-        val body=config.optString("text").ifBlank{"请在下方输入公告内容"}.lines().joinToString("   ")
+        val items=SeewoBar.messages(config)
+        val durations=SeewoBar.durations(config,band.font,band.speed,band.gap)
+        val (index,local,rounds)=SeewoBar.locate(elapsed,durations)
+        val message=items.getOrElse(index){""}
         val prefixWidth=if(prefix.isBlank())0f else textPaint.measureText(prefix)
-        val runWidth=prefixWidth+textPaint.measureText(body)
+        val runWidth=prefixWidth+textPaint.measureText(message)
         val metrics=textPaint.fontMetrics
         val baseline=band.y+band.height/2f-(metrics.ascent+metrics.descent)/2f
-        val (copies,cycles)=SeewoBar.positions(elapsed,band.speed,band.viewport.width(),runWidth,band.gap)
         if(!paused&&((config.optInt("duration")>0&&elapsed>=config.optInt("duration"))||
-                (config.optInt("repeats")>0&&cycles>=config.optInt("repeats")))){
+                (config.optInt("repeats")>0&&rounds>=config.optInt("repeats")))){
             playback.finish(SystemClock.elapsedRealtime());onPlaybackState?.invoke(playback.state)
         }
         canvas.save();canvas.clipRect(band.viewport)
-        for(offset in copies){
-            var x=band.viewport.left+offset
-            if(prefix.isNotBlank()){
-                textPaint.color=Color.parseColor(SeewoBar.ACCENT)
-                canvas.drawText(prefix,x,baseline,textPaint);x+=prefixWidth
-            }
-            textPaint.color=Color.parseColor(SeewoBar.TEXT_COLOR)
-            canvas.drawText(body,x,baseline,textPaint)
+        var x=band.viewport.left+SeewoBar.offset(local,band.speed,runWidth)
+        if(prefix.isNotBlank()){
+            textPaint.color=Color.parseColor(SeewoBar.ACCENT)
+            canvas.drawText(prefix,x,baseline,textPaint);x+=prefixWidth
         }
+        textPaint.color=Color.parseColor(SeewoBar.TEXT_COLOR)
+        canvas.drawText(message,x,baseline,textPaint)
+        canvas.restore()
         canvas.restore()
         canvas.restore()
 
