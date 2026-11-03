@@ -5,10 +5,10 @@ window: paint into a memory bitmap and ``BitBlt`` it into ``WM_PAINT``.  That is
 also why the phone preview can match it exactly — there is no per-pixel alpha to
 approximate.
 
-Drawn per frame: the vertical gradient, the stroked speaker glyph, and the
-message that is currently taking its turn. Every message scrolls left — even a
-short one — for as long as ``announcement_seewo.durations`` allots it, then the
-next one starts from the left edge.
+Drawn per frame: the vertical gradient, the stroked speaker glyph, the fixed
+blue lead-in, and the white body that is currently taking its turn.  Only the
+body moves: it enters at the right edge, crosses the track at a constant pace,
+vanishes behind the lead-in, and the next message starts from the right again.
 """
 import ctypes as c
 from ctypes import wintypes as w
@@ -80,18 +80,18 @@ class SeewoSurface:
 
         self.prefix = seewo.prefix_text(config)
         self.items = seewo.messages(config)
-        # Real glyph runs drive the scroll; the schedule uses the shared estimate.
-        self.runs = [self.measure(self.prefix + item)[0] for item in self.items] or [1.0]
+        # The body alone scrolls, so its own glyph run drives the travel.
+        self.runs = [self.measure(item)[0] for item in self.items] or [1.0]
         self.durations = seewo.durations(config, self.spec["font"], self.spec["speed"],
-                                         self.spec["gap"])
-        sample = (self.prefix + self.items[0]) if self.items else (self.prefix or " ")
+                                         self.spec["viewport"]["width"])
+        sample = self.items[0] if self.items else (self.prefix or " ")
         self.text_height = self.measure(sample)[1]
         self.index = -1
 
     @property
     def text(self):
-        """The message being shown, with the prefix in front of it."""
-        return self.prefix + (self.items[self.index] if 0 <= self.index < len(self.items) else "")
+        """The body being shown (the lead-in is drawn separately and never moves)."""
+        return self.items[self.index] if 0 <= self.index < len(self.items) else ""
 
     # ------------------------------------------------------------- GDI+ setup
     def _bind(self):
@@ -215,17 +215,18 @@ class SeewoSurface:
         view = spec["viewport"]
         index, local, rounds = seewo.locate(elapsed, self.durations)
         self.index = index
-        run = self.runs[index] if index < len(self.runs) else 1.0
-        offset = seewo.offset(local, spec["speed"], run)
+        offset = seewo.offset(local, spec["speed"], view["width"])
         top = view["y"] + (view["height"] - self.text_height) / 2.0
+        body = self.items[index] if index < len(self.items) else ""
+
+        prefix = spec["prefix"]
+        if prefix:
+            self.draw(prefix["text"], prefix["x"], top, seewo.ACCENT)
+
         self.gp.GdipSetClipRect(self.graphics, float(view["x"]), float(view["y"]),
                                 float(view["width"]), float(view["height"]), 0)
         try:
-            x = view["x"] + offset
-            if self.prefix:
-                self.draw(self.prefix, x, top, seewo.ACCENT)
-                x += self.measure(self.prefix)[0]
-            self.draw(self.items[index] if index < len(self.items) else "", x, top, seewo.TEXT)
+            self.draw(body, view["x"] + offset, top, seewo.TEXT)
         finally:
             self.gp.GdipResetClip(self.graphics)
         return rounds

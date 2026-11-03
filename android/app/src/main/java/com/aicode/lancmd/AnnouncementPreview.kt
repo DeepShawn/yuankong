@@ -155,27 +155,29 @@ class AnnouncementPreview(context:Context):View(context) {
         textPaint.typeface=Typeface.create("sans-serif",Typeface.NORMAL)
         textPaint.textSize=band.font
         textPaint.isFakeBoldText=config.optBoolean("bold",false)
-        val prefix=SeewoBar.prefixText(config)
-        val items=SeewoBar.messages(config)
-        val durations=SeewoBar.durations(config,band.font,band.speed,band.gap)
-        val (index,local,rounds)=SeewoBar.locate(elapsed,durations)
-        val message=items.getOrElse(index){""}
-        val prefixWidth=if(prefix.isBlank())0f else textPaint.measureText(prefix)
-        val runWidth=prefixWidth+textPaint.measureText(message)
         val metrics=textPaint.fontMetrics
         val baseline=band.y+band.height/2f-(metrics.ascent+metrics.descent)/2f
+
+        // 蓝色前缀固定不动：与 Windows 一致，只有白色正文在轨道里滚动。
+        band.prefix?.let{prefix->
+            textPaint.color=Color.parseColor(SeewoBar.ACCENT)
+            canvas.save();canvas.clipRect(prefix.rect)
+            canvas.drawText(prefix.text,prefix.rect.left,baseline,textPaint);canvas.restore()
+        }
+
+        val items=SeewoBar.messages(config)
+        val durations=SeewoBar.durations(config,band.font,band.speed,band.viewport.width())
+        val (index,local,rounds)=SeewoBar.locate(elapsed,durations)
+        val message=items.getOrElse(index){""}
         if(!paused&&((config.optInt("duration")>0&&elapsed>=config.optInt("duration"))||
                 (config.optInt("repeats")>0&&rounds>=config.optInt("repeats")))){
             playback.finish(SystemClock.elapsedRealtime());onPlaybackState?.invoke(playback.state)
         }
         canvas.save();canvas.clipRect(band.viewport)
-        var x=band.viewport.left+SeewoBar.offset(local,band.speed,runWidth)
-        if(prefix.isNotBlank()){
-            textPaint.color=Color.parseColor(SeewoBar.ACCENT)
-            canvas.drawText(prefix,x,baseline,textPaint);x+=prefixWidth
-        }
         textPaint.color=Color.parseColor(SeewoBar.TEXT_COLOR)
-        canvas.drawText(message,x,baseline,textPaint)
+        canvas.drawText(message,band.viewport.left+SeewoBar.offset(local,band.speed,band.viewport.width()),
+            baseline,textPaint)
+        canvas.restore()
         canvas.restore()
         canvas.restore()
         canvas.restore()

@@ -22,9 +22,11 @@ import kotlin.math.roundToInt
  *
  * 没有圆角、阴影、徽标底框、分隔线和关闭按钮：整条是通栏的纯色带。
  *
- * 行为是跑马灯：文字始终向左滚动（短消息也滚），多条消息轮巡播放。
- * 每条都从左侧对齐开始（老师按下发送就该立刻读到），向左移出视口后停顿
- * 一个间隔，再由下一条接上；只有一条时就循环它自己。
+ * 行为是跑马灯，分成两块：
+ *  - 蓝色前缀（喇叭 + 「消息提醒：」）只画一次，**永不移动**；
+ *  - 只有白色正文滚动：从屏幕最右端进入，匀速左移，被前缀挡掉后消失，
+ *    同一条再从最右端重新出现——就是普通的 marquee 循环。
+ * 多条消息轮巡：每条横穿一遍，接着下一条从右边进来，最后一条之后回到第一条。
  */
 internal object SeewoBar {
     const val BAR_HEIGHT = 52f / 360f
@@ -37,14 +39,13 @@ internal object SeewoBar {
     const val STROKE = 2f / 360f
 
     const val SPEED_EM = 2.4f
-    const val GAP_EM = 3.0f
+    const val GAP_EM = 0.6f      // 前缀与正文轨道之间的小间隙
 
     const val MIN_BAR = 36
     const val MIN_FONT = 12
 
     const val MAX_MESSAGES = 30
     const val MAX_MESSAGE = 500
-    const val MIN_SECONDS = 4f
     const val WIDTH_SLACK = 1.05f
 
     const val TOP_COLOR = "#020914"
@@ -54,10 +55,13 @@ internal object SeewoBar {
     const val STYLE = "seewo"
     const val DEFAULT_PREFIX = "消息提醒"
 
+    /** 固定不动的前缀列；text 为空表示没有前缀。 */
+    data class Prefix(val rect: RectF, val text: String)
+
     data class Band(
         val x: Float, val y: Float, val width: Float, val height: Float,
-        val icon: RectF, val viewport: RectF, val font: Float, val stroke: Float,
-        val gap: Float, val speed: Float
+        val icon: RectF, val prefix: Prefix?, val viewport: RectF, val font: Float,
+        val stroke: Float, val speed: Float
     )
 
     fun isSeewo(config: JSONObject) = config.optString("style") == STYLE
@@ -107,10 +111,17 @@ internal object SeewoBar {
         val inset = px(ICON_INSET, area)
         val icon = RectF(inset, (height - iconSize) / 2f, inset + iconSize,
             (height + iconSize) / 2f)
-        val left = icon.right + px(ICON_GAP, area)
-        return Band(0f, 0f, width, height, icon,
-            RectF(left, 0f, maxOf(left + 1f, width - px(RIGHT_INSET, area)), height), font,
-            maxOf(1f, STROKE * scale(area)), font * GAP_EM, speed(area))
+        var left = icon.right + px(ICON_GAP, area)
+        val text = prefixText(config)
+        var prefix: Prefix? = null
+        if (text.isNotEmpty()) {
+            val column = advance(text, font)
+            prefix = Prefix(RectF(left, 0f, left + column, height), text)
+            left += column + font * GAP_EM
+        }
+        val right = maxOf(left + 1f, width - px(RIGHT_INSET, area))
+        return Band(0f, 0f, width, height, icon, prefix, RectF(left, 0f, right, height), font,
+            maxOf(1f, STROKE * scale(area)), speed(area))
     }
 
     fun gradientColor(fraction: Float): Int {
@@ -141,16 +152,14 @@ internal object SeewoBar {
         return items
     }
 
-    /** 每条消息的估算宽度（含前缀），与 Windows 的 runs() 同一公式。 */
-    fun runs(config: JSONObject, font: Float): List<Float> {
-        val prefix = prefixText(config)
-        return messages(config).map { advance(prefix + it, font) }
-    }
+    /** 每条正文的估算宽度（不含前缀），与 Windows 的 runs() 同一公式。 */
+    fun runs(config: JSONObject, font: Float): List<Float> =
+        messages(config).map { advance(it, font) }
 
-    /** 每条消息的时长：滚到左边缘 + 停顿；两端用同一份估算，时刻表一致。 */
-    fun durations(config: JSONObject, font: Float, speedPx: Float, gap: Float): List<Float> {
+    /** 每条正文横穿轨道（从右到左）所需的秒数；两端用同一份估算，时刻表一致。 */
+    fun durations(config: JSONObject, font: Float, speedPx: Float, viewportWidth: Float): List<Float> {
         val pace = speedPx.coerceAtLeast(1f)
-        return runs(config, font).map { maxOf(MIN_SECONDS, (it * WIDTH_SLACK + gap) / pace) }
+        return runs(config, font).map { maxOf(0.05f, (viewportWidth + it * WIDTH_SLACK) / pace) }
     }
 
     /** 当前是第几条、已经播了多久、跑完几轮。 */
@@ -168,9 +177,9 @@ internal object SeewoBar {
         return Triple(durations.size - 1, durations.last(), rounds)
     }
 
-    /** 行在视口内的左边缘：从 0 开始向左，滚出后停住等间隔。 */
-    fun offset(local: Float, speedPx: Float, runWidth: Float): Float =
-        -minOf(local.coerceAtLeast(0f) * speedPx, runWidth)
+    /** 正文左边缘：从轨道右端（视口宽）开始，匀速左移，越过前缀后消失。 */
+    fun offset(local: Float, speedPx: Float, viewportWidth: Float): Float =
+        viewportWidth - local.coerceAtLeast(0f) * speedPx
 
     /** 描边喇叭：左侧小方箱 + 锥形 + 两道声波弧，坐标与 Windows 的 glyph() 相同。 */
     data class Glyph(val body: FloatArray, val arcs: List<FloatArray>)

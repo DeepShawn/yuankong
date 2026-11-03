@@ -111,25 +111,23 @@ def draw_bar(area, config, elapsed):
                  fill=hex_rgb(seewo.ACCENT), width=stroke)
 
     view = spec["viewport"]
-    prefix = seewo.prefix_text(config)
+    prefix = spec["prefix"]
     items = seewo.messages(config)
     text_font = font(spec["font"])
     metrics = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    prefix_width = metrics.textlength(prefix, font=text_font) if prefix else 0
-    durations = seewo.durations(config, spec["font"], spec["speed"], spec["gap"])
+    durations = seewo.durations(config, spec["font"], spec["speed"], view["width"])
     index, local, rounds = seewo.locate(elapsed, durations)
     message = items[index] if index < len(items) else ""
-    run_width = prefix_width + metrics.textlength(message, font=text_font)
     middle = view["height"] / 2
-    layer = Image.new("RGBA", (view["width"], view["height"]), (0, 0, 0, 0))
-    layer_draw = ImageDraw.Draw(layer)
-    x = seewo.offset(local, spec["speed"], run_width)
+
+    # The lead-in is fixed; only the white body scrolls through the track.
     if prefix:
-        layer_draw.text((x, middle), prefix, font=text_font, anchor="lm",
-                        fill=hex_rgb(seewo.ACCENT) + (255,))
-        x += prefix_width
-    layer_draw.text((x, middle), message, font=text_font, anchor="lm",
-                    fill=hex_rgb(seewo.TEXT) + (255,))
+        draw.text((prefix["x"], middle), prefix["text"], font=text_font, anchor="lm",
+                  fill=hex_rgb(seewo.ACCENT) + (255,))
+    layer = Image.new("RGBA", (view["width"], view["height"]), (0, 0, 0, 0))
+    ImageDraw.Draw(layer).text((seewo.offset(local, spec["speed"], view["width"]), middle),
+                               message, font=text_font, anchor="lm",
+                               fill=hex_rgb(seewo.TEXT) + (255,))
     image.paste(layer, (int(view["x"]), int(view["y"])), layer)
     return image, rounds
 

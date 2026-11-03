@@ -465,9 +465,14 @@ accent=#559BE2`，并且 `font_size / speed / width / placement` 对它不再生
 
 - 新增 `config.messages: string[]`（≤30 条、每条 ≤500 字）。非空时逐条轮巡；为空退回 `text`。
   第一条同时写进 `text`，旧接收端仍能显示。
-- 每条：从左对齐开始（`offset = 0`）→ 向左匀速移动 → 完全移出视口后停 `gap`
-  → 下一条；最后一条播完回到第一条。**短消息同样滚动**，取消 3.18.1 的静止分支。
-- 每条时长 `max(4.0, (estimate(run) × 1.05 + gap) / speed)`，`estimate` 用共享字宽表
-  （CJK 1 em、拉丁 0.55 em），因此手机与电脑的轮播时刻表一致；位移仍按各端真实行宽。
-- 进度：`cycles`（即 `repeats` 的计数）按**轮**计，所有消息各播一遍为一轮。
+### 3.18.3 前缀固定、正文单独滚动
+
+3.18.2 把前缀和正文当成一整行滚，是错的。3.18.3 拆成两个盒子：
+
+- `prefix`：喇叭右侧的蓝色「消息提醒：」，**固定不动**，宽度 = `advance(prefix, font)`。
+- `viewport`：正文轨道，`x = 前缀右缘 + 0.6 em`，右端到 `屏宽 − 19/360·H`。
+- 正文 `offset(t) = viewport.width − t × speed`：从轨道右端进入，匀速左移，
+  越过前缀后被 `clip` 裁掉；`duration = (viewport.width + estimate(body) × 1.05) / speed`
+  之后换下一条（或同一条重新从右端进来）。**没有停顿**。
+- `cycles`（`repeats` 计数）按**轮**计，所有消息各横穿一遍为一轮。
 - 边界：`locate()` 用 1 µs 容差，时刻正好落在切换点时归下一条。

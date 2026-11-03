@@ -92,15 +92,17 @@ class GeometryTest(unittest.TestCase):
         self.assertGreaterEqual(icon["y"], 0)
         self.assertLessEqual(icon["y"] + icon["height"], spec["height"])
         self.assertGreater(view["x"], icon["x"] + icon["width"])
-        self.assertLess(view["x"] + view["width"], spec["width"] + 1)
+        self.assertLessEqual(view["x"] + view["width"], spec["width"])
 
-    def test_text_starts_at_the_measured_offset(self):
-        # Reference: icon left 19, width 20, gap 8 -> text at 46 of 640 on a 360-tall screen.
+    def test_lead_in_starts_at_the_measured_offset(self):
+        # Reference: icon left 19, width 20, gap 8 -> the lead-in starts at 46 of
+        # 640 on a 360-tall screen; the body track starts after the lead-in.
         area = dict(x=0, y=0, width=640, height=360, dpi=96)
         spec = seewo.layout(area, config(style="seewo"))
         self.assertAlmostEqual(19, spec["icon"]["x"], delta=1)
         self.assertAlmostEqual(20, spec["icon"]["width"], delta=1)
-        self.assertAlmostEqual(46, spec["viewport"]["x"], delta=2)
+        self.assertAlmostEqual(46, spec["prefix"]["x"], delta=2)
+        self.assertGreater(spec["viewport"]["x"], spec["prefix"]["x"] + spec["prefix"]["width"] - 1)
         self.assertAlmostEqual(52, window_rect(config(style="seewo"), area)["height"], delta=1)
         self.assertAlmostEqual(19.5, spec["font"], delta=1)
 
@@ -111,36 +113,61 @@ class GeometryTest(unittest.TestCase):
 
 
 class MotionTest(unittest.TestCase):
-    def schedule(self, items, viewport=1729.0):
-        font = seewo.font_size(AREA)
-        speed = seewo.speed(AREA)
-        gap = round(font * seewo.GAP_EM)
+    def schedule(self, items):
         config = validate(dict(style="seewo", messages=items))
-        return config, font, speed, gap, seewo.durations(config, font, speed, gap)
+        spec = seewo.layout(AREA, config)
+        return (config, spec, seewo.durations(config, spec["font"], spec["speed"],
+                                              spec["viewport"]["width"]))
+
+    def test_prefix_is_fixed_and_outside_the_scroll_track(self):
+        config, spec, _ = self.schedule(["任意消息"])
+        prefix, view = spec["prefix"], spec["viewport"]
+        self.assertIsNotNone(prefix)
+        self.assertEqual("消息提醒：", prefix["text"])
+        self.assertLessEqual(prefix["x"] + prefix["width"], view["x"])
+        # The track starts after the lead-in and ends inside the right margin.
+        self.assertGreater(view["x"], prefix["x"] + prefix["width"])
+        self.assertEqual(0, view["y"])
+        self.assertLess(view["x"] + view["width"], spec["width"])
+
+    def test_empty_prefix_leaves_the_track_at_the_icon(self):
+        config = validate(dict(style="seewo", prefix="", messages=["消息"]))
+        spec = seewo.layout(AREA, config)
+        self.assertIsNone(spec["prefix"])
+        icon = spec["icon"]
+        self.assertGreater(spec["viewport"]["x"], icon["x"] + icon["width"])
+
+    def test_body_enters_from_the_right_edge(self):
+        config, spec, _ = self.schedule(["明天上午大扫除"])
+        width = spec["viewport"]["width"]
+        # t=0 sits just past the right edge, walking left afterwards.
+        self.assertEqual(width, seewo.offset(0, spec["speed"], width))
+        self.assertLess(seewo.offset(1, spec["speed"], width), width)
+        self.assertGreater(seewo.offset(1, spec["speed"], width), 0)
+
+    def test_body_leaves_past_the_lead_in_and_comes_back(self):
+        config, spec, durations = self.schedule(["明天上午大扫除"])
+        width, speed = spec["viewport"]["width"], spec["speed"]
+        run = seewo.advance("明天上午大扫除", spec["font"])
+        # Crossing takes (track + body) / speed, so the body is fully out at the end.
+        self.assertAlmostEqual((width + run * seewo.WIDTH_SLACK) / speed, durations[0], delta=1e-6)
+        self.assertLess(seewo.offset(durations[0] - 0.01, speed, width) + run, 1.0)
+        # The next pass starts again at the right edge.
+        _, local, rounds = seewo.locate(durations[0] + 0.001, durations)
+        self.assertEqual(1, rounds)
+        self.assertGreater(seewo.offset(local, speed, width), width - 5)
 
     def test_every_message_scrolls_even_a_short_one(self):
-        _, font, speed, gap, durations = self.schedule(["集合"])
-        run = seewo.advance("消息提醒：集合", font)
-        self.assertLess(run, 1729.0)
-        _, local, _ = seewo.locate(0.0, durations)
-        self.assertEqual(0.0, seewo.offset(local, speed, run))
-        # One second later it has moved left: a 跑马灯 never stands still.
-        self.assertLess(seewo.offset(1.0, speed, run), 0)
-        self.assertGreater(seewo.offset(1.0, speed, run), -run)
-
-    def test_offset_stops_at_the_edge_and_never_overshoots(self):
-        run, speed = 300.0, 130.0
-        self.assertEqual(0.0, seewo.offset(0, speed, run))
-        self.assertAlmostEqual(-130.0, seewo.offset(1, speed, run))
-        self.assertAlmostEqual(-run, seewo.offset(99, speed, run))
-        self.assertEqual(-run, seewo.offset(99, speed, run))
+        config, spec, durations = self.schedule(["集合"])
+        width, speed = spec["viewport"]["width"], spec["speed"]
+        self.assertGreater(durations[0], 1.0)
+        self.assertGreater(seewo.offset(0.5, speed, width), 0)
+        self.assertLess(seewo.offset(2.5, speed, width), seewo.offset(0.5, speed, width))
 
     def test_messages_take_turns_in_order(self):
-        items = ["第一条", "第二条更长一些的内容", "第三条"]
-        _, _, _, _, durations = self.schedule(items)
+        _, spec, durations = self.schedule(["第一条", "第二条更长一些的内容", "第三条"])
         self.assertEqual(3, len(durations))
-        seen = []
-        moment = 0.0
+        seen, moment = [], 0.0
         for duration in durations:
             index, local, rounds = seewo.locate(moment, durations)
             self.assertEqual(len(seen), index)
@@ -149,39 +176,19 @@ class MotionTest(unittest.TestCase):
             seen.append(index)
             moment += duration
         self.assertEqual([0, 1, 2], seen)
-        # After the last one the first takes over again and the round counter ticks.
         index, local, rounds = seewo.locate(moment, durations)
         self.assertEqual(0, index)
         self.assertAlmostEqual(0.0, local, delta=1e-6)
         self.assertEqual(1, rounds)
 
-    def test_durations_are_shared_between_platforms(self):
-        # Fixed by the estimate table, not by the local font's real metrics.
-        _, font, speed, gap, durations = self.schedule(["通知"])
-        run = seewo.advance("消息提醒：通知", font)
-        expected = max(seewo.MIN_SECONDS, (run * seewo.WIDTH_SLACK + gap) / speed)
-        self.assertAlmostEqual(expected, durations[0], delta=1e-6)
-        self.assertGreaterEqual(durations[0], seewo.MIN_SECONDS)
-
     def test_locate_survives_edge_times(self):
-        _, _, _, _, durations = self.schedule(["a", "b"])
+        _, _, durations = self.schedule(["a", "b"])
         for elapsed in (0, -5, 1e-9, sum(durations), sum(durations) * 3 + 0.5, 1e6):
             index, local, rounds = seewo.locate(elapsed, durations)
             self.assertIn(index, (0, 1))
             self.assertGreaterEqual(local, 0)
             self.assertLess(local, max(durations) + 1e-6)
             self.assertGreaterEqual(rounds, 0)
-
-    def test_single_message_loops_itself(self):
-        config, font, speed, gap, durations = self.schedule(["只有一条通知"])
-        self.assertEqual(1, len(durations))
-        run = seewo.advance("消息提醒：只有一条通知", font)
-        first = seewo.locate(0.1, durations)
-        again = seewo.locate(durations[0] + 0.1, durations)
-        self.assertEqual(0, first[0])
-        self.assertEqual(0, again[0])       # same message, second round
-        self.assertEqual(1, again[2])
-        self.assertAlmostEqual(first[1], again[1], delta=1e-6)
 
     def test_speed_is_proportional_to_the_font(self):
         small = seewo.speed(dict(AREA, height=520))
@@ -264,7 +271,9 @@ class ParityTest(unittest.TestCase):
             if text.startswith('"'):
                 cls.values[name] = text.strip('"')
             else:
-                cls.values[name] = eval(text.replace("f", ""), {"__builtins__": {}}, {})
+                # Comment tails (GAP_EM carries a trailing note) are not arithmetic.
+                cls.values[name] = eval(text.split("//")[0].replace("f", "").strip(),
+                                        {"__builtins__": {}}, {})
 
     def test_every_shared_metric_matches(self):
         expect = dict(BAR_HEIGHT=seewo.BAR_HEIGHT, TOP=seewo.TOP, FONT=seewo.FONT,

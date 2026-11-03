@@ -19,11 +19,16 @@ Measured layout (640x360 reference, therefore "mock units"):
 There is no rounded corner, no shadow, no badge box, no divider and no close
 button: the bar is a flat full-bleed band.
 
-Behaviour is a 跑马灯: the line always moves left — short messages included —
-and several messages take turns.  Each message starts aligned with the left
-edge (a teacher who presses send must read it at once), travels left until it
-has fully left the viewport, holds for ``gap``, and then the next message takes
-over.  When it is the only message the cycle simply repeats.
+Behaviour is a 跑马灯 with two separate parts:
+
+* the blue lead-in (speaker glyph + "消息提醒：") is painted **once and never
+  moves**;
+* only the white body scrolls.  It enters at the right edge of the screen,
+  travels left at a constant pace, disappears past the lead-in, and the same
+  message re-enters from the right — a plain marquee loop.
+
+Several messages take turns: each one crosses the band once, then the next
+starts from the right edge, and after the last one the first repeats.
 """
 import unicodedata
 
@@ -37,16 +42,16 @@ ICON_GAP = 8 / 360
 RIGHT_INSET = 19 / 360
 STROKE = 2 / 360
 
-# Scroll speed and the gap between repeats, both in ems.
+# Scroll speed in ems per second, and the gap between the lead-in and the
+# scrolling body (also ems).
 SPEED_EM = 2.4
-GAP_EM = 3.0
+GAP_EM = 0.6
 
 MIN_BAR = 36           # never thinner than this, whatever the screen
 MIN_FONT = 12
 
 MAX_MESSAGES = 30      # a phone cannot flood the bar
 MAX_MESSAGE = 500      # per message, characters
-MIN_SECONDS = 4.0      # a very short message still gets its moment
 WIDTH_SLACK = 1.05     # estimate slack so a real glyph is never cut by a millisecond
 
 # ---------------------------------------------------------------------- colours
@@ -115,7 +120,8 @@ def layout(area, config):
     """Sub-rectangles of the band **in window-local pixels**.
 
     window_rect() is the absolute screen position; everything painted into the
-    band bitmap starts at (0, 0).
+    band bitmap starts at (0, 0).  ``prefix`` is the fixed blue lead-in,
+    ``viewport`` is the track the white body scrolls through.
     """
     window = window_rect(area)
     height = window["height"]
@@ -123,13 +129,18 @@ def layout(area, config):
     icon_size = px(ICON, area)
     inset = px(ICON_INSET, area)
     icon = dict(x=inset, y=(height - icon_size) // 2, width=icon_size, height=icon_size)
-    text_left = icon["x"] + icon_size + px(ICON_GAP, area)
-    viewport = dict(x=text_left, y=0,
-                    width=max(1, window["width"] - px(RIGHT_INSET, area) - text_left),
-                    height=height)
-    return dict(window=window, icon=icon, viewport=viewport, font=size,
-                stroke=max(1.0, STROKE * scale(area)), gap=int(round(size * GAP_EM)),
-                speed=speed(area), width=window["width"], height=height)
+    left = icon["x"] + icon_size + px(ICON_GAP, area)
+    text = prefix_text(config)
+    prefix = None
+    if text:
+        width = int(round(advance(text, size)))
+        prefix = dict(x=left, y=0, width=width, height=height, text=text)
+        left += width + int(round(size * GAP_EM))
+    right = window["width"] - px(RIGHT_INSET, area)
+    viewport = dict(x=left, y=0, width=max(1, right - left), height=height)
+    return dict(window=window, icon=icon, prefix=prefix, viewport=viewport, font=size,
+                stroke=max(1.0, STROKE * scale(area)), speed=speed(area),
+                width=window["width"], height=height)
 
 
 def gradient_colour(fraction):
@@ -162,24 +173,24 @@ def messages(config):
 
 
 def runs(config, font):
-    """Estimated advance of every line (prefix included), from the same table."""
-    prefix = prefix_text(config)
-    return [advance(prefix + item, font) for item in messages(config)]
+    """Estimated advance of every body (the lead-in is not part of it)."""
+    return [advance(item, font) for item in messages(config)]
 
 
-def durations(config, font, speed_px, gap):
-    """Seconds per message: travel to the left edge plus the hold.
+def durations(config, font, speed_px, viewport_width):
+    """Seconds for one message to cross the band from right to left.
 
     The estimate is used, not the measured glyph run, so the schedule is the
     same on the phone and on Windows; ``WIDTH_SLACK`` keeps a slightly wider
-    real line from being cut off mid-glyph.
+    real line from being cut mid-glyph.
     """
     pace = max(1.0, float(speed_px))
-    return [max(MIN_SECONDS, (run * WIDTH_SLACK + gap) / pace) for run in runs(config, font)]
+    return [max(0.05, (float(viewport_width) + run * WIDTH_SLACK) / pace)
+            for run in runs(config, font)]
 
 
 def locate(elapsed, durations):
-    """Which message is on now, how far into it, and how many full rounds ran."""
+    """Which message is crossing now, how far into it, and how many rounds ran."""
     if not durations:
         return 0, 0.0, 0
     total = sum(durations)
@@ -196,9 +207,14 @@ def locate(elapsed, durations):
     return len(durations) - 1, durations[-1], rounds
 
 
-def offset(local, speed_px, run_width):
-    """Left edge of the line inside the viewport: 0 until it has scrolled out."""
-    return -min(max(0.0, float(local)) * speed_px, float(run_width))
+def offset(local, speed_px, viewport_width):
+    """Left edge of the body inside the track.
+
+    Starts at ``viewport_width`` (just past the right edge) and walks left at a
+    constant pace, so the message enters from the right and leaves at the
+    lead-in — the marquee behaviour of the reference bar.
+    """
+    return float(viewport_width) - max(0.0, float(local)) * float(speed_px)
 
 
 def glyph(size):
