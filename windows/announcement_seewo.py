@@ -1,85 +1,86 @@
-"""Pixel specification of the Seewo-style notice bar.
+"""Pixel spec of the Seewo notice bar, measured from a real 消息通知 screenshot.
 
-One table drives three renderers — the Windows GDI+ window, the Android preview
-and the offline PIL preview — so the phone shows exactly what the classroom
-screen shows.  Every number below is a Windows logical pixel (96 dpi); each
-renderer multiplies by ``dpi/96``.
+The reference image is a 640x360 render of a 1920x1080 desktop (Windows icons
+measure 16 px there, i.e. 48 px at 1/3 scale), so every number below is a
+fraction of the screen height.  That keeps the bar looking identical on a
+1080p classroom panel and on a 4K one.
 
-Layout, left to right::
+Measured layout (640x360 reference, therefore "mock units"):
 
-    ┌───────────────────────────────────────────────────────────────┐
-    │ (icon) 消息通知 │ 正文向左滚动 …                          (×) │
-    └───────────────────────────────────────────────────────────────┘
-      ↑rounded   ↑blue badge   ↑divider   ↑viewport with fading edges
+    y=158  screen top
+    y=168  bar top            <- 10 units below the edge, desktop shows through
+    y=219  bar bottom         <- 52 units tall
+    x=54   screen left edge
+    x=73   speaker icon left  <- 19 units inset
+    x=93   speaker icon right <- 20 units wide, stroke 2
+    x=100  text left          <- 8 units after the icon
+    y=184..201  text ink      <- 18 units: ~18.7 px font, regular weight
 
-The bar is a single row inside the window; the window keeps ``PAD`` logical
-pixels of transparent margin so the drop shadow can be drawn without moving the
-reported rectangle.
+There is no rounded corner, no shadow, no badge box, no divider and no close
+button: the bar is a flat full-bleed band.  The prefix ("消息提醒：") is part of
+the same single line as the body and scrolls with it.
 """
-import math
 import unicodedata
 
-# --------------------------------------------------------------------- metrics
-HEIGHT = 56
-RADIUS = 10
-SIDE_MARGIN = 24
-TOP = 12
-MAX_WIDTH = 1760
-MIN_WIDTH = 480
-PAD = 8
+# ----------------------------------------------------------- fractions of height
+BAR_HEIGHT = 52 / 360
+TOP = 10 / 360
+FONT = 19.5 / 360
+ICON = 20 / 360
+ICON_INSET = 19 / 360
+ICON_GAP = 8 / 360
+RIGHT_INSET = 19 / 360
+STROKE = 2 / 360
 
-ICON = 30
-ICON_RADIUS = 8
-ICON_GAP = 12
+# Scroll speed and the gap between repeats, both in ems.
+SPEED_EM = 2.4
+GAP_EM = 3.0
 
-PREFIX_SIZE = 20
-PREFIX_GAP = 4
+MIN_BAR = 36           # never thinner than this, whatever the screen
+MIN_FONT = 12
 
-DIVIDER_GAP = 12
-DIVIDER_WIDTH = 1
-DIVIDER_HEIGHT = 20
-
-TEXT_SIZE = 22
-FADE = 20
-GAP = 64
-
-CLOSE = 24
-CLOSE_HIT = 36
-CLOSE_GAP = 14
-
-SPEED = 132          # logical pixels per second, ~ one 20-character line in 4 s
-OPACITY = 96
-
-# ---------------------------------------------------------------------- colors
-TOP_COLOR = "#12324F"
-BOTTOM_COLOR = "#071522"
-BORDER_COLOR = "#2E9BF0"
-BORDER_ALPHA = 0x48
-ACCENT = "#8FD8FF"
+# ---------------------------------------------------------------------- colours
+TOP_COLOR = "#020914"
+BOTTOM_COLOR = "#040E1C"
+ACCENT = "#559BE2"
 TEXT = "#FFFFFF"
-DIVIDER_ALPHA = 0x28
-CLOSE_COLOR = "#DCE8F5"
-SHADOW_ALPHA = 0x6E
-SHADOW_STEPS = 6
+BACKGROUND = TOP_COLOR
 
-# Values the style owns.  A phone that still carries an old draft must not be
-# able to break the bar, so validate() rewrites them instead of rejecting.
-LOCKED = dict(mode="ticker", motion="left", position="top", shape="rounded",
-              bold=True, font="Microsoft YaHei UI", background=TOP_COLOR,
-              foreground=TEXT, accent=ACCENT, width=100, font_size=TEXT_SIZE,
-              speed=SPEED, opacity=OPACITY)
+DEFAULT_PREFIX = "消息提醒"
+COLONS = ("：", ":")
+
+# Fields the style owns.  A phone that still carries an old draft must not be
+# able to deform the bar, so validate() rewrites them instead of rejecting.
+LOCKED = dict(mode="ticker", motion="left", position="top", shape="rectangle",
+              bold=False, font="Microsoft YaHei UI", background=TOP_COLOR,
+              foreground=TEXT, accent=ACCENT, width=100, opacity=100,
+              placement="preset", rect=None)
 
 
 def scale(area):
-    return area["dpi"] / 96
+    """Device pixels per design unit: the constants above are already ratios."""
+    return float(area["height"])
+
+
+def px(value, area):
+    return max(1, int(round(value * scale(area))))
+
+
+def font_size(area):
+    return max(MIN_FONT, int(round(FONT * scale(area))))
+
+
+def bar_height(area):
+    return max(MIN_BAR, int(round(BAR_HEIGHT * scale(area))))
+
+
+def speed(area):
+    """Logical pixels per second: 2.4 em, so the pace matches the font size."""
+    return font_size(area) * SPEED_EM
 
 
 def advance(text, size):
-    """Approximate advance width in logical pixels: CJK 1 em, Latin 0.55 em.
-
-    The exact advance is whatever GDI+ reports; this estimate exists so the
-    phone can reserve the same prefix column without asking Windows.
-    """
+    """Advance width: CJK 1 em, Latin 0.55 em, punctuation of either width."""
     total = 0.0
     for character in text:
         wide = unicodedata.east_asian_width(character) in ("W", "F")
@@ -87,29 +88,42 @@ def advance(text, size):
     return total * size
 
 
-def px(value, area):
-    """Logical -> device pixels, rounded like every other size in the pack."""
-    return int(round(value * scale(area)))
+def prefix_text(config):
+    """The blue lead-in with exactly one full-width colon."""
+    prefix = (config.get("prefix") or "").strip().rstrip("：:")
+    return prefix + "：" if prefix else ""
 
 
 def window_rect(area):
-    """The bar's outer rectangle, shadow margin included.
+    """Full-bleed band: the whole screen width, no shadow margin."""
+    height = min(area["height"], bar_height(area))
+    top = min(px(TOP, area), max(0, area["height"] - height))
+    return dict(x=area["x"], y=area["y"] + top, width=area["width"], height=height)
 
-    The reported box is what the phone draws, so the transparent margin is part
-    of it: the bar itself is inset by ``PAD`` on every side.
+
+def layout(area, config):
+    """Sub-rectangles of the band **in window-local pixels**.
+
+    window_rect() is the absolute screen position; everything painted into the
+    band bitmap starts at (0, 0).
     """
-    side = px(SIDE_MARGIN, area)
-    pad = px(PAD, area)
-    widest = min(px(MAX_WIDTH, area), max(1, area["width"] - 2 * side))
-    width = min(area["width"], widest + 2 * pad)
-    height = min(area["height"], px(HEIGHT + 2 * PAD, area))
-    x = area["x"] + (area["width"] - width) // 2
-    y = area["y"] + min(max(0, px(TOP, area)), max(0, area["height"] - height))
-    return dict(x=x, y=y, width=width, height=height)
+    window = window_rect(area)
+    height = window["height"]
+    size = font_size(area)
+    icon_size = px(ICON, area)
+    inset = px(ICON_INSET, area)
+    icon = dict(x=inset, y=(height - icon_size) // 2, width=icon_size, height=icon_size)
+    text_left = icon["x"] + icon_size + px(ICON_GAP, area)
+    viewport = dict(x=text_left, y=0,
+                    width=max(1, window["width"] - px(RIGHT_INSET, area) - text_left),
+                    height=height)
+    return dict(window=window, icon=icon, viewport=viewport, font=size,
+                stroke=max(1.0, STROKE * scale(area)), gap=int(round(size * GAP_EM)),
+                speed=speed(area), width=window["width"], height=height)
 
 
 def gradient_colour(fraction):
-    """Interpolated #RRGGBB of the bar background at ``fraction`` from the top."""
+    """Interpolated #RRGGBB of the band at ``fraction`` from the top."""
     fraction = min(1.0, max(0.0, fraction))
     top = int(TOP_COLOR[1:], 16)
     bottom = int(BOTTOM_COLOR[1:], 16)
@@ -121,92 +135,56 @@ def gradient_colour(fraction):
     return "#%02X%02X%02X" % tuple(parts)
 
 
-def layout(area, config):
-    """Every sub-rectangle of the bar in device pixels."""
-    window = window_rect(area)
-    pad = px(PAD, area)
-    bar = dict(x=pad, y=pad, width=max(1, window["width"] - 2 * pad),
-               height=max(1, window["height"] - 2 * pad))
-    icon_size = px(ICON, area)
-    icon = dict(x=pad + px(16, area), y=bar["y"] + (bar["height"] - icon_size) // 2,
-                width=icon_size, height=icon_size)
-    close_hit = px(CLOSE_HIT, area)
-    close = dict(x=bar["x"] + bar["width"] - px(CLOSE_GAP, area) - close_hit,
-                 y=bar["y"] + (bar["height"] - close_hit) // 2,
-                 width=close_hit, height=close_hit)
-    prefix = None
-    divider = None
-    left = icon["x"] + icon["width"] + px(ICON_GAP, area)
-    if config.get("prefix"):
-        # Width comes from the same advance estimate on every platform, so the
-        # message starts at the same pixel on the phone and on the classroom
-        # screen without the phone needing GDI+ metrics.
-        column = px(advance(config["prefix"], PREFIX_SIZE) + PREFIX_GAP * 2, area)
-        prefix = dict(x=left, y=bar["y"], width=column, height=bar["height"],
-                      size=px(PREFIX_SIZE, area))
-        divider = dict(x=prefix["x"] + prefix["width"] + px(DIVIDER_GAP, area),
-                       y=bar["y"] + (bar["height"] - px(DIVIDER_HEIGHT, area)) // 2,
-                       width=max(1, px(DIVIDER_WIDTH, area)),
-                       height=px(DIVIDER_HEIGHT, area))
-        left = divider["x"] + divider["width"] + px(DIVIDER_GAP, area)
-    viewport = dict(x=left, y=bar["y"], width=max(1, close["x"] - px(CLOSE_GAP, area) - left),
-                    height=bar["height"])
-    return dict(window=window, bar=bar, icon=icon, prefix=prefix, divider=divider,
-                viewport=viewport, close=close, pad=pad, radius=px(RADIUS, area),
-                icon_radius=px(ICON_RADIUS, area), prefix_size=px(PREFIX_SIZE, area),
-                text_size=px(TEXT_SIZE, area), fade=px(FADE, area), gap=px(GAP, area),
-                close_size=px(CLOSE, area), divider_width=max(1, px(DIVIDER_WIDTH, area)))
+def static(viewport_width, run_width):
+    """A message that fits sits still at the left edge, like the reference."""
+    return run_width <= viewport_width
 
 
-def offset(elapsed, speed, viewport_width, text_width, gap):
-    """Leftward offset in device pixels, plus the completed cycle count."""
-    elapsed = max(0.0, elapsed)
-    period = max(1.0, viewport_width + text_width + gap)
-    travel = elapsed * speed
+def offset(elapsed, speed_px, viewport_width, run_width, gap):
+    """Leftward travel for one scrolling line; returns (offset, cycles).
+
+    The line enters from the right edge, leaves at the left, waits ``gap`` and
+    comes back.  A short line never moves.
+    """
+    if static(viewport_width, run_width):
+        return 0.0, 0
+    elapsed = max(0.0, float(elapsed))
+    period = max(1.0, viewport_width + run_width + gap)
+    travel = elapsed * speed_px
     return viewport_width - (travel % period), int(travel // period)
 
 
-def fade_rects(view, fade):
-    """The two strips where the text dissolves into the bar."""
-    if fade <= 0 or view["width"] <= 2 * fade:
-        return []
-    return [dict(x=view["x"], y=view["y"], width=fade, height=view["height"], side="left"),
-            dict(x=view["x"] + view["width"] - fade, y=view["y"], width=fade,
-                 height=view["height"], side="right")]
-
-
-def shadow_rects(bar, pad, steps=SHADOW_STEPS):
-    """Concentric rounded rectangles standing in for a blurred shadow."""
-    items = []
-    for step in range(steps, 0, -1):
-        grow = int(round(pad * step / steps))
-        alpha = int(SHADOW_ALPHA * (1 - (step - 1) / steps) ** 1.6 / steps * 3)
-        items.append(dict(x=bar["x"] - grow, y=bar["y"] - grow + max(1, pad // 3),
-                          width=bar["width"] + 2 * grow, height=bar["height"] + 2 * grow,
-                          alpha=max(0, min(SHADOW_ALPHA, alpha)),
-                          radius=max(2, pad * step // steps)))
-    return items
+def positions(elapsed, speed_px, viewport_width, run_width, gap):
+    """Every copy of the line that can be on screen right now, plus the cycle."""
+    if static(viewport_width, run_width):
+        return [0.0], 0
+    x, cycles = offset(elapsed, speed_px, viewport_width, run_width, gap)
+    period = viewport_width + run_width + gap
+    copies = [x]
+    if x + run_width < viewport_width:
+        copies.append(x + period)      # the previous copy is still leaving
+    if x > 0:
+        copies.append(x - period)      # the next copy is already entering
+    return [value for value in copies if value <= viewport_width and value + run_width > 0], cycles
 
 
 def glyph(size):
-    """Speaker glyph in a ``size`` box: polygon points plus two sound arcs."""
-    s = size
-    cone = [(0.16, 0.36), (0.36, 0.36), (0.56, 0.14), (0.56, 0.86), (0.36, 0.64), (0.16, 0.64)]
-    arcs = []
-    for radius, spread in ((0.16, 90), (0.28, 80)):
-        points = []
-        for index in range(9):
-            angle = -math.radians(spread) + index * (2 * math.radians(spread)) / 8
-            points.append((0.56 + 0.34 + math.cos(angle) * radius,
-                           0.5 + math.sin(angle) * radius))
-        arcs.append(points)
-    return [(x * s, y * s) for x, y in cone], [[(x * s, y * s) for x, y in arc] for arc in arcs]
+    """Stroked speaker: body polygon plus two sound arcs, in a size x size box.
+
+    Matches the reference: a small back box on the left, a cone flaring to a
+    tall vertical edge, then two arcs.  Coordinates are relative to the box.
+    """
+    body = [(0.05, 0.32), (0.22, 0.32), (0.53, 0.03), (0.53, 0.97),
+            (0.22, 0.68), (0.05, 0.68), (0.05, 0.32)]
+    arcs = [(0.56, 0.50, 0.17, -52.0, 104.0), (0.58, 0.50, 0.36, -50.0, 100.0)]
+    return [(x * size, y * size) for x, y in body], [(x * size, y * size, r * size, a, b)
+                                                    for x, y, r, a, b in arcs]
 
 
-def preset():
+def preset(prefix=DEFAULT_PREFIX):
     """Config fragment the phone sends when it picks the Seewo style."""
     return dict(style="seewo", mode="ticker", motion="left", position="top",
-                shape="rounded", bold=True, font="Microsoft YaHei UI",
+                shape="rectangle", bold=False, font="Microsoft YaHei UI",
                 background=TOP_COLOR, foreground=TEXT, accent=ACCENT, width=100,
-                font_size=TEXT_SIZE, speed=SPEED, opacity=OPACITY,
-                placement="preset", rect=None, prefix="消息通知")
+                font_size=18, speed=150, opacity=100,
+                placement="preset", rect=None, prefix=prefix)

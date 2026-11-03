@@ -90,91 +90,47 @@ def vertical_gradient(width, height, top, bottom):
 
 
 def draw_bar(area, config, elapsed):
-    """Mirror of announcement_layer.SeewoSurface: same boxes, same order."""
+    """Mirror of announcement_layer.SeewoSurface: gradient, glyph, one text line."""
     spec = seewo.layout(area, config)
     window = spec["window"]
-    bar = spec["bar"]
-    image = Image.new("RGBA", (window["width"], window["height"]), (0, 0, 0, 0))
-
-    # Shadow: one blurred rounded rectangle instead of the six drawn on Windows.
-    shadow = Image.new("RGBA", (window["width"], window["height"]), (0, 0, 0, 0))
-    ImageDraw.Draw(shadow).rounded_rectangle(
-        (bar["x"], bar["y"] + max(1, spec["pad"] // 3),
-         bar["x"] + bar["width"] - 1, bar["y"] + bar["height"] - 1),
-        radius=spec["radius"], fill=(0, 0, 0, seewo.SHADOW_ALPHA))
-    image = Image.alpha_composite(image, shadow.filter(ImageFilter.GaussianBlur(spec["pad"] * 0.7)))
-
-    body = Image.new("RGBA", (bar["width"], bar["height"]), (0, 0, 0, 0))
-    body.paste(vertical_gradient(bar["width"], bar["height"], hex_rgb(seewo.TOP_COLOR),
-                                 hex_rgb(seewo.BOTTOM_COLOR)), (0, 0))
-    body.putalpha(rounded_mask(bar["width"], bar["height"], spec["radius"]))
-    image.alpha_composite(body, (bar["x"], bar["y"]))
-
+    band_w, band_h = window["width"], window["height"]
+    image = Image.new("RGB", (band_w, band_h))
+    image.paste(vertical_gradient(band_w, band_h, hex_rgb(seewo.TOP_COLOR),
+                                  hex_rgb(seewo.BOTTOM_COLOR)), (0, 0))
     draw = ImageDraw.Draw(image)
-    draw.line((bar["x"] + spec["radius"], bar["y"] + 1,
-               bar["x"] + bar["width"] - spec["radius"], bar["y"] + 1),
-              fill=(0x5E, 0x9F, 0xD0, 0x3C), width=1)
 
     icon = spec["icon"]
-    badge = Image.new("RGBA", (icon["width"], icon["height"]), (0, 0, 0, 0))
-    badge.paste(vertical_gradient(icon["width"], icon["height"], hex_rgb("#57BEF9"),
-                                  hex_rgb("#1D7BC8")), (0, 0))
-    badge.putalpha(rounded_mask(icon["width"], icon["height"], spec["icon_radius"]))
-    image.alpha_composite(badge, (icon["x"], icon["y"]))
+    body, arcs = seewo.glyph(icon["width"])
+    stroke = max(1, int(round(spec["stroke"])))
+    draw.line([(icon["x"] + x, icon["y"] + y) for x, y in body],
+              fill=hex_rgb(seewo.ACCENT), width=stroke, joint="curve")
+    for centre_x, centre_y, radius, start_angle, sweep in arcs:
+        draw.arc((icon["x"] + centre_x - radius, icon["y"] + centre_y - radius,
+                  icon["x"] + centre_x + radius, icon["y"] + centre_y + radius),
+                 start=start_angle, end=start_angle + sweep,
+                 fill=hex_rgb(seewo.ACCENT), width=stroke)
 
-    cone, arcs = seewo.glyph(icon["width"] * 0.78)
-    offset_x = icon["x"] + icon["width"] * 0.11
-    offset_y = icon["y"] + icon["height"] * 0.11
-    draw.polygon([(offset_x + x, offset_y + y) for x, y in cone], fill=(255, 255, 255, 255))
-    centre_x = offset_x + icon["width"] * 0.78 * 0.56
-    centre_y = offset_y + icon["height"] * 0.78 * 0.5
-    for factor in (1.0, 1.55):
-        radius = icon["width"] * 0.20 * factor
-        draw.arc((centre_x - radius, centre_y - radius, centre_x + radius, centre_y + radius),
-                 start=-55, end=55, fill=(255, 255, 255, 0xE6), width=max(1, int(icon["width"] / 20)))
-
-    if spec["prefix"]:
-        prefix = spec["prefix"]
-        draw.text((prefix["x"], bar["y"] + bar["height"] / 2), config["prefix"],
-                  font=font(spec["prefix_size"]), anchor="lm",
-                  fill=hex_rgb(seewo.ACCENT) + (255,))
-        divider = spec["divider"]
-        draw.rectangle((divider["x"], divider["y"], divider["x"] + divider["width"] - 1,
-                        divider["y"] + divider["height"] - 1),
-                       fill=(255, 255, 255, seewo.DIVIDER_ALPHA))
-
-    close = spec["close"]
-    arm = spec["close_size"] / 2
-    centre_x = close["x"] + close["width"] / 2
-    centre_y = close["y"] + close["height"] / 2
-    width = max(1, int(arm / 6))
-    draw.line((centre_x - arm / 2, centre_y - arm / 2, centre_x + arm / 2, centre_y + arm / 2),
-              fill=hex_rgb(seewo.CLOSE_COLOR) + (0xE8,), width=width)
-    draw.line((centre_x + arm / 2, centre_y - arm / 2, centre_x - arm / 2, centre_y + arm / 2),
-              fill=hex_rgb(seewo.CLOSE_COLOR) + (0xE8,), width=width)
-
-    # Scrolling text, clipped to the viewport, then dissolved at both edges.
     view = spec["viewport"]
+    prefix = seewo.prefix_text(config)
     message = "   ".join(config["text"].splitlines())
-    text_font = font(spec["text_size"])
-    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-    text_width = probe.textlength(message, font=text_font)
-    x, cycles = seewo.offset(elapsed, config["speed"] * seewo.scale(area), view["width"],
-                             text_width, spec["gap"])
+    text_font = font(spec["font"])
+    metrics = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    prefix_width = metrics.textlength(prefix, font=text_font) if prefix else 0
+    run_width = prefix_width + metrics.textlength(message, font=text_font)
+    # PIL 的 "lm" 锚点按升部到降部居中，和 Canvas 的 baseline 居中一致。
+    middle = view["height"] / 2
+    copies, cycles = seewo.positions(elapsed, spec["speed"], view["width"], run_width, spec["gap"])
     layer = Image.new("RGBA", (view["width"], view["height"]), (0, 0, 0, 0))
-    ImageDraw.Draw(layer).text((x, view["height"] / 2), message, font=text_font, anchor="lm",
-                               fill=hex_rgb(seewo.TEXT) + (255,))
-    fade = spec["fade"]
-    if fade and view["width"] > 2 * fade:
-        mask = Image.new("L", (view["width"], view["height"]), 255)
-        mask_draw = ImageDraw.Draw(mask)
-        for index in range(fade):
-            value = int(255 * index / fade)
-            mask_draw.line((index, 0, index, view["height"]), fill=value)
-            mask_draw.line((view["width"] - 1 - index, 0, view["width"] - 1 - index,
-                            view["height"]), fill=value)
-        layer.putalpha(Image.composite(layer.getchannel("A"), Image.new("L", layer.size, 0), mask))
-    image.alpha_composite(layer, (view["x"], view["y"]))
+    layer_draw = ImageDraw.Draw(layer)
+    for offset in copies:
+        x = offset
+        if prefix:
+            layer_draw.text((x, middle), prefix, font=text_font, anchor="lm",
+                            fill=hex_rgb(seewo.ACCENT) + (255,))
+            x += prefix_width
+        layer_draw.text((x, middle), message, font=text_font, anchor="lm",
+                        fill=hex_rgb(seewo.TEXT) + (255,))
+    image.paste(layer, (int(view["x"]), int(view["y"])), layer)
     return image, cycles
 
 
@@ -203,21 +159,28 @@ def main():
     args = parser.parse_args()
 
     area = dict(x=0, y=0, width=1920, height=1040, dpi=96)
-    config = {"text": args.text, "prefix": args.prefix, **seewo.preset()}
+    config = dict(seewo.preset(), text=args.text, prefix=args.prefix)
     elapsed = args.elapsed
     if args.center:
+        # 让正文居中：进度 = (视口宽 - 行宽/2) / 速度
         spec = seewo.layout(area, config)
-        probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-        width = probe.textlength("   ".join(config["text"].splitlines()),
-                                 font=font(spec["text_size"]))
-        travel = spec["viewport"]["width"] + (spec["viewport"]["width"] - width) / 2
-        elapsed = travel / (config["speed"] * seewo.scale(area))
+        probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+        text_font = font(spec["font"])
+        prefix = seewo.prefix_text(config)
+        message = "   ".join(config["text"].splitlines())
+        run_width = ((probe.textlength(prefix, font=text_font) if prefix else 0) +
+                     probe.textlength(message, font=text_font))
+        if run_width <= spec["viewport"]["width"]:
+            elapsed = 0.0
+        else:
+            travel = spec["viewport"]["width"] - (spec["viewport"]["width"] - run_width) / 2
+            elapsed = travel / spec["speed"]
     image, cycles = draw_bar(area, config, elapsed)
     if args.desktop:
         width, height = (int(part) for part in args.desktop.lower().split("x"))
         canvas = desktop_canvas(width, height)
         window = seewo.window_rect(dict(area, width=width, height=height))
-        canvas.paste(image, (window["x"], window["y"]), image)
+        canvas.paste(image, (window["x"], window["y"]))
         image = canvas
     if args.scale != 1:
         image = image.resize((image.width * args.scale, image.height * args.scale), Image.LANCZOS)

@@ -1,4 +1,8 @@
-"""The Seewo-style bar: locked config, shared geometry and the Windows raster."""
+"""The Seewo-style band: locked config, geometry and the Windows raster.
+
+Numbers come from the reference screenshot: a 640x360 render of a 1920x1080
+desktop, so the bar is 52/360 of the screen height and its text 19.5/360.
+"""
 import json
 import os
 from pathlib import Path
@@ -15,10 +19,11 @@ from announcements import DEFAULT, STYLES, lock_seewo, motion_frame, validate, w
 
 AREA = dict(x=0, y=0, width=1920, height=1040, dpi=96)
 KOTLIN = ROOT / "android/app/src/main/java/com/aicode/lancmd/AnnouncementSeewo.kt"
+TEXT = "今天下午放学后，请各班班长安排全体学生进行大扫除。"
 
 
 def config(**fields):
-    return validate(dict({"text": "本周五下午三点召开家长会。"}, **fields))
+    return validate(dict({"text": TEXT}, **fields))
 
 
 class LockTest(unittest.TestCase):
@@ -28,12 +33,9 @@ class LockTest(unittest.TestCase):
         self.assertEqual("classic", config()["style"])
 
     def test_seewo_rewrites_every_owned_field(self):
-        # A phone carrying an old draft must not be able to deform the bar.
         cramped = config(style="seewo", mode="popup", motion="fade", position="bottom",
                          shape="pill", background="#FF0000", foreground="#00FF00",
-                         accent="#0000FF", font="SimSun", font_size=88, speed=400,
-                         opacity=30, width=40, bold=False,
-                         placement="custom", rect=dict(x=10, y=10, width=200, height=100))
+                         accent="#0000FF", font="SimSun", bold=True, opacity=30, width=40)
         for key, value in seewo.LOCKED.items():
             self.assertEqual(value, cramped[key], key)
         self.assertEqual("seewo", cramped["style"])
@@ -45,129 +47,139 @@ class LockTest(unittest.TestCase):
         self.assertEqual("校园通知", message["prefix"])
         self.assertEqual(45, message["duration"])
         self.assertEqual(3, message["repeats"])
-        # An empty prefix is a legitimate choice: no icon column, no divider.
-        blank = config(style="seewo", prefix="")
-        self.assertEqual("", blank["prefix"])
-        self.assertIsNone(seewo.layout(AREA, blank)["prefix"])
+        self.assertEqual("", seewo.prefix_text(config(style="seewo", prefix="")))
+
+    def test_prefix_colon_is_never_doubled(self):
+        self.assertEqual("消息提醒：", seewo.prefix_text(config(style="seewo")))
+        self.assertEqual("注意：", seewo.prefix_text(config(style="seewo", prefix="注意：")))
+        self.assertEqual("注意：", seewo.prefix_text(config(style="seewo", prefix="注意:")))
+        self.assertEqual("", seewo.prefix_text(config(style="seewo", prefix="   ")))
 
     def test_lock_helper_is_idempotent(self):
         once = lock_seewo(config(style="seewo"))
         self.assertEqual(once, lock_seewo(dict(once)))
-        self.assertEqual({"text": once["text"]},
-                         {k: v for k, v in lock_seewo(dict(once)).items() if k == "text"})
 
     def test_preset_round_trips(self):
-        preset = dict(seewo.preset(), text="家长会通知")
-        validated = validate(preset)
+        validated = validate(dict(seewo.preset(), text=TEXT))
         for key, value in seewo.LOCKED.items():
             self.assertEqual(value, validated[key], key)
-        self.assertEqual("消息通知", validated["prefix"])
+        self.assertEqual("消息提醒", validated["prefix"])
 
 
 class GeometryTest(unittest.TestCase):
-    def test_window_fits_and_is_centred_on_every_size(self):
-        for width, height, dpi in ((1920, 1040, 96), (3840, 2120, 192), (1366, 728, 96),
-                                   (1024, 600, 120), (800, 480, 96), (320, 240, 96)):
-            area = dict(x=-1920, y=40, width=width, height=height, dpi=dpi)
+    def test_band_is_full_bleed_and_near_the_top(self):
+        for width, height in ((1920, 1040), (3840, 2120), (1366, 728), (1024, 600), (800, 480)):
+            area = dict(x=-1920, y=40, width=width, height=height, dpi=96)
             box = window_rect(config(style="seewo"), area)
-            self.assertGreaterEqual(box["x"], area["x"])
-            self.assertGreaterEqual(box["y"], area["y"])
-            self.assertLessEqual(box["x"] + box["width"], area["x"] + area["width"])
+            self.assertEqual(area["x"], box["x"])
+            self.assertEqual(area["width"], box["width"])
+            self.assertGreater(box["y"], area["y"])
+            self.assertLess(box["y"] - area["y"], height * 0.04)
             self.assertLessEqual(box["y"] + box["height"], area["y"] + area["height"])
-            self.assertEqual(area["x"] + (area["width"] - box["width"]) // 2, box["x"])
-            self.assertEqual(area["y"] + int(round(seewo.TOP * dpi / 96)), box["y"])
+            self.assertAlmostEqual(height * seewo.BAR_HEIGHT, box["height"], delta=2)
 
-    def test_window_is_bar_plus_shadow_margin(self):
-        box = window_rect(config(style="seewo"), AREA)
-        bar = seewo.layout(AREA, config(style="seewo"))["bar"]
-        self.assertEqual(seewo.PAD * 2, box["height"] - bar["height"])
-        self.assertEqual(seewo.PAD * 2, box["width"] - bar["width"])
-        self.assertEqual(int(round(seewo.HEIGHT)), bar["height"])
-        self.assertLessEqual(bar["width"], seewo.MAX_WIDTH)
+    def test_height_follows_the_screen(self):
+        low = window_rect(config(style="seewo"), dict(AREA))
+        high = window_rect(config(style="seewo"), dict(AREA, dpi=192, height=2080))
+        self.assertAlmostEqual(low["height"] * 2, high["height"], delta=2)
 
-    def test_boxes_are_ordered_left_to_right(self):
-        for prefix in ("消息通知", "校园通知公告", ""):
-            spec = seewo.layout(AREA, config(style="seewo", prefix=prefix))
-            bar, icon, view, close = spec["bar"], spec["icon"], spec["viewport"], spec["close"]
-            self.assertGreater(icon["x"], bar["x"])
-            self.assertGreaterEqual(icon["y"], bar["y"])
-            self.assertLessEqual(icon["y"] + icon["height"], bar["y"] + bar["height"])
-            self.assertGreater(view["x"], icon["x"] + icon["width"])
-            if spec["prefix"]:
-                divider = spec["divider"]
-                self.assertGreater(divider["x"], spec["prefix"]["x"] + spec["prefix"]["width"] - 1)
-                self.assertGreater(view["x"], divider["x"])
-            self.assertLess(view["x"] + view["width"], close["x"])
-            self.assertGreater(close["x"] + close["width"], bar["x"] + bar["width"] - 2 * spec["pad"])
-            self.assertEqual(bar["height"], view["height"])
+    def test_layout_is_window_local_and_ordered(self):
+        spec = seewo.layout(AREA, config(style="seewo"))
+        icon, view = spec["icon"], spec["viewport"]
+        self.assertEqual(0, view["y"])
+        self.assertEqual(spec["height"], view["height"])
+        self.assertGreater(icon["x"], 0)
+        self.assertGreaterEqual(icon["y"], 0)
+        self.assertLessEqual(icon["y"] + icon["height"], spec["height"])
+        self.assertGreater(view["x"], icon["x"] + icon["width"])
+        self.assertLess(view["x"] + view["width"], spec["width"] + 1)
 
-    def test_prefix_column_tracks_the_text_not_a_fixed_width(self):
-        short = seewo.layout(AREA, config(style="seewo", prefix="通知"))
-        long = seewo.layout(AREA, config(style="seewo", prefix="校园重要通知"))
-        self.assertLess(short["prefix"]["width"], long["prefix"]["width"])
-        self.assertAlmostEqual(seewo.advance("通知", seewo.PREFIX_SIZE) + 2 * seewo.PREFIX_GAP,
-                               short["prefix"]["width"], delta=1)
-        self.assertAlmostEqual(seewo.advance("校园重要通知", seewo.PREFIX_SIZE) + 2 * seewo.PREFIX_GAP,
-                               long["prefix"]["width"], delta=1)
-        # Latin prefixes are narrower than the same number of CJK characters.
-        self.assertLess(seewo.advance("Notice", seewo.PREFIX_SIZE),
-                        seewo.advance("通知内容字样", seewo.PREFIX_SIZE))
+    def test_text_starts_at_the_measured_offset(self):
+        # Reference: icon left 19, width 20, gap 8 -> text at 46 of 640 on a 360-tall screen.
+        area = dict(x=0, y=0, width=640, height=360, dpi=96)
+        spec = seewo.layout(area, config(style="seewo"))
+        self.assertAlmostEqual(19, spec["icon"]["x"], delta=1)
+        self.assertAlmostEqual(20, spec["icon"]["width"], delta=1)
+        self.assertAlmostEqual(46, spec["viewport"]["x"], delta=2)
+        self.assertAlmostEqual(52, window_rect(config(style="seewo"), area)["height"], delta=1)
+        self.assertAlmostEqual(19.5, spec["font"], delta=1)
 
-    def test_dpi_scaling_is_uniform(self):
-        low = seewo.layout(dict(AREA), config(style="seewo"))
-        high = seewo.layout(dict(AREA, dpi=192), config(style="seewo"))
-        for key in ("radius", "text_size", "prefix_size", "fade", "gap", "close_size", "pad"):
-            self.assertEqual(low[key] * 2, high[key], key)
+    def test_advance_handles_cjk_latin_and_emoji(self):
+        self.assertAlmostEqual(4 * 20, seewo.advance("消息提醒", 20))
+        self.assertAlmostEqual(3 * 20 * 0.55, seewo.advance("abc", 20))
+        self.assertGreater(seewo.advance("😀", 20), seewo.advance("a", 20))
 
 
 class MotionTest(unittest.TestCase):
-    def test_offset_wraps_after_one_screen_plus_text_plus_gap(self):
-        width, text, gap, speed = 1000.0, 400.0, 64.0, 100.0
-        period = width + text + gap
-        x, cycles = seewo.offset(0, speed, width, text, gap)
-        self.assertEqual(width, x)
-        self.assertEqual(0, cycles)
-        self.assertAlmostEqual(width - 100, seewo.offset(1, speed, width, text, gap)[0])
-        self.assertEqual(1, seewo.offset(period / speed, speed, width, text, gap)[1])
-        middle = seewo.offset(period / speed / 2, speed, width, text, gap)[0]
-        self.assertAlmostEqual(width - period / 2, middle)
+    def test_short_message_never_moves(self):
+        self.assertTrue(seewo.static(1000, 900))
+        self.assertEqual((0.0, 0), seewo.offset(12.0, 100, 1000, 900, 60))
+        self.assertEqual(([0.0], 0), seewo.positions(12.0, 100, 1000, 900, 60))
+
+    def test_long_message_enters_from_the_right_and_wraps(self):
+        width, run, gap, speed = 1000.0, 2000.0, 60.0, 100.0
+        period = width + run + gap
+        self.assertEqual((width, 0), seewo.offset(0, speed, width, run, gap))
+        self.assertAlmostEqual(width - 100, seewo.offset(1, speed, width, run, gap)[0])
+        self.assertEqual(1, seewo.offset(period / speed, speed, width, run, gap)[1])
         for elapsed in (0, 0.5, 7.3, 123.4):
-            value = seewo.offset(elapsed, speed, width, text, gap)[0]
-            self.assertGreaterEqual(value, -text - gap)
-            self.assertLessEqual(value, width)
+            x = seewo.offset(elapsed, speed, width, run, gap)[0]
+            self.assertGreaterEqual(x, -run - gap)
+            self.assertLessEqual(x, width)
+
+    def test_positions_keep_a_copy_on_screen_until_the_gap(self):
+        width, run, gap = 500.0, 800.0, 60.0
+        period = width + run + gap
+        blank = 0
+        for step in range(0, 600):
+            elapsed = step / 4.0
+            travel = (elapsed * 100) % period
+            copies, _ = seewo.positions(elapsed, 100, width, run, gap)
+            inside_gap = travel >= width + run
+            if inside_gap:
+                blank += 1
+                continue
+            self.assertTrue(copies, elapsed)
+            for value in copies:
+                self.assertLessEqual(value, width)
+                self.assertGreater(value + run, 0)
+        # the blank window is exactly the repeat gap
+        self.assertAlmostEqual(blank, 600 * gap / period, delta=6)
+
+    def test_speed_is_proportional_to_the_font(self):
+        small = seewo.speed(dict(AREA, height=520))
+        large = seewo.speed(dict(AREA, height=1040))
+        self.assertAlmostEqual(small * 2, large, delta=2)
+        self.assertAlmostEqual(seewo.speed(AREA), seewo.font_size(AREA) * seewo.SPEED_EM, delta=0.1)
 
     def test_classic_motion_gained_the_gap_parameter_but_keeps_its_behaviour(self):
         self.assertEqual((300, 15.0, 0, 1.0), motion_frame("left", 300, 60, 200, 30, 0, 100, 32))
-        self.assertEqual((300, 15.0, 0, 1.0), motion_frame("left", 300, 60, 200, 30, 0, 100))
-        # The gap only changes the cycle once the travel exceeds one period.
         self.assertNotEqual(motion_frame("left", 300, 60, 200, 30, 10, 100, 32),
                             motion_frame("left", 300, 60, 200, 30, 10, 100, 64))
 
 
 class ColourTest(unittest.TestCase):
-    def test_gradient_endpoints_and_midpoint(self):
+    def test_gradient_matches_the_measured_ends(self):
+        self.assertEqual("#020914", seewo.TOP_COLOR)
+        self.assertEqual("#040E1C", seewo.BOTTOM_COLOR)
         self.assertEqual(seewo.TOP_COLOR, seewo.gradient_colour(0))
         self.assertEqual(seewo.BOTTOM_COLOR, seewo.gradient_colour(1))
-        self.assertEqual("#0C2438", seewo.gradient_colour(0.5))
         self.assertEqual(seewo.TOP_COLOR, seewo.gradient_colour(-5))
         self.assertEqual(seewo.BOTTOM_COLOR, seewo.gradient_colour(9))
 
-    def test_fade_strips_are_symmetric_and_skipped_when_narrow(self):
-        view = dict(x=200, y=8, width=1200, height=56)
-        strips = seewo.fade_rects(view, 20)
-        self.assertEqual(["left", "right"], [item["side"] for item in strips])
-        self.assertEqual(view["x"], strips[0]["x"])
-        self.assertEqual(view["x"] + view["width"], strips[1]["x"] + strips[1]["width"])
-        self.assertEqual([], seewo.fade_rects(dict(view, width=30), 20))
-
-    def test_shadow_rects_shrink_towards_the_bar(self):
-        bar = dict(x=8, y=8, width=1700, height=56)
-        items = seewo.shadow_rects(bar, 8)
-        self.assertEqual(seewo.SHADOW_STEPS, len(items))
-        widths = [item["width"] for item in items]
-        self.assertTrue(all(a > b for a, b in zip(widths, widths[1:])))
-        self.assertTrue(all(item["alpha"] <= seewo.SHADOW_ALPHA for item in items))
-        self.assertGreaterEqual(items[-1]["alpha"], 0)
+    def test_glyph_is_stroked_and_inside_its_box(self):
+        body, arcs = seewo.glyph(100)
+        xs = [x for x, _ in body]
+        ys = [y for _, y in body]
+        self.assertGreaterEqual(min(xs), 0)
+        self.assertLessEqual(max(xs), 100)
+        self.assertGreaterEqual(min(ys), 0)
+        self.assertLessEqual(max(ys), 100)
+        self.assertEqual(7, len(body))          # closed speaker polygon
+        self.assertEqual(2, len(arcs))          # two sound waves
+        for _, _, radius, start, sweep in arcs:
+            self.assertGreater(radius, 0)
+            self.assertGreater(sweep, 0)
 
 
 class ParityTest(unittest.TestCase):
@@ -177,138 +189,92 @@ class ParityTest(unittest.TestCase):
     def setUpClass(cls):
         source = KOTLIN.read_text(encoding="utf-8")
         cls.values = {}
-        for name, value in re.findall(r'const val ([A-Z_]+) = (0x[0-9A-Fa-f]+|[0-9.]+f?|"[^"]*")',
-                                      source):
-            cls.values[name] = value
+        for name, expression in re.findall(
+                r'const val ([A-Z_]+)\s*=\s*("(?:[^"]*)"|[-0-9.f/ ]+)', source):
+            text = expression.strip()
+            if text.startswith('"'):
+                cls.values[name] = text.strip('"')
+            else:
+                cls.values[name] = eval(text.replace("f", ""), {"__builtins__": {}}, {})
 
     def test_every_shared_metric_matches(self):
-        expect = dict(HEIGHT=seewo.HEIGHT, RADIUS=seewo.RADIUS, SIDE_MARGIN=seewo.SIDE_MARGIN,
-                      TOP=seewo.TOP, MAX_WIDTH=seewo.MAX_WIDTH, PAD=seewo.PAD, ICON=seewo.ICON,
-                      ICON_RADIUS=seewo.ICON_RADIUS, ICON_GAP=seewo.ICON_GAP,
-                      PREFIX_SIZE=seewo.PREFIX_SIZE, PREFIX_GAP=seewo.PREFIX_GAP,
-                      DIVIDER_GAP=seewo.DIVIDER_GAP, DIVIDER_HEIGHT=seewo.DIVIDER_HEIGHT,
-                      TEXT_SIZE=seewo.TEXT_SIZE, FADE=seewo.FADE, GAP=seewo.GAP,
-                      CLOSE=seewo.CLOSE, CLOSE_HIT=seewo.CLOSE_HIT, CLOSE_GAP=seewo.CLOSE_GAP,
-                      SPEED=seewo.SPEED, OPACITY=seewo.OPACITY,
+        expect = dict(BAR_HEIGHT=seewo.BAR_HEIGHT, TOP=seewo.TOP, FONT=seewo.FONT,
+                      ICON=seewo.ICON, ICON_INSET=seewo.ICON_INSET, ICON_GAP=seewo.ICON_GAP,
+                      RIGHT_INSET=seewo.RIGHT_INSET, STROKE=seewo.STROKE,
+                      SPEED_EM=seewo.SPEED_EM, GAP_EM=seewo.GAP_EM,
+                      MIN_BAR=seewo.MIN_BAR, MIN_FONT=seewo.MIN_FONT,
                       TOP_COLOR=seewo.TOP_COLOR, BOTTOM_COLOR=seewo.BOTTOM_COLOR,
-                      ACCENT=seewo.ACCENT, TEXT_COLOR=seewo.TEXT, CLOSE_COLOR=seewo.CLOSE_COLOR,
-                      SHADOW_ALPHA=seewo.SHADOW_ALPHA, SHADOW_STEPS=seewo.SHADOW_STEPS,
-                      DIVIDER_ALPHA=seewo.DIVIDER_ALPHA)
+                      ACCENT=seewo.ACCENT, TEXT_COLOR=seewo.TEXT, STYLE="seewo",
+                      DEFAULT_PREFIX=seewo.DEFAULT_PREFIX)
         for name, value in expect.items():
             self.assertIn(name, self.values, "Kotlin table is missing " + name)
-            raw = self.values[name]
             if isinstance(value, str):
-                self.assertEqual(value, raw.strip('"'), name)
+                self.assertEqual(value, self.values[name], name)
             else:
-                number = float(int(raw, 16)) if raw.lower().startswith("0x") else float(raw.rstrip("f"))
-                self.assertAlmostEqual(float(value), number, delta=1e-6, msg=name)
+                self.assertAlmostEqual(float(value), float(self.values[name]), delta=1e-6,
+                                       msg=name)
 
-    def test_style_tag_and_preset_fields_agree(self):
+    def test_glyph_points_match(self):
         source = KOTLIN.read_text(encoding="utf-8")
-        self.assertIn('const val STYLE = "seewo"', source)
-        self.assertEqual("seewo", seewo.preset()["style"])
-        for field in ("mode", "motion", "position", "shape", "bold", "font", "background",
-                      "foreground", "accent", "width", "font_size", "speed", "opacity",
-                      "placement", "rect", "prefix"):
-            self.assertIn('put("%s"' % field, source, field)
+        numbers = set(re.findall(r"(\d\.\d+)f", source))
+        body, _ = seewo.glyph(1.0)
+        for x, y in body:
+            self.assertIn("%.2f" % x, numbers)
+            self.assertIn("%.2f" % y, numbers)
 
 
-class LayerTest(unittest.TestCase):
-    """The alpha mask is pure Python, so its shape is checked on every platform."""
-
-    def setUp(self):
-        from announcement_layer import alpha_mask, premultiplied_layer
-        self.area = dict(x=0, y=0, width=1920, height=1040, dpi=96)
-        self.spec = seewo.layout(self.area, config(style="seewo"))
-        self.bar = self.spec["bar"]
-        width, height = self.spec["window"]["width"], self.spec["window"]["height"]
-        self.width, self.height = width, height
-        self.mask = alpha_mask(width, height, self.bar, self.spec["radius"], self.spec["pad"])
-        self.layer = premultiplied_layer(self.mask, width, height, self.bar)
-
-    def alpha(self, x, y):
-        return self.mask[y * self.width + x]
-
-    def test_margin_is_transparent_and_the_bar_is_opaque(self):
-        self.assertEqual(0, self.alpha(0, 0))
-        self.assertEqual(0, self.alpha(self.width - 1, self.height - 1))
-        self.assertEqual(255, self.alpha(self.width // 2, self.bar["y"] + self.bar["height"] // 2))
-
-    def test_shadow_ring_fades_outwards(self):
-        column = [self.alpha(self.width // 2, self.bar["y"] - distance)
-                  for distance in range(1, self.spec["pad"])]
-        self.assertEqual(sorted(column, reverse=True), column)
-        self.assertTrue(all(0 < value < 255 for value in column), column)
-
-    def test_rounded_corners_have_partial_coverage(self):
-        radius = self.spec["radius"]
-        partial = [self.alpha(x, y)
-                   for y in range(self.bar["y"], self.bar["y"] + radius + 2)
-                   for x in range(self.bar["x"], self.bar["x"] + radius + 2)
-                   if 0 < self.alpha(x, y) < 255]
-        self.assertGreaterEqual(len(partial), 4)
-        self.assertEqual(0, self.alpha(self.bar["x"], self.bar["y"]))
-
-    def test_layer_is_premultiplied_and_mirrors(self):
-        for index in range(0, len(self.layer), 4):
-            for channel in range(3):
-                self.assertLessEqual(self.layer[index + channel], self.layer[index + 3])
-        middle = self.bar["y"] + self.bar["height"] // 2
-        left = self.alpha(self.bar["x"] + 400, middle)
-        right = self.alpha(self.bar["x"] + self.bar["width"] - 401, middle)
-        self.assertEqual(left, right)
-
-    def test_gradient_is_brighter_at_the_top(self):
-        middle = self.width // 2
-        top = self.layer[(self.bar["y"] + 3) * self.width * 4 + middle * 4:
-                         (self.bar["y"] + 3) * self.width * 4 + middle * 4 + 3]
-        bottom = self.layer[(self.bar["y"] + self.bar["height"] - 4) * self.width * 4 + middle * 4:
-                            (self.bar["y"] + self.bar["height"] - 4) * self.width * 4 + middle * 4 + 3]
-        self.assertGreater(top[0] + top[1] + top[2], bottom[0] + bottom[1] + bottom[2])
-
-
-@unittest.skipUnless(os.name == "nt", "UpdateLayeredWindow and GDI+")
+@unittest.skipUnless(os.name == "nt", "GDI+ raster")
 class NativeSeewoTest(unittest.TestCase):
-    def test_layered_bar_has_transparent_margin_rounded_corners_and_text(self):
+    def setUp(self):
         from announcement_layer import SeewoSurface
-        area = dict(x=0, y=0, width=1920, height=1040, dpi=96)
-        surface = SeewoSurface(area, config(style="seewo"))
-        try:
-            cycles, alpha = surface.paint(0.4)
-            self.assertEqual(1.0, alpha)
-            with tempfile.TemporaryDirectory() as folder:
-                path = Path(folder) / "seewo.bmp"
-                surface.save_bmp(path)
-                data = path.read_bytes()
-            header = 54
-            stride = surface.width * 4
-            def pixel(x, y):
-                index = header + y * stride + x * 4
-                return tuple(data[index:index + 4])
-            self.assertEqual(0, pixel(0, 0)[3])                 # shadow margin is transparent
-            corner = pixel(9, 9)
-            self.assertLess(corner[3], 255)                      # anti-aliased rounded corner
-            self.assertEqual(255, pixel(surface.width // 2, surface.spec["bar"]["height"] // 2)[3])
-            self.assertIn("消息通知", surface.text) if False else None
-            body = data[header:]
-            bright = sum(1 for index in range(0, len(body), 4) if body[index] > 200
-                         and body[index + 1] > 200 and body[index + 2] > 200 and body[index + 3] > 128)
-            self.assertGreater(bright, 200, "the white message must be drawn")
-        finally:
-            surface.close()
+        self.surface = SeewoSurface(AREA, config(style="seewo"))
 
-    def test_window_geometry_matches_the_phone_table(self):
-        from announcement_layer import SeewoSurface
-        area = dict(x=0, y=0, width=1920, height=1040, dpi=96)
-        surface = SeewoSurface(area, config(style="seewo"))
-        try:
-            box = window_rect(config(style="seewo"), area)
-            self.assertEqual((box["width"], box["height"]), (surface.width, surface.height))
-            close = surface.spec["close"]
-            self.assertTrue(surface.hit_close(close["x"] + 2, close["y"] + 2))
-            self.assertFalse(surface.hit_close(2, 2))
-        finally:
-            surface.close()
+    def tearDown(self):
+        self.surface.close()
+
+    def pixels(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "band.bmp"
+            self.surface.paint(0.0)
+            self.surface.save_bmp(path)
+            data = path.read_bytes()
+        header = 54
+        stride = self.surface.width * 4
+
+        def pixel(x, y):
+            index = header + y * stride + x * 4
+            return tuple(data[index:index + 4])       # BGRA
+
+        return pixel
+
+    def test_band_is_opaque_and_square_cornered(self):
+        pixel = self.pixels()
+        for x, y in ((0, 0), (0, self.surface.height - 1), (self.surface.width - 1, 0),
+                     (self.surface.width - 1, self.surface.height - 1)):
+            self.assertEqual(255, pixel(x, y)[3], (x, y))
+        top = pixel(self.surface.width // 2, 1)
+        bottom = pixel(self.surface.width // 2, self.surface.height - 2)
+        self.assertGreaterEqual(bottom[0] + bottom[1] + bottom[2], top[0] + top[1] + top[2])
+
+    def test_blue_glyph_and_white_text_are_drawn(self):
+        pixel = self.pixels()
+        blue = white = 0
+        for y in range(self.surface.height):
+            for x in range(0, self.surface.width, 2):
+                b, g, r, a = pixel(x, y)
+                if b > 150 and b - r > 60:
+                    blue += 1
+                if r > 200 and g > 200 and b > 200:
+                    white += 1
+        self.assertGreater(blue, 40, "speaker glyph and prefix must be blue")
+        self.assertGreater(white, 200, "body text must be white")
+
+    def test_no_close_button_and_no_fill_behind_the_glyph(self):
+        self.assertFalse(self.surface.hit_close(self.surface.width - 20, 20))
+        pixel = self.pixels()
+        icon = self.surface.spec["icon"]
+        centre = pixel(icon["x"] + icon["width"] // 2, icon["y"] + icon["height"] // 2)
+        self.assertLess(centre[0] + centre[1] + centre[2], 200, "glyph is stroke-only")
 
 
 if __name__ == "__main__":

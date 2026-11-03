@@ -147,8 +147,9 @@ class NoticeWindow:
         area=primary_work_area();s=area['dpi']/96
         bounds=window_rect(self.config,area)
         x,y,width,height=(bounds[k] for k in ('x','y','width','height'))
-        layered=self.config.get('style')=='seewo'
-        surface=SeewoSurface(area,self.config) if layered else Surface(width,height,self.config,s)
+        # Seewo style: a flat opaque band, painted straight into the window.
+        seewo_style=self.config.get('style')=='seewo'
+        surface=SeewoSurface(area,self.config) if seewo_style else Surface(width,height,self.config,s)
         start=time.monotonic();paused=None;paused_total=0.;last_report=0.;state='playing';cycles=0
         instance=kernel.GetModuleHandleW(None);name='LanCmdAnnouncement_'+uuid.uuid4().hex
         def elapsed():return ((paused if paused is not None else time.monotonic())-start-paused_total)
@@ -159,7 +160,6 @@ class NoticeWindow:
             try:
                 if message==0x21:return 3 # MA_NOACTIVATE, preserve the user's foreground application.
                 if message==0xf:
-                    if layered:return 0 # UpdateLayeredWindow owns the pixels
                     paint=Paint();dc=user.BeginPaint(hwnd,c.byref(paint))
                     try:surface.copy_to(dc)
                     finally:user.EndPaint(hwnd,c.byref(paint))
@@ -167,7 +167,7 @@ class NoticeWindow:
                 if message==0x14:return 1
                 if message==0x201:
                     px=lp&0xffff;py=(lp>>16)&0xffff
-                    if surface.hit_close(px,py) if layered else (px>=width-surface.close_size and py<=surface.close_size):
+                    if surface.hit_close(px,py) if seewo_style else (px>=width-surface.close_size and py<=surface.close_size):
                         end(hwnd,'local_close')
                     return 0
                 if message==0x10:end(hwnd,'closed');return 0
@@ -186,12 +186,8 @@ class NoticeWindow:
                     if self.config['duration'] and now>=self.config['duration']:end(hwnd,'duration');return 0
                     cycles,alpha=surface.paint(now)
                     if self.config['repeats'] and cycles>=self.config['repeats']:end(hwnd,'repeats');return 0
-                    if layered:
-                        if not surface.present(hwnd,x,y,255*self.config['opacity']/100*alpha):
-                            raise OSError('Windows 拒绝分层窗口更新')
-                    else:
-                        user.SetLayeredWindowAttributes(hwnd,0,max(25,int(255*self.config['opacity']/100*alpha)),2)
-                        user.InvalidateRect(hwnd,None,False)
+                    user.SetLayeredWindowAttributes(hwnd,0,max(25,int(255*self.config['opacity']/100*alpha)),2)
+                    user.InvalidateRect(hwnd,None,False)
                     if time.monotonic()-last_report>=1:
                         self.emit(dict(status=state,elapsed=round(now,2),cycles=cycles));last_report=time.monotonic()
                     return 0
@@ -205,19 +201,14 @@ class NoticeWindow:
             registered=True
             hwnd=user.CreateWindowExW(0x08080088,name,self.config['prefix'] or '桌面公告',0x80000000,x,y,width,height,None,None,instance,None)
             if not hwnd:raise c.WinError(c.get_last_error())
-            if not layered and self.config['shape']!='rectangle':
+            if not seewo_style and self.config['shape']!='rectangle':
                 radius=height if self.config['shape']=='pill' else int(24*s)
                 gdi.CreateRoundRectRgn.argtypes=[c.c_int]*6;gdi.CreateRoundRectRgn.restype=w.HRGN
                 region=gdi.CreateRoundRectRgn(0,0,width+1,height+1,radius,radius)
                 if not user.SetWindowRgn(hwnd,region,True):gdi.DeleteObject(region)
             surface.paint(0)
-            if layered:
-                if not surface.present(hwnd,x,y,255*self.config['opacity']/100):
-                    raise OSError('Windows 拒绝分层窗口更新')
-                user.SetWindowPos(hwnd,c.c_void_p(-1),x,y,width,height,0x50)
-            else:
-                user.SetLayeredWindowAttributes(hwnd,0,int(255*self.config['opacity']/100),2)
-                user.SetWindowPos(hwnd,c.c_void_p(-1),x,y,width,height,0x50)
+            user.SetLayeredWindowAttributes(hwnd,0,int(255*self.config['opacity']/100),2)
+            user.SetWindowPos(hwnd,c.c_void_p(-1),x,y,width,height,0x50)
             if not user.SetTimer(hwnd,1,33,None):raise c.WinError(c.get_last_error())
             def controls():
                 try:

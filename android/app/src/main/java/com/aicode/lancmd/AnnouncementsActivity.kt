@@ -116,9 +116,9 @@ class AnnouncementsActivity:MiuixActivity() {
             androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize()) {
                 item {
                     if(tab==0)SectionCard("内容与预设") {
-                        SelectionRow("希沃样式（锁定外观）","与教室一体机的消息通知条一致：深蓝圆角条、喇叭徽标、浅蓝前缀、白色滚动词、顶端柔和淡出",
+                        SelectionRow("希沃样式（锁定外观）","与一体机消息通知条一致：通栏深色带、蓝色描边喇叭、“消息提醒：”蓝色前缀接白色正文，同一行滚动",
                             SeewoBar.isSeewo(config),{applySeewo(it)})
-                        if(SeewoBar.isSeewo(config))Note("已锁定的项目：顶部位置、92% 宽度、56 逻辑像素高度、圆角 10、飞书蓝渐变、22 号粗体正文与 132 像素／秒匀速左移。可改的只有正文、前缀、播放次数与秒数。")
+                        if(SeewoBar.isSeewo(config))Note("已锁定的项目：通栏宽度、屏高的 14.4% 高度、距顶 2.8%、#020914→#040E1C 竖向渐变、蓝色描边喇叭、18.7/360 屏高字号、常规字重。短消息静止左对齐，长消息从右侧进场滚动。可改的只有正文、前缀、播放次数与秒数。")
                         ActionRow {listOf("经典跑马灯","全局弹窗","桌面常驻").forEachIndexed{i,label->Action(label,modifier=Modifier.weight(1f)){preset(i)}}}
                         Field("消息前缀（可留空）",config.optString("prefix"),{change("prefix",it.take(30))})
                         Field("公告内容",config.optString("text"),{change("text",it.take(2000))},singleLine=false,maxLines=6)
@@ -132,8 +132,8 @@ class AnnouncementsActivity:MiuixActivity() {
                         Action("退出希沃样式",modifier=Modifier.fillMaxWidth()){applySeewo(false)}
                     }
                     if(tab==2 && SeewoBar.isSeewo(config))SectionCard("颜色与形状") {
-                        InfoItem("希沃样式固定配色","深蓝渐变 #12324F → #071522 · 前缀 #8FD8FF · 正文 #FFFFFF")
-                        Note("背景、前缀色、字号、字体与形状都属于希沃样式的锁定项，避免改完后不再像学校的通知条。")
+                        InfoItem("希沃样式固定配色","背景 #020914 → #040E1C · 喇叭与前缀 #559BE2 · 正文 #FFFFFF")
+                        Note("通栏、无圆角、无阴影、无关闭按钮：与一体机上的通知条一致。背景、配色、字号、字体与形状都属于锁定项。")
                     }
                     if(tab==1 && !SeewoBar.isSeewo(config))SectionCard("位置与尺寸") {
                         InfoItem("当前布局",boxLabel())
@@ -161,7 +161,7 @@ class AnnouncementsActivity:MiuixActivity() {
                             ChoiceField(listOf("向左滚动","向右滚动","向上滚动","向下滚动","往返移动","静止显示","淡入淡出"),"流动方式",listOf("left","right","up","down","bounce","static","fade").indexOf(config.optString("motion")).coerceAtLeast(0)){
                                 change("motion",listOf("left","right","up","down","bounce","static","fade")[it])}
                             numeric("速度（20–400 像素／秒，按系统缩放）","speed")
-                        } else Note("希沃样式固定为向左匀速滚动（132 逻辑像素／秒，无播放时长上限时循环播放）。")
+                        } else Note("希沃样式固定为向左匀速滚动（速度随字号，约 2.4 个字号宽／秒）；消息短于可用宽度时静止显示，不滚动。")
                         numeric("播放次数（0 不限，最多 100）","repeats");numeric("显示秒数（0 不限，最多 3600）","duration")
                         Field("本条延迟秒数（留空跟随全局，0 立即）",overrideDelay,{overrideDelay=it.filter(Char::isDigit).take(5)})
                         Note("次数和时长先到者结束；静止／淡入淡出每 5 秒算一次。暂停不计播放时长。手机断线后继续，接收端退出会结束公告；修改样式后点发送／更新才应用到电脑。")

@@ -441,3 +441,22 @@ self_manage, self_rename, self_delete, tunnel`。以下命令全部要求已握�
 
 尺寸表的唯一来源是 `windows/announcement_seewo.py`，安卓镜像在
 `AnnouncementSeewo.kt`；`tools/test_announcement_seewo.py` 断言两侧常量一致。
+
+## 3.18.1 希沃样式的最终规格
+
+`style="seewo"` 的锁定值在 3.18.1 有变化（3.18.0 的圆角浮动条已废弃）：
+`shape=rectangle, bold=false, opacity=100, background=#020914, foreground=#FFFFFF,
+accent=#559BE2`，并且 `font_size / speed / width / placement` 对它不再生效——条的位置、
+尺寸、字号与速度全部由屏幕可用高度推导：
+
+| 量 | 规则（H = 可用高度，W = 可用宽度） |
+|---|---|
+| 窗口 | `x=可用x, y=可用y+round(10H/360), w=W, h=max(36, round(52H/360))` |
+| 字号 | `max(12, round(19.5H/360))` |
+| 图标 | 左内边距 `round(19H/360)`，边长 `round(20H/360)`，描边 `2H/360` |
+| 文字视口 | 起点 `图标右 + round(8H/360)`，右端留 `round(19H/360)` |
+| 速度 | `2.4 × 字号` 像素／秒 |
+| 重复间隔 | `3 × 字号` 像素 |
+
+`prefix` 结尾统一补一个全角冒号（已有则不重复）。前缀与正文是同一行，前缀用 accent 色，
+正文用 foreground 色，整行一起滚动；行宽 ≤ 视口宽时静止左对齐。

@@ -1,69 +1,69 @@
 package com.aicode.lancmd
 
+import android.graphics.Color
+import android.graphics.RectF
 import org.json.JSONObject
 import kotlin.math.min
 import kotlin.math.roundToInt
-import android.graphics.Color
-import android.graphics.RectF
 
 /**
- * “希沃样式”通知条的唯一尺寸表，与 windows/announcement_seewo.py 一一对应。
+ * “希沃样式”通知条：与 windows/announcement_seewo.py 同一张尺寸表。
  *
- * 两端都按 96 dpi 的逻辑像素书写，再乘 dpi/96。任何一侧改数字都要同步改另一侧，
- * tools/test_announcement_seewo.py 会解析这两个文件并断言两边一致。
+ * 参考截图是 1920×1080 桌面的 1/3 缩略（640×360，桌面图标 16 px），
+ * 所以下面每个数字都是“屏高的几分之几”，1080p 与 4K 上的观感一致：
+ *
+ * ```
+ * y=158 屏幕顶
+ * y=168 条顶      ← 距屏幕顶 10 单位
+ * y=219 条底      ← 高 52 单位
+ * x=73  喇叭左    ← 内缩 19 单位，宽 20，描边 2
+ * x=100 文字左    ← 图标后 8 单位
+ * ```
+ *
+ * 没有圆角、阴影、徽标底框、分隔线和关闭按钮：整条是通栏的纯色带，
+ * 前缀「消息提醒：」和正文在同一行里一起滚动。
  */
 internal object SeewoBar {
-    const val HEIGHT = 56f
-    const val RADIUS = 10f
-    const val SIDE_MARGIN = 24f
-    const val TOP = 12f
-    const val MAX_WIDTH = 1760f
-    const val PAD = 8f
+    const val BAR_HEIGHT = 52f / 360f
+    const val TOP = 10f / 360f
+    const val FONT = 19.5f / 360f
+    const val ICON = 20f / 360f
+    const val ICON_INSET = 19f / 360f
+    const val ICON_GAP = 8f / 360f
+    const val RIGHT_INSET = 19f / 360f
+    const val STROKE = 2f / 360f
 
-    const val ICON = 30f
-    const val ICON_RADIUS = 8f
-    const val ICON_GAP = 12f
+    const val SPEED_EM = 2.4f
+    const val GAP_EM = 3.0f
 
-    const val PREFIX_SIZE = 20f
-    const val PREFIX_GAP = 4f
+    const val MIN_BAR = 36
+    const val MIN_FONT = 12
 
-    const val DIVIDER_GAP = 12f
-    const val DIVIDER_HEIGHT = 20f
-
-    const val TEXT_SIZE = 22f
-    const val FADE = 20f
-    const val GAP = 64f
-
-    const val CLOSE = 24f
-    const val CLOSE_HIT = 36f
-    const val CLOSE_GAP = 14f
-
-    const val SPEED = 132f
-    const val OPACITY = 96
-
-    const val TOP_COLOR = "#12324F"
-    const val BOTTOM_COLOR = "#071522"
-    const val ACCENT = "#8FD8FF"
+    const val TOP_COLOR = "#020914"
+    const val BOTTOM_COLOR = "#040E1C"
+    const val ACCENT = "#559BE2"
     const val TEXT_COLOR = "#FFFFFF"
-    const val BORDER_COLOR = "#2E9BF0"
-    const val BORDER_ALPHA = 0x48
-    const val DIVIDER_ALPHA = 0x28
-    const val CLOSE_COLOR = "#DCE8F5"
-    const val SHADOW_ALPHA = 0x6E
-    const val SHADOW_STEPS = 6
-
     const val STYLE = "seewo"
+    const val DEFAULT_PREFIX = "消息提醒"
 
-    /** 手机点选后发送的配置片段；锁定项与 Windows 的 lock_seewo 完全一致。 */
-    fun preset(prefix: String = "消息通知"): JSONObject = JSONObject()
-        .put("style", STYLE).put("mode", "ticker").put("motion", "left").put("position", "top")
-        .put("shape", "rounded").put("bold", true).put("font", "Microsoft YaHei UI")
-        .put("background", TOP_COLOR).put("foreground", TEXT_COLOR).put("accent", ACCENT)
-        .put("width", 100).put("font_size", TEXT_SIZE.toInt()).put("speed", SPEED.toInt())
-        .put("opacity", OPACITY).put("placement", "preset").put("rect", JSONObject.NULL)
-        .put("prefix", prefix)
+    data class Band(
+        val x: Float, val y: Float, val width: Float, val height: Float,
+        val icon: RectF, val viewport: RectF, val font: Float, val stroke: Float,
+        val gap: Float, val speed: Float
+    )
 
     fun isSeewo(config: JSONObject) = config.optString("style") == STYLE
+
+    /** 设计单位 → 设备像素：上面的常量本来就是屏高比例。 */
+    fun scale(area: AnnouncementGeometry.Area) = area.height.toFloat()
+
+    private fun px(value: Float, area: AnnouncementGeometry.Area) =
+        (value * scale(area)).roundToInt().coerceAtLeast(1).toFloat()
+
+    fun fontSize(area: AnnouncementGeometry.Area) =
+        Math.max(MIN_FONT, (FONT * scale(area)).roundToInt()).toFloat()
+
+    fun speed(area: AnnouncementGeometry.Area) = fontSize(area) * SPEED_EM
 
     fun advance(text: String, size: Float): Float {
         var total = 0f
@@ -77,68 +77,32 @@ internal object SeewoBar {
         return total * size
     }
 
-    data class Bar(
-        val x: Float, val y: Float, val width: Float, val height: Float,
-        val icon: RectF, val prefix: RectF?, val divider: RectF?, val viewport: RectF,
-        val close: RectF, val radius: Float, val iconRadius: Float, val prefixSize: Float,
-        val textSize: Float, val fade: Float, val gap: Float, val closeSize: Float,
-        val pad: Float
-    )
+    /** 蓝色前缀，结尾保证只有一个全角冒号。 */
+    fun prefixText(config: JSONObject): String {
+        val prefix = config.optString("prefix").trim().trimEnd('：', ':')
+        return if (prefix.isEmpty()) "" else "$prefix："
+    }
 
     fun window(area: AnnouncementGeometry.Area): AnnouncementGeometry.Box {
-        val s = area.scale
-        val side = (SIDE_MARGIN * s).roundToInt()
-        val pad = (PAD * s).roundToInt()
-        val widest = min((MAX_WIDTH * s).roundToInt(), (area.width - 2 * side).coerceAtLeast(1))
-        val width = min(area.width, widest + 2 * pad)
-        val height = min(area.height, ((HEIGHT + 2 * PAD) * s).roundToInt())
-        val x = area.x + (area.width - width) / 2
-        val y = area.y + min((TOP * s).roundToInt(), (area.height - height).coerceAtLeast(0))
-        return AnnouncementGeometry.Box(x, y, width, height)
+        val height = min(area.height, Math.max(MIN_BAR, (BAR_HEIGHT * scale(area)).roundToInt()))
+        val top = min((TOP * scale(area)).roundToInt(), maxOf(0, area.height - height))
+        return AnnouncementGeometry.Box(area.x, area.y + top, area.width, height)
     }
 
-    fun layout(area: AnnouncementGeometry.Area, config: JSONObject): Bar {
-        val s = area.scale
-        fun px(value: Float) = (value * s).roundToInt().toFloat()
+    /** 返回的是**相对条左上角**的坐标：预览画布已平移到条的左上角。 */
+    fun layout(area: AnnouncementGeometry.Area, config: JSONObject): Band {
         val box = window(area)
-        val pad = px(PAD)
-        val barX = pad
-        val barY = pad
-        val barWidth = (box.width - 2 * pad).coerceAtLeast(1f)
-        val barHeight = (box.height - 2 * pad).coerceAtLeast(1f)
-        val iconSize = px(ICON)
-        val icon = RectF(barX + px(16f), barY + (barHeight - iconSize) / 2f,
-            barX + px(16f) + iconSize, barY + (barHeight + iconSize) / 2f)
-        val closeHit = px(CLOSE_HIT)
-        val closeRight = barX + barWidth - px(CLOSE_GAP)
-        val close = RectF(closeRight - closeHit, barY + (barHeight - closeHit) / 2f,
-            closeRight, barY + (barHeight + closeHit) / 2f)
-        var left = icon.right + px(ICON_GAP)
-        var prefix: RectF? = null
-        var divider: RectF? = null
-        val text = config.optString("prefix")
-        if (text.isNotBlank()) {
-            val column = px(advance(text, PREFIX_SIZE) + PREFIX_GAP * 2)
-            prefix = RectF(left, barY, left + column, barY + barHeight)
-            val dividerX = left + column + px(DIVIDER_GAP)
-            val dividerHeight = px(DIVIDER_HEIGHT)
-            divider = RectF(dividerX, barY + (barHeight - dividerHeight) / 2f, dividerX + 1f,
-                barY + (barHeight + dividerHeight) / 2f)
-            left = dividerX + 1f + px(DIVIDER_GAP)
-        }
-        val viewport = RectF(left, barY, (close.left - px(CLOSE_GAP)).coerceAtLeast(left + 1f),
-            barY + barHeight)
-        return Bar(barX, barY, barWidth, barHeight, icon, prefix, divider, viewport, close,
-            px(RADIUS), px(ICON_RADIUS), px(PREFIX_SIZE), px(TEXT_SIZE), px(FADE), px(GAP),
-            px(CLOSE), pad)
-    }
-
-    /** 与 Windows 的 offset() 完全相同：视口宽度 + 文本宽度 + 间隔为一个周期。 */
-    fun offset(elapsed: Float, speed: Float, viewportWidth: Float, textWidth: Float, gap: Float): Pair<Float, Int> {
-        val time = elapsed.coerceAtLeast(0f)
-        val period = (viewportWidth + textWidth + gap).coerceAtLeast(1f)
-        val travel = time * speed
-        return (viewportWidth - travel % period) to (travel / period).toInt()
+        val height = box.height.toFloat()
+        val width = box.width.toFloat()
+        val font = fontSize(area)
+        val iconSize = px(ICON, area)
+        val inset = px(ICON_INSET, area)
+        val icon = RectF(inset, (height - iconSize) / 2f, inset + iconSize,
+            (height + iconSize) / 2f)
+        val left = icon.right + px(ICON_GAP, area)
+        return Band(0f, 0f, width, height, icon,
+            RectF(left, 0f, maxOf(left + 1f, width - px(RIGHT_INSET, area)), height), font,
+            maxOf(1f, STROKE * scale(area)), font * GAP_EM, speed(area))
     }
 
     fun gradientColor(fraction: Float): Int {
@@ -152,43 +116,47 @@ internal object SeewoBar {
         )
     }
 
-    /** 视口两端的淡出条；Windows 端按 8 段横向渐变绘制同样的效果。 */
-    fun fadeRects(viewport: RectF, fade: Float): List<Pair<RectF, Boolean>> {
-        if (fade <= 0f || viewport.width() <= 2 * fade) return emptyList()
-        return listOf(
-            RectF(viewport.left, viewport.top, viewport.left + fade, viewport.bottom) to true,
-            RectF(viewport.right - fade, viewport.top, viewport.right, viewport.bottom) to false
-        )
+    /** 短消息不动，长消息从右侧进场；返回值是每条副本的偏移与已完成圈数。 */
+    fun positions(elapsed: Float, speedPx: Float, viewportWidth: Float, runWidth: Float,
+                  gap: Float): Pair<List<Float>, Int> {
+        if (runWidth <= viewportWidth) return listOf(0f) to 0
+        val time = elapsed.coerceAtLeast(0f)
+        val period = (viewportWidth + runWidth + gap).coerceAtLeast(1f)
+        val travel = time * speedPx
+        val x = viewportWidth - travel % period
+        val cycles = (travel / period).toInt()
+        val copies = mutableListOf(x)
+        if (x + runWidth < viewportWidth) copies.add(x + period)
+        if (x > 0) copies.add(x - period)
+        return copies.filter { it <= viewportWidth && it + runWidth > 0 } to cycles
     }
 
-    /** 喇叭图标：锥形 + 两道声波弧，坐标与 Windows 的 glyph() 相同。 */
-    fun speaker(size: Float): Pair<FloatArray, List<Triple<Float, Float, Float>>> {
-        val cone = floatArrayOf(
-            0.16f, 0.36f, 0.36f, 0.36f, 0.56f, 0.14f, 0.56f, 0.86f, 0.36f, 0.64f, 0.16f, 0.64f
+    /** 描边喇叭：左侧小方箱 + 锥形 + 两道声波弧，坐标与 Windows 的 glyph() 相同。 */
+    data class Glyph(val body: FloatArray, val arcs: List<FloatArray>)
+
+    fun glyph(size: Float): Glyph {
+        val points = floatArrayOf(
+            0.05f, 0.32f, 0.22f, 0.32f, 0.53f, 0.03f, 0.53f, 0.97f,
+            0.22f, 0.68f, 0.05f, 0.68f, 0.05f, 0.32f
         )
-        for (index in cone.indices) cone[index] *= size
-        val centreX = size * 0.56f
-        val centreY = size * 0.5f
-        val arcs = listOf(0.16f, 0.28f).map { Triple(centreX, centreY, size * it) }
-        return cone to arcs
+        for (index in points.indices) points[index] *= size
+        val arcs = listOf(
+            floatArrayOf(0.56f * size, 0.50f * size, 0.17f * size, -52f, 104f),
+            floatArrayOf(0.58f * size, 0.50f * size, 0.36f * size, -50f, 100f)
+        )
+        return Glyph(points, arcs)
     }
 
-    fun shadowRects(bar: Bar): List<Triple<RectF, Float, Int>> {
-        val items = ArrayList<Triple<RectF, Float, Int>>()
-        for (step in SHADOW_STEPS downTo 1) {
-            val grow = (bar.pad * step / SHADOW_STEPS)
-            val alpha = (SHADOW_ALPHA * Math.pow(1.0 - (step - 1).toDouble() / SHADOW_STEPS, 1.6) /
-                SHADOW_STEPS * 3).toInt().coerceIn(0, SHADOW_ALPHA)
-            items.add(Triple(
-                RectF(bar.x - grow, bar.y - grow + maxOf(1f, bar.pad / 3), bar.x + bar.width + grow,
-                    bar.y + bar.height + grow), alpha.toFloat(), maxOf(2f, bar.pad * step / SHADOW_STEPS).roundToInt()))
-        }
-        return items
-    }
+    fun preset(prefix: String = DEFAULT_PREFIX): JSONObject = JSONObject()
+        .put("style", STYLE).put("mode", "ticker").put("motion", "left").put("position", "top")
+        .put("shape", "rectangle").put("bold", false).put("font", "Microsoft YaHei UI")
+        .put("background", TOP_COLOR).put("foreground", TEXT_COLOR).put("accent", ACCENT)
+        .put("width", 100).put("font_size", 18).put("speed", 150).put("opacity", 100)
+        .put("placement", "preset").put("rect", JSONObject.NULL).put("prefix", prefix)
 }
 
 internal fun announcementSeewoDefaults() = announcementDefaults().apply {
-    val preset = SeewoBar.preset(optString("prefix").ifBlank { "消息通知" })
+    val preset = SeewoBar.preset(optString("prefix").ifBlank { SeewoBar.DEFAULT_PREFIX })
     val keys = preset.keys()
     while (keys.hasNext()) {
         val key = keys.next()
