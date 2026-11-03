@@ -4,6 +4,7 @@ Hidden/system flags are informational. No concealment, recursion, DACL or
 timestamp changes. A held native handle prevents rename/replacement races.
 """
 import ctypes
+import ntpath
 import os
 from pathlib import Path
 import stat
@@ -96,7 +97,10 @@ def properties(q, backend=NativeProperties, protected=None):
         raise ValueError("无效的属性操作")
     if any(key in q for key in ("hidden", "system", "attributes", "mask")):
         raise ValueError("隐藏和系统属性仅可查看，不能通过此接口修改")
-    path = checked_path(q.get("path"))
+    value=q.get("path")
+    if isinstance(value,str) and (":" in ntpath.splitdrive(value)[1] or value.startswith(("\\\\","\\??\\"))):
+        raise ValueError("请选择普通本地文件或文件夹，不支持数据流、网络或设备路径")
+    path = checked_path(value)
     before = snapshot(path)
     if before.st_nlink > 1 and not stat.S_ISDIR(before.st_mode):
         raise ValueError("不处理具有多个硬链接的文件")

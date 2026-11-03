@@ -66,6 +66,11 @@ class PropertiesTest(unittest.TestCase):
         for value in (1,"true",None):
             with self.subTest(value=value),self.assertRaises(ValueError):
                 properties(dict(action="readonly",path=str(self.file),file_id=file_token(snapshot(self.file)),readonly=value,expected_attributes=32),Flags(),protected=[])
+    def test_stream_network_and_device_paths_are_rejected_before_io(self):
+        for path in (r"C:\Windows:stream",r"C:\data\file.txt:Zone.Identifier",r"\\server\share\file.txt",r"\\.\PhysicalDrive0"):
+            with self.subTest(path=path),mock.patch("file_properties.checked_path") as inspect:
+                with self.assertRaises(ValueError):properties(dict(action="properties",path=path),Flags(),protected=[])
+                inspect.assert_not_called()
     def test_folder_readonly_is_not_reported_as_access_denial(self):
         record=properties(dict(action="properties",path=str(self.folder)),Flags(16),protected=[])
         self.assertTrue(record["dir"]);self.assertIn("不限制子项读写",record["notice"])
