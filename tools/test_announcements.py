@@ -100,6 +100,54 @@ class OwnershipTest(unittest.TestCase):
 
 @unittest.skipUnless(os.name=='nt','Windows GDI+ and desktop message pump')
 class NativeTest(unittest.TestCase):
+    def test_seewo_round_limit_and_unlimited_playback_are_enforced_by_windows(self):
+        # Keep the real native renderer/message pump; a narrow test work area
+        # lets complete rounds finish quickly without changing production speed.
+        script=("import sys;sys.path.insert(0,sys.argv[1]);import announcements as a;"
+                "a.primary_work_area=lambda:dict(x=0,y=0,width=320,height=1040,dpi=96);"
+                "raise SystemExit(a.worker_main())")
+        for repeats in (2,0):
+            with self.subTest(repeats=repeats):
+                p=subprocess.Popen([sys.executable,'-I','-X','utf8','-c',script,
+                                    str(Path(__file__).resolve().parents[1]/'windows')],
+                                   stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                                   text=True,encoding='utf-8',creationflags=0x08000000)
+                incoming=queue.Queue()
+                def reader(stream=p.stdout,output=incoming):
+                    for line in stream:output.put(json.loads(line))
+                thread=threading.Thread(target=reader,daemon=True);thread.start()
+                def wait_for(predicate):
+                    deadline=time.monotonic()+15
+                    while time.monotonic()<deadline:
+                        try:report=incoming.get(timeout=.2)
+                        except queue.Empty:continue
+                        if report.get('status')=='failed':self.fail(report.get('error'))
+                        if predicate(report):return report
+                    self.fail('Native announcement did not reach the expected round/state')
+                try:
+                    p.stdin.write(json.dumps(dict(style='seewo',prefix='',text='测试',
+                                                  repeats=repeats,duration=0))+'\n');p.stdin.flush()
+                    wait_for(lambda r:r.get('status')=='playing')
+                    if repeats:
+                        ended=wait_for(lambda r:r.get('status')=='completed')
+                        self.assertEqual('repeats',ended.get('reason'))
+                        self.assertEqual(repeats,ended.get('cycles'))
+                    else:
+                        wait_for(lambda r:r.get('status')=='playing' and r.get('cycles',0)>=2)
+                        self.assertIsNone(p.poll())
+                        p.stdin.write('{"action":"pause"}\n');p.stdin.flush()
+                        paused=wait_for(lambda r:r.get('status')=='paused')
+                        again=wait_for(lambda r:r.get('status')=='paused')
+                        self.assertEqual(paused['cycles'],again['cycles'])
+                        self.assertEqual(paused['elapsed'],again['elapsed'])
+                        p.stdin.close();p.stdin=None
+                        ended=wait_for(lambda r:r.get('status')=='cancelled')
+                        self.assertEqual('eof',ended.get('reason'))
+                    self.assertEqual(0,p.wait(5),p.stderr.read())
+                finally:
+                    if p.poll() is None:p.kill();p.wait(5)
+                    if p.stdin:p.stdin.close()
+                    thread.join(2);p.stdout.close();p.stderr.close()
     def test_real_surface_renders_chinese_text_and_custom_color(self):
         from notice_window import Surface
         config=validate(dict(text='测试消息 Chinese 123',motion='static',shape='rounded',background='#123456'))

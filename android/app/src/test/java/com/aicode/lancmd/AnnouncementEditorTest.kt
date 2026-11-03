@@ -4,6 +4,7 @@ import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.MotionEvent
 import android.view.View
@@ -70,6 +71,100 @@ class AnnouncementEditorTest {
         shadowOf(Looper.getMainLooper()).idleFor(1200,java.util.concurrent.TimeUnit.MILLISECONDS)
         val bitmap=Bitmap.createBitmap(411,260,Bitmap.Config.ARGB_8888);v.draw(Canvas(bitmap));bitmap.recycle()
         assertEquals("completed",v.playback.state)
+    }
+    private fun seewo()=announcementSeewoDefaults().put("text","第一条公告")
+        .put("messages",JSONArray().put("第一条公告").put("第二条公告"))
+    private fun drawBalanced(view:AnnouncementPreview) {
+        val bitmap=Bitmap.createBitmap(411,260,Bitmap.Config.ARGB_8888)
+        try {
+            val canvas=Canvas(bitmap)
+            val count=canvas.saveCount
+            view.draw(canvas)
+            assertEquals("预览不得恢复调用者的画布状态",count,canvas.saveCount)
+        }finally{bitmap.recycle()}
+    }
+    @Test fun seewoCanvasRestoresOnlyItsOwnFramesWhenStoppedPlayingAndPaused(){
+        val view=AnnouncementPreview(ctx);view.config=seewo();size(view)
+        repeat(3){drawBalanced(view)}
+        view.playPreview();repeat(3){drawBalanced(view)}
+        view.pausePreview();drawBalanced(view)
+        assertEquals("paused",view.playback.state)
+        view.stopPreview();drawBalanced(view)
+        // The classic renderer shares the Canvas but retains its own save/layer stack.
+        view.config=custom();drawBalanced(view)
+    }
+    @Test fun savedSeewoDraftOpensExpandsAndRecreatesWithoutCanvasUnderflow(){
+        ctx.getSharedPreferences("announcements",0).edit().putString("draft",seewo().toString()).commit()
+        val controller=Robolectric.buildActivity(AnnouncementsActivity::class.java).setup()
+        try {
+            var page=controller.get()
+            size(page.preview);drawBalanced(page.preview)
+            page.preview.playback.play(SystemClock.elapsedRealtime()-3500)
+            page.preview.pausePreview()
+            page.expand(true);compose.waitForIdle()
+            size(page.window.decorView,411,891)
+            val image=Bitmap.createBitmap(411,891,Bitmap.Config.ARGB_8888)
+            try {
+                val canvas=Canvas(image);val count=canvas.saveCount
+                page.window.decorView.draw(canvas);assertEquals(count,canvas.saveCount)
+                File("build/ui-previews/announcements-seewo-fixed.png").apply{parentFile!!.mkdirs()}
+                    .outputStream().use{image.compress(Bitmap.CompressFormat.PNG,100,it)}
+            }finally{image.recycle()}
+            controller.recreate();page=controller.get()
+            assertTrue(page.expanded);assertEquals("seewo",page.config.getString("style"))
+            assertEquals(2,SeewoBar.messages(page.config).size)
+            size(page.preview);drawBalanced(page.preview)
+            page.expand(false);compose.waitForIdle();size(page.preview);drawBalanced(page.preview)
+        }finally{controller.pause().stop().destroy()}
+    }
+    @Test fun seewoInfinitePlaybackAndCountedRoundsUseTheSameMessageSchedule(){
+        val view=AnnouncementPreview(ctx);size(view)
+        val infinite=seewo().put("repeats",0).put("duration",0)
+        view.config=infinite
+        view.playback.play(SystemClock.elapsedRealtime()-12*60*60*1000L)
+        drawBalanced(view);assertEquals("playing",view.playback.state)
+        val limited=JSONObject(infinite.toString()).put("repeats",2)
+        view.config=limited
+        assertEquals("stopped",view.playback.state)
+        val band=SeewoBar.layout(view.area,limited)
+        val round=SeewoBar.durations(limited,band.font,band.speed,band.viewport.width()).sum()
+        view.playback.play(SystemClock.elapsedRealtime()-((round*2-.1f)*1000).toLong())
+        drawBalanced(view);assertEquals("playing",view.playback.state)
+        view.stopPreview()
+        view.playback.play(SystemClock.elapsedRealtime()-((round*2+.1f)*1000).toLong())
+        drawBalanced(view);assertEquals("completed",view.playback.state)
+    }
+    @Test fun loopSelectionClearsOldTimeCapsAndTransmitsIntegersWithoutChangingStyle(){
+        Stub().use {stub->
+            stub.install();val controller=Robolectric.buildActivity(AnnouncementsActivity::class.java).setup();val page=controller.get()
+            try {
+                waitFor{page.preview.area.width==1920}
+                page.applySeewo(true);page.updateMessages("第一条公告\n第二条公告")
+                page.change("duration",30)
+                val appearance=JSONObject(page.config.toString()).apply{remove("duration");remove("repeats")}.toString()
+                page.choosePlaybackMode(0)
+                assertEquals(0,page.config.getInt("repeats"));assertEquals(0,page.config.getInt("duration"))
+                assertFalse(stub.requests.any{it.optString("action")=="show"})
+                page.confirmSend();compose.onNodeWithText("确认").performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{!page.busy && stub.requests.count{it.optString("action")=="show"}==1}
+                val forever=stub.requests.single{it.optString("action")=="show"}.getJSONObject("config")
+                assertEquals(0,forever.getInt("repeats"));assertEquals(0,forever.getInt("duration"))
+                page.choosePlaybackMode(1);page.change("repeats","3")
+                page.confirmSend();compose.onNodeWithText("确认").performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{!page.busy && stub.requests.count{it.optString("action")=="show"}==2}
+                val counted=stub.requests.last{it.optString("action")=="show"}.getJSONObject("config")
+                assertTrue(counted.get("repeats") is Int);assertEquals(3,counted.getInt("repeats"));assertEquals(0,counted.getInt("duration"))
+                for(value in listOf("","0","101")) {
+                    page.change("repeats",value);page.sendNow();assertTrue(page.note.contains("1–100"))
+                }
+                assertEquals(2,stub.requests.count{it.optString("action")=="show"})
+                page.choosePlaybackMode(0)
+                assertEquals(appearance,JSONObject(page.config.toString()).apply{remove("duration");remove("repeats")}.toString())
+                controller.recreate();assertEquals(0,controller.get().playbackMode)
+                assertEquals(0,controller.get().config.getInt("repeats"));assertEquals(0,controller.get().config.getInt("duration"))
+                assertEquals(2,stub.requests.count{it.optString("action")=="show"})
+            }finally{controller.pause().stop().destroy()}
+        }
     }
     @Test fun draggingAndCornerResizingChangeDraftButCanvasZoomDoesNotChangeItsGeometry(){
         val v=AnnouncementPreview(ctx);v.config=custom();v.area=AnnouncementGeometry.Area(1920,1040,144)

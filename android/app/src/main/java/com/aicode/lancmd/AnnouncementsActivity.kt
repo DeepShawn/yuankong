@@ -29,6 +29,9 @@ class AnnouncementsActivity:MiuixActivity() {
     private var confirmation by mutableStateOf(false)
     private var poll:Job?=null
     private var tab by mutableIntStateOf(0)
+    // 0 = unlimited, 1 = complete rounds, 2 = elapsed time. Keep the selection
+    // while a numeric field is temporarily empty so it does not turn unlimited.
+    internal var playbackMode by mutableIntStateOf(1)
     internal var expanded by mutableStateOf(false)
     private var previewState by mutableStateOf("stopped")
     private var previewZoom by mutableIntStateOf(1)
@@ -47,6 +50,8 @@ class AnnouncementsActivity:MiuixActivity() {
         overrideDelay=state?.getString("delay") ?: prefs.getString("delay","").orEmpty()
         expanded=state?.getBoolean("expanded")?:false
         tab=state?.getInt("tab")?.coerceIn(0,3)?:0
+        playbackMode=(if(state?.containsKey("playback_mode")==true)state.getInt("playback_mode")
+            else prefs.getInt("playback_mode",modeFor(config))).coerceIn(0,2)
         resize=expanded && state?.getBoolean("resize")==true
         preview=AnnouncementPreview(this).apply{
             config=this@AnnouncementsActivity.config
@@ -69,6 +74,22 @@ class AnnouncementsActivity:MiuixActivity() {
         }
     }
     internal fun change(key:String,value:Any){config=JSONObject(config.toString()).put(key,value);preview.config=config}
+
+    private fun modeFor(value:JSONObject)=when {
+        value.optInt("repeats")>0->1
+        value.optInt("duration")>0->2
+        else->0
+    }
+    internal fun choosePlaybackMode(mode:Int) {
+        require(mode in 0..2)
+        val next=JSONObject(config.toString())
+        when(mode) {
+            0->next.put("repeats",0).put("duration",0)
+            1->next.put("repeats",config.optInt("repeats").takeIf{it in 1..100}?:5).put("duration",0)
+            2->next.put("duration",config.optInt("duration").takeIf{it in 1..3600}?:30).put("repeats",0)
+        }
+        playbackMode=mode;config=next;preview.config=config
+    }
 
     /** 希沃样式的编辑框：一行一条消息。 */
     internal fun seewoText():String {
@@ -111,6 +132,7 @@ class AnnouncementsActivity:MiuixActivity() {
         config=announcementDefaults().put("text",text)
         if(index==1)config.put("mode","popup").put("motion","static").put("position","center").put("shape","rounded").put("background","#14344E").put("duration",30).put("repeats",0)
         if(index==2)config.put("mode","sticky").put("motion","static").put("position","bottom").put("shape","rounded").put("background","#FFF8E1").put("foreground","#2A303B").put("accent","#B56C16").put("repeats",0)
+        playbackMode=modeFor(config)
         preview.config=config
     }
     @Composable private fun Screen(){
@@ -126,7 +148,7 @@ class AnnouncementsActivity:MiuixActivity() {
                 Action("展开编辑",modifier=Modifier.weight(1f)){expand(true)}
             }
             Note("按住消息移动；展开可四角缩放。$areaLabel。字体渲染以 Windows 为准。")
-            job?.let{InfoItem("电脑公告状态",stateLabel(it)+" · 已播放 ${it.optInt("cycles")} 次")}
+            job?.let{InfoItem("电脑公告状态",stateLabel(it)+" · 已播放 ${it.optInt("cycles")} 轮")}
             ActionRow {
                 Action("发送／更新",enabled=supported && !busy,primary=true,modifier=Modifier.weight(1f)){confirmSend()}
                 Action(if(job?.optString("status")=="paused")"继续" else "暂停",enabled=!busy && job?.optString("status") in listOf("playing","paused"),modifier=Modifier.weight(1f)){
@@ -192,9 +214,15 @@ class AnnouncementsActivity:MiuixActivity() {
                                 change("motion",listOf("left","right","up","down","bounce","static","fade")[it])}
                             numeric("速度（20–400 像素／秒，按系统缩放）","speed")
                         } else Note("希沃样式固定为匀速向左滚动（2.4 个字号宽／秒，1080p 约每秒 130 像素），每条滚完再换下一条。")
-                        numeric("播放次数（0 不限，最多 100）","repeats");numeric("显示秒数（0 不限，最多 3600）","duration")
+                        ChoiceField(listOf("一直循环","循环 N 次","按时长结束"),"循环方式",playbackMode){choosePlaybackMode(it)}
+                        when(playbackMode) {
+                            0->Note("一直循环：不限次数和时长，可随时暂停或撤回。")
+                            1->numeric("循环次数 N（1–100）","repeats")
+                            2->numeric("显示秒数（1–3600）","duration")
+                        }
+                        if(playbackMode==1 && config.optInt("duration")>0)Note("此旧草稿另有 ${config.optInt("duration")} 秒上限，先到者结束；重新选择循环方式可清除此上限。")
                         Field("本条延迟秒数（留空跟随全局，0 立即）",overrideDelay,{overrideDelay=it.filter(Char::isDigit).take(5)})
-                        Note("次数和时长先到者结束；静止／淡入淡出每 5 秒算一次。暂停不计播放时长。手机断线后继续，接收端退出会结束公告；修改样式后点发送／更新才应用到电脑。")
+                        Note("单条完整播放算一轮；多条全部播放完算一轮。静止／淡入淡出每 5 秒算一轮。暂停不计播放时长。手机断线后继续，接收端退出会结束公告；设置确认发送／更新后才应用到电脑。")
                     }
                 }
             }
@@ -285,6 +313,10 @@ class AnnouncementsActivity:MiuixActivity() {
         })
         val ranges=mapOf("font_size" to 16..96,"width" to 30..100,"opacity" to 30..100,"speed" to 20..400,"repeats" to 0..100,"duration" to 0..3600)
         val normalized=params.getJSONObject("config")
+        if((playbackMode==1 && normalized.optInt("repeats",-1) !in 1..100) ||
+            (playbackMode==2 && normalized.optInt("duration",-1) !in 1..3600)) {
+            status(if(playbackMode==1)"循环次数 N 须为 1–100 的整数" else "显示秒数须为 1–3600 的整数",true);return
+        }
         if(ranges.any{(key,range)->normalized.optInt(key,-1) !in range} || listOf("background","foreground","accent").any{!Regex("#[0-9a-fA-F]{6}").matches(config.optString(it))}) {
             status("请检查字号、颜色、速度、次数和时长的范围",true);return
         }
@@ -304,6 +336,6 @@ class AnnouncementsActivity:MiuixActivity() {
     private suspend fun refresh(){val result=pinnedCall(origin,"announcements");job=result.optJSONObject("job");if(result.optBoolean("occupied"))status("其他手机正在显示公告，可在电脑端关闭",true)}
     private fun startPoll(){poll?.cancel();if(supported)poll=task{while(true){delay(1000);if(!busy)refresh()}}}
     override fun onStart(){super.onStart();startPoll()}
-    override fun onStop(){poll?.cancel();preview.pausePreview();prefs.edit().putString("draft",config.toString()).putString("delay",overrideDelay).apply();super.onStop()}
-    override fun onSaveInstanceState(out:Bundle){out.putString("config",config.toString());out.putString("delay",overrideDelay);out.putBoolean("expanded",expanded);out.putInt("tab",tab);out.putBoolean("resize",resize);super.onSaveInstanceState(out)}
+    override fun onStop(){poll?.cancel();preview.pausePreview();prefs.edit().putString("draft",config.toString()).putString("delay",overrideDelay).putInt("playback_mode",playbackMode).apply();super.onStop()}
+    override fun onSaveInstanceState(out:Bundle){out.putString("config",config.toString());out.putString("delay",overrideDelay);out.putBoolean("expanded",expanded);out.putInt("tab",tab);out.putBoolean("resize",resize);out.putInt("playback_mode",playbackMode);super.onSaveInstanceState(out)}
 }

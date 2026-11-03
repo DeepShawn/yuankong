@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 
-from local_maintenance import DocumentHandle
+from file_time import DocumentHandle
 
 MAX_PATHS = 100
 MAX_FILES = 20000

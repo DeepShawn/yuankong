@@ -20,7 +20,7 @@ internal fun announcementDefaults()=JSONObject().put("text","").put("prefix","�
 /** Local work-area canvas. Playing and editing never send RPCs. */
 class AnnouncementPreview(context:Context):View(context) {
     var config=announcementDefaults()
-        set(value){val reset=listOf("text","motion","mode").any{field.optString(it)!=value.optString(it)}
+        set(value){val reset=listOf("text","motion","mode","style","messages","repeats","duration").any{field.optString(it)!=value.optString(it)}
             field=JSONObject(value.toString());if(reset)stopPreview();invalidate()}
     internal var area=AnnouncementGeometry.Area()
         set(value){field=value;cancelGesture();invalidate()}
@@ -122,14 +122,14 @@ class AnnouncementPreview(context:Context):View(context) {
     }
     /**
      * “希沃样式”绘制，顺序与 Windows 的 SeewoSurface 相同：
-     * 通栏竖向渐变 → 描边喇叭 → 前缀（蓝）＋正文（白）同一行滚动。
+     * 通栏竖向渐变 → 描边喇叭 → 固定蓝色前缀 → 单独滚动的白色正文。
      * 没有圆角、阴影、徽标底框、分隔线与关闭按钮。
      */
     private fun drawSeewo(canvas:Canvas,box:RectF,scale:Float) {
         val band=SeewoBar.layout(area,config)
         val elapsed=playback.elapsed(SystemClock.elapsedRealtime())/1000f
-        val paused=playback.state in listOf("stopped","completed")
-        canvas.save();canvas.translate(box.left,box.top);canvas.scale(scale,scale)
+        val checkpoint=canvas.save()
+        canvas.translate(box.left,box.top);canvas.scale(scale,scale)
         val paint=Paint(Paint.ANTI_ALIAS_FLAG)
         paint.shader=LinearGradient(0f,0f,0f,band.height,Color.parseColor(SeewoBar.TOP_COLOR),
             Color.parseColor(SeewoBar.BOTTOM_COLOR),Shader.TileMode.CLAMP)
@@ -169,7 +169,7 @@ class AnnouncementPreview(context:Context):View(context) {
         val durations=SeewoBar.durations(config,band.font,band.speed,band.viewport.width())
         val (index,local,rounds)=SeewoBar.locate(elapsed,durations)
         val message=items.getOrElse(index){""}
-        if(!paused&&((config.optInt("duration")>0&&elapsed>=config.optInt("duration"))||
+        if(playback.state=="playing"&&((config.optInt("duration")>0&&elapsed>=config.optInt("duration"))||
                 (config.optInt("repeats")>0&&rounds>=config.optInt("repeats")))){
             playback.finish(SystemClock.elapsedRealtime());onPlaybackState?.invoke(playback.state)
         }
@@ -178,9 +178,7 @@ class AnnouncementPreview(context:Context):View(context) {
         canvas.drawText(message,band.viewport.left+SeewoBar.offset(local,band.speed,band.viewport.width()),
             baseline,textPaint)
         canvas.restore()
-        canvas.restore()
-        canvas.restore()
-        canvas.restore()
+        canvas.restoreToCount(checkpoint)
 
         paint.style=Paint.Style.STROKE;paint.strokeWidth=1.5f*unit;paint.color=0xff3ee0b5.toInt()
         canvas.drawRect(box,paint);paint.style=Paint.Style.FILL
