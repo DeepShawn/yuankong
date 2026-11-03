@@ -84,6 +84,8 @@ class SeewoSurface:
         self.runs = [self.measure(self.prefix + item)[0] for item in self.items] or [1.0]
         self.durations = seewo.durations(config, self.spec["font"], self.spec["speed"],
                                          self.spec["gap"])
+        sample = (self.prefix + self.items[0]) if self.items else (self.prefix or " ")
+        self.text_height = self.measure(sample)[1]
         self.index = -1
 
     @property

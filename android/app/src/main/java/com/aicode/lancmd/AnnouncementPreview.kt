@@ -141,9 +141,9 @@ class AnnouncementPreview(context:Context):View(context) {
         paint.color=Color.parseColor(SeewoBar.ACCENT)
         val path=Path()
         path.moveTo(band.icon.left+glyph.body[0],band.icon.top+glyph.body[1])
-        var index=2
-        while(index<glyph.body.size){
-            path.lineTo(band.icon.left+glyph.body[index],band.icon.top+glyph.body[index+1]);index+=2
+        var step=2
+        while(step<glyph.body.size){
+            path.lineTo(band.icon.left+glyph.body[step],band.icon.top+glyph.body[step+1]);step+=2
         }
         canvas.drawPath(path,paint)
         for(arc in glyph.arcs){
