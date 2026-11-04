@@ -39,6 +39,9 @@ internal object SeewoBar {
     const val STROKE = 2f / 360f
 
     const val SPEED_EM = 2.4f
+    const val RATE_DEFAULT = 100
+    const val RATE_MIN = 25
+    const val RATE_MAX = 300
     const val GAP_EM = 0.6f      // 前缀与正文轨道之间的小间隙
 
     const val MIN_BAR = 36
@@ -75,7 +78,8 @@ internal object SeewoBar {
     fun fontSize(area: AnnouncementGeometry.Area) =
         Math.max(MIN_FONT, (FONT * scale(area)).roundToInt()).toFloat()
 
-    fun speed(area: AnnouncementGeometry.Area) = fontSize(area) * SPEED_EM
+    fun speed(area: AnnouncementGeometry.Area, config:JSONObject?=null) =
+        fontSize(area) * SPEED_EM * (config?.optInt("scroll_rate",RATE_DEFAULT)?:RATE_DEFAULT).coerceIn(RATE_MIN,RATE_MAX) / RATE_DEFAULT
 
     fun advance(text: String, size: Float): Float {
         var total = 0f
@@ -121,7 +125,7 @@ internal object SeewoBar {
         }
         val right = maxOf(left + 1f, width - px(RIGHT_INSET, area))
         return Band(0f, 0f, width, height, icon, prefix, RectF(left, 0f, right, height), font,
-            maxOf(1f, STROKE * scale(area)), speed(area))
+            maxOf(1f, STROKE * scale(area)), speed(area,config))
     }
 
     fun gradientColor(fraction: Float): Int {
@@ -201,7 +205,7 @@ internal object SeewoBar {
         .put("style", STYLE).put("mode", "ticker").put("motion", "left").put("position", "top")
         .put("shape", "rectangle").put("bold", false).put("font", "Microsoft YaHei UI")
         .put("background", TOP_COLOR).put("foreground", TEXT_COLOR).put("accent", ACCENT)
-        .put("width", 100).put("font_size", 18).put("speed", 150).put("opacity", 100)
+        .put("width", 100).put("font_size", 18).put("speed", 150).put("opacity", 100).put("scroll_rate",RATE_DEFAULT)
         .put("placement", "preset").put("rect", JSONObject.NULL).put("prefix", prefix)
         .put("messages", org.json.JSONArray())
 }

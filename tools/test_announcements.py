@@ -97,6 +97,17 @@ class OwnershipTest(unittest.TestCase):
         self.backend.run=lambda *args:(_ for _ in ()).throw(OSError('render failed'))
         ident=self.call(action='show',config={'text':'one'})['job']['id'];self.wait(lambda:self.manager.jobs[ident]['done'].is_set())
         self.assertEqual('failed',self.call()['job']['status']);self.assertIn('render failed',self.call()['job']['error'])
+    def test_confirmed_auto_withdrawal_is_reported_and_releases_the_slot(self):
+        def finish(config,report,commands,cancel):
+            report(dict(status='completed',reason='repeats',cycles=config['repeats'],withdrawn=True))
+        self.backend.run=finish
+        ident=self.call(action='show',config=dict(text='completed',repeats=2))['job']['id']
+        self.wait(lambda:self.manager.jobs[ident]['done'].is_set())
+        result=self.call()['job']
+        self.assertTrue(result['withdrawn']);self.assertEqual('completed',result['status']);self.assertEqual(2,result['cycles'])
+        other=SimpleNamespace(client_id='another-phone')
+        another=self.manager.request(dict(action='show',config=dict(text='next notice')),other,Error)
+        self.assertNotEqual(ident,another['job']['id'])
 
 @unittest.skipUnless(os.name=='nt','Windows GDI+ and desktop message pump')
 class NativeTest(unittest.TestCase):
@@ -126,8 +137,15 @@ class NativeTest(unittest.TestCase):
                     self.fail('Native announcement did not reach the expected round/state')
                 try:
                     p.stdin.write(json.dumps(dict(style='seewo',prefix='',text='测试',
-                                                  repeats=repeats,duration=0))+'\n');p.stdin.flush()
+                                                  repeats=repeats,duration=0,scroll_rate=200))+'\n');p.stdin.flush()
                     wait_for(lambda r:r.get('status')=='playing')
+                    from ctypes import wintypes as w
+                    user=ctypes.WinDLL('user32',use_last_error=True)
+                    user.FindWindowW.argtypes=[w.LPCWSTR,w.LPCWSTR];user.FindWindowW.restype=w.HWND
+                    user.IsWindow.argtypes=[w.HWND];user.IsWindow.restype=w.BOOL
+                    user.GetWindowThreadProcessId.argtypes=[w.HWND,ctypes.POINTER(w.DWORD)]
+                    handle=user.FindWindowW(None,'桌面公告');self.assertTrue(handle)
+                    owner=w.DWORD();user.GetWindowThreadProcessId(handle,ctypes.byref(owner));self.assertEqual(p.pid,owner.value)
                     if repeats:
                         ended=wait_for(lambda r:r.get('status')=='completed')
                         self.assertEqual('repeats',ended.get('reason'))
@@ -143,7 +161,9 @@ class NativeTest(unittest.TestCase):
                         p.stdin.close();p.stdin=None
                         ended=wait_for(lambda r:r.get('status')=='cancelled')
                         self.assertEqual('eof',ended.get('reason'))
+                    self.assertTrue(ended.get('withdrawn'))
                     self.assertEqual(0,p.wait(5),p.stderr.read())
+                    self.assertFalse(user.IsWindow(handle),'The completed notice must actually disappear')
                 finally:
                     if p.poll() is None:p.kill();p.wait(5)
                     if p.stdin:p.stdin.close()

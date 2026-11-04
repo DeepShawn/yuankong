@@ -131,6 +131,7 @@ class NoticeWindow:
         spec={'RegisterClassExW':([c.POINTER(WindowClass)],w.WORD),'UnregisterClassW':([w.LPCWSTR,w.HINSTANCE],w.BOOL),
               'CreateWindowExW':([w.DWORD,w.LPCWSTR,w.LPCWSTR,w.DWORD,c.c_int,c.c_int,c.c_int,c.c_int,w.HWND,w.HMENU,w.HINSTANCE,c.c_void_p],w.HWND),
               'DefWindowProcW':([w.HWND,w.UINT,w.WPARAM,w.LPARAM],c.c_ssize_t),'DestroyWindow':([w.HWND],w.BOOL),
+              'IsWindow':([w.HWND],w.BOOL),
               'BeginPaint':([w.HWND,c.POINTER(Paint)],w.HDC),'EndPaint':([w.HWND,c.POINTER(Paint)],w.BOOL),
               'SetWindowPos':([w.HWND,w.HWND,c.c_int,c.c_int,c.c_int,c.c_int,w.UINT],w.BOOL),
               'SetLayeredWindowAttributes':([w.HWND,w.DWORD,w.BYTE,w.DWORD],w.BOOL),'InvalidateRect':([w.HWND,c.c_void_p,w.BOOL],w.BOOL),
@@ -228,7 +229,8 @@ class NoticeWindow:
                 user.TranslateMessage(c.byref(msg));user.DispatchMessageW(c.byref(msg))
             if result<0:raise c.WinError(c.get_last_error())
             if self.failure:raise OSError(self.failure)
-            self.emit(dict(status='completed' if self.reason in ('duration','repeats') else 'cancelled',reason=self.reason,elapsed=round(elapsed(),2),cycles=cycles))
+            if user.IsWindow(hwnd):raise OSError('公告窗口尚未确认撤下')
+            self.emit(dict(status='completed' if self.reason in ('duration','repeats') else 'cancelled',reason=self.reason,elapsed=round(elapsed(),2),cycles=cycles,withdrawn=True))
             return 0
         finally:
             if hwnd:user.DestroyWindow(hwnd)

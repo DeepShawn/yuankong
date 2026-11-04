@@ -25,7 +25,7 @@ FONTS=('Microsoft YaHei UI','Microsoft YaHei','SimHei','SimSun','Segoe UI')
 DEFAULT=dict(text='',prefix='消息提醒',mode='ticker',motion='left',position='top',shape='rectangle',
              background='#081424',foreground='#FFFFFF',accent='#56B5F1',font='Microsoft YaHei UI',
              font_size=28,bold=True,speed=90,opacity=92,width=100,duration=0,repeats=5,placement='preset',rect=None,
-             style='classic',messages=[])
+             style='classic',messages=[],scroll_rate=100)
 STYLES=('classic','seewo')
 
 
@@ -57,7 +57,7 @@ def validate(value):
     else:result['style']='classic'
     for key,choices in (('mode',MODES),('motion',MOTIONS),('position',('top','center','bottom')),('shape',('rectangle','rounded','pill')),('font',FONTS)):
         if result[key] not in choices:raise ValueError('公告样式选项无效：'+key)
-    for key,lower,upper in (('font_size',16,96),('speed',20,400),('opacity',30,100),('width',30,100),('duration',0,3600),('repeats',0,100)):
+    for key,lower,upper in (('font_size',16,96),('speed',20,400),('opacity',30,100),('width',30,100),('duration',0,3600),('repeats',0,100),('scroll_rate',seewo.RATE_MIN,seewo.RATE_MAX)):
         if type(result[key])is not int or not lower<=result[key]<=upper:raise ValueError('公告数值超出范围：'+key)
     if type(result['bold'])is not bool:raise ValueError('粗体设置无效')
     if result['placement'] not in ('preset','custom'):raise ValueError('公告布局无效')
@@ -234,7 +234,7 @@ class Announcements:
                     previous['cancel'].set()
                 if self.closed:raise ValueError('接收端正在退出')
                 job=dict(owner=owner,cancel=threading.Event(),done=threading.Event(),commands=queue.Queue(),
-                         data=dict(id=uuid.uuid4().hex,status='starting',config=config,created=time.time(),cycles=0,elapsed=0))
+                         data=dict(id=uuid.uuid4().hex,status='starting',config=config,created=time.time(),cycles=0,elapsed=0,withdrawn=False))
                 self.jobs[job['data']['id']]=job;self.current=job
                 for key,value in list(self.jobs.items()):
                     if len(self.jobs)<=20:break
@@ -248,7 +248,7 @@ class Announcements:
             if job['cancel'].is_set():job['data']['status']='cancelled';return
             def report(value):
                 with self.lock:
-                    for key in ('status','elapsed','cycles','error','reason','x','y','width','height'):
+                    for key in ('status','elapsed','cycles','error','reason','x','y','width','height','withdrawn'):
                         if key in value:job['data'][key]=value[key]
             self.backend.run(job['data']['config'],report,job['commands'],job['cancel'])
             with self.lock:
