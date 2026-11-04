@@ -1,2 +1,3 @@
 windows/start.bat text eol=crlf
 windows/WebsiteRules.cmd text eol=crlf
+windows/AdGuardSetup.cmd text eol=crlf

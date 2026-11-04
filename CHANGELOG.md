@@ -1,5 +1,13 @@
 # 更新记录
 
+## 3.18.8
+
+- 本机 AdGuardSetup.cmd 确认后，start.bat 三条启动路径可请求启动已安装且程序、命令均匹配的 AdGuard Home Windows 服务；默认关闭，不新增启动通知，不改变服务启动类型。
+- 保留本机状态、停止和取消联动入口；权限不足、配置变化、暂停或停止中不自动越过用户设置。失败只写本机启动日志，不改接收端退出码。
+- 安卓网络页增加独立 HTTPS 管理页入口，按电脑保存无凭据地址，拒绝 HTTP、地址内密码和查询参数；管理凭据与访问记录由浏览器直接交给 AdGuard Home，不经过 LanCmd 连接。
+- 不捆绑／下载／安装 AdGuard Home，不自动改 DNS、ICS、防火墙或开启记录；受控 DNS 和 HTTPS 需先在本机配置。设备与网站规则由外部管理页提供，限制见 docs/adguard-home.md。
+- 双端 3.18.8 / Android versionCode 70，保留原签名及现有样式。
+
 ## 3.18.7
 
 - Windows 包增加 `WebsiteRules.cmd`：本机管理员控制台输入域名列表，预览差异并输入 APPLY 确认后写入 hosts；撤销只移除本工具标记区。

@@ -6,6 +6,7 @@ on:
       - tools/test_*.py
       - tools/check_windows_package.py
       - tools/start_panel_harness.c
+      - tools/adguard_service_fixture.c
       - tools/record_mix_test.cpp
       - .github/workflows/windows-features.yml
       - .github/workflows/publish-release.yml
@@ -16,6 +17,7 @@ on:
       - tools/test_*.py
       - tools/check_windows_package.py
       - tools/start_panel_harness.c
+      - tools/adguard_service_fixture.c
       - tools/record_mix_test.cpp
       - .github/workflows/windows-features.yml
       - .github/workflows/publish-release.yml
@@ -64,6 +66,11 @@ jobs:
         run: python -m unittest discover -s tools -p test_readonly_diagnostics.py -v
       - name: Locally confirmed website rules, preservation and native DACL replacement
         run: python -m unittest discover -s tools -p test_hosts_rules.py -v
+      - name: Build temporary SCM service fixture
+        shell: cmd
+        run: cl /nologo /O2 /W3 /DUNICODE /D_UNICODE /Fe:windows\build-win\AdGuardHome.exe tools\adguard_service_fixture.c /link advapi32.lib
+      - name: Opt-in AdGuard companion and native SCM lifecycle
+        run: python -m unittest discover -s tools -p test_adguard_service.py -v
       - name: Busy USB listing and disk query isolation
         run: python -m unittest discover -s tools -p test_storage_reads.py -v
       - name: Pointer input and cleanup regression
