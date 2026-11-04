@@ -66,6 +66,9 @@ class NetworkManagementActivity : MiuixActivity() {
     private var pendingArea=""
     private var monitor:Job?=null
     private val pendingPrefs by lazy {getSharedPreferences("network-pending",MODE_PRIVATE)}
+    private val adguardPrefs by lazy {getSharedPreferences("adguard-admin",MODE_PRIVATE)}
+    internal var adguardAddress by mutableStateOf("")
+    private var adguardExpanded by mutableStateOf(false)
 
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
@@ -73,6 +76,7 @@ class NetworkManagementActivity : MiuixActivity() {
         peerId=state?.getString("peer") ?: Prefs.target(this)?.agentId.orEmpty()
         peerHost=state?.getString("host") ?: origin?.host.orEmpty()
         peerPort=state?.getInt("port") ?: origin?.port ?: 0
+        adguardAddress=adguardPrefs.getString(adguardKey(),"").orEmpty()
         area=state?.getString("area")?.takeIf {it in areas} ?: "hotspot"
         val stored=runCatching{JSONObject(pendingPrefs.getString("pending","{}")!!)}.getOrDefault(JSONObject())
         val same=if(peerId.isNotBlank())stored.optString("peer")==peerId
@@ -112,10 +116,18 @@ class NetworkManagementActivity : MiuixActivity() {
                     item {SectionCard {
                         Action(if(busy)"正在处理，可等待或返回" else "刷新设备与连接",enabled=supported && !busy,primary=true){refresh()}
                         Action("锁定网络管理",enabled=!busy){lockManagement()}
+                        Action("AdGuard Home 网站守护"){adguardExpanded=!adguardExpanded}
                         job?.optJSONObject("result")?.rows("items")?.forEach {result ->
                             InfoItem((if(result.optBoolean("confirmed"))"✓ " else "! ")+result.optString("name",result.optString("id")),result.optString("message"))
                         }
                         snapshots[area]?.optString("error")?.takeIf{it.isNotBlank() && it!=noteText.value}?.let{Note(it)}
+                    }}
+                    if(adguardExpanded)item {SectionCard("AdGuard Home · 独立管理页") {
+                        Note("先在电脑安装并配置 AdGuard Home 服务，再以管理员身份运行 AdGuardSetup.cmd，确认允许 start.bat 启动。启用记录、运行状态和停止入口在电脑设置中保留，不新增启动通知。")
+                        Field("电脑 AdGuard Home HTTPS 管理地址",adguardAddress,{adguardAddress=it.take(2048)},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Uri))
+                        Action("打开独立 HTTPS 管理页",primary=true){openAdGuard()}
+                        Note("手机浏览器直接连接并登录，不通过 LanCmd 转发管理密码或访问记录。请使用受信任证书，不提供跳过证书验证或 HTTP 回退。")
+                        Note("只有实际使用受控 DNS 的请求才会记录或拦截。域名请求不等于访问网页，无法准确识别手机应用；加密 DNS、VPN、代理、缓存和直接 IP 可能绕过。记录需在电脑明确配置并告知受控设备。")
                     }}
                     val snapshot=snapshots[area] ?: JSONObject()
                     item {HardwareControls(snapshot)}
@@ -468,6 +480,18 @@ class NetworkManagementActivity : MiuixActivity() {
     }
 
     private fun canChange()=supported && authorized && !busy && pendingArea.isBlank()
+    private fun adguardKey()="https_url:"+peerId.ifBlank{"$peerHost:$peerPort"}
+    internal fun openAdGuard() {
+        try {
+            val address=AdGuardAdmin.address(adguardAddress)
+            startActivity(AdGuardAdmin.intent(address))
+            adguardAddress=address
+            adguardPrefs.edit().putString(adguardKey(),address).apply()
+            status("已打开独立管理页；登录及规则在 AdGuard Home 完成")
+        } catch(e:android.content.ActivityNotFoundException){status("未找到手机浏览器，请先安装可打开 HTTPS 的浏览器",true)}
+        catch(e:IllegalArgumentException){status(e.message ?: "HTTPS 管理地址无效",true)}
+        catch(e:SecurityException){status("手机系统阻止打开浏览器，请检查设备策略",true)}
+    }
     private fun ask(operation:String,params:JSONObject,description:String) {
         if(canChange())confirmation=Change(area,operation,params,description)
     }

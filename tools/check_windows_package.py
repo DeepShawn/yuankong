@@ -194,6 +194,15 @@ class PackagedStartupTest(unittest.TestCase):
             self.assertEqual(code, result.returncode, (result.stdout + result.stderr).decode('utf-8', 'replace'))
             self.assertNotIn(b'Traceback', result.stderr)
 
+    def test_adguard_setup_loads_in_shipped_python_and_refuses_redirected_consent(self):
+        self.assertTrue((self.package / 'AdGuardSetup.cmd').is_file())
+        result=subprocess.run([str(self.package / 'python/python.exe'), '-I', '-X', 'utf8', '-B',
+                               str(self.package / 'adguard_service.py'), '--setup'],
+                              cwd=self.folder,env=self.env,input=b'ENABLE\n',capture_output=True,timeout=10)
+        self.assertEqual(1,result.returncode,(result.stdout+result.stderr).decode('utf-8','replace'))
+        self.assertIn('重定向'.encode(),result.stdout)
+        self.assertNotIn(b'Traceback',result.stderr)
+
     def test_gui_launcher_starts_real_receiver_and_accepts_phone_connection(self):
         ready = self.state / "healthy.json"
         nonce = uuid.uuid4().hex

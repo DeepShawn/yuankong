@@ -30,7 +30,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class NetworkManagementUiTest {
     @get:Rule val compose=createEmptyComposeRule()
-    @Before fun before(){disconnect();RuntimeEnvironment.getApplication().getSharedPreferences("network-pending",Context.MODE_PRIVATE).edit().clear().commit()}
+    @Before fun before(){disconnect();RuntimeEnvironment.getApplication().getSharedPreferences("network-pending",Context.MODE_PRIVATE).edit().clear().commit();RuntimeEnvironment.getApplication().getSharedPreferences("adguard-admin",Context.MODE_PRIVATE).edit().clear().commit()}
     @After fun after()=disconnect()
     private fun disconnect() {
         ConnectionManager.stop()
@@ -51,6 +51,47 @@ class NetworkManagementUiTest {
         waitFor{page.supported && !page.busy && page.administrator}
         page.managementPassword="test-only-password";page.unlock()
         waitFor{page.authorized && page.snapshots.isNotEmpty() && (!page.busy || page.job?.optJSONObject("question")!=null)}
+    }
+    @Test fun adGuardOnlyAcceptsHttpsWithoutEmbeddedCredentialsOrQueryData() {
+        assertEquals("https://guard.example.org:3000/",AdGuardAdmin.address(" https://guard.example.org:3000/ "))
+        assertEquals("https://[2001:db8::1]:8443/",AdGuardAdmin.address("https://[2001:db8::1]:8443/"))
+        for(url in listOf("http://guard.example.org/","javascript:alert(1)","https://user:secret@guard.example.org/",
+            "https://guard.example.org/?password=secret","https://guard.example.org/#token","https://guard.example.org:0/",
+            "https://guard.example.org:65536/","https://0.0.0.0/","https://[::]/","https://guard.example.org/\n"+"other")) {
+            assertThrows(IllegalArgumentException::class.java){AdGuardAdmin.address(url)}
+        }
+    }
+    @Test fun adGuardOpensIndependentBrowserWithoutSendingTheUrlOrCredentialsToTheReceiver() {
+        Stub().use {stub ->
+            stub.install();val controller=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=controller.get()
+            try {
+                enter(page);waitFor{!page.busy}
+                compose.onNodeWithText("AdGuard Home 网站守护").performSemanticsAction(SemanticsActions.OnClick){it()}
+                page.adguardAddress="https://guard.example.org:8443/"
+                compose.onNodeWithText("打开独立 HTTPS 管理页").performSemanticsAction(SemanticsActions.OnClick){it()}
+                val intent=shadowOf(page).nextStartedActivity
+                assertEquals(android.content.Intent.ACTION_VIEW,intent.action)
+                assertEquals("https://guard.example.org:8443/",intent.dataString)
+                assertFalse(page.isFinishing);assertFalse(stub.client!!.closed)
+                assertFalse(stub.requests.any{it.toString().contains("guard.example.org")})
+                val saved=page.getSharedPreferences("adguard-admin",Context.MODE_PRIVATE).all
+                assertEquals(listOf("https://guard.example.org:8443/"),saved.values.toList())
+                assertTrue(saved.keys.single().startsWith("https_url:"))
+                runBlocking{stub.client!!.call("ping")}
+            }finally{controller.pause().stop().destroy()}
+        }
+    }
+    @Test fun adGuardRejectsCredentialBearingAddressesWithoutStoringOrOpeningThem() {
+        Stub().use {stub ->
+            stub.install();val controller=Robolectric.buildActivity(NetworkManagementActivity::class.java).setup();val page=controller.get()
+            try {
+                enter(page);page.adguardAddress="https://user:secret@guard.example.org/";page.openAdGuard()
+                assertTrue(page.note.contains("用户名、密码"));assertNull(shadowOf(page).nextStartedActivity)
+                assertTrue(page.getSharedPreferences("adguard-admin",Context.MODE_PRIVATE).all.isEmpty())
+                assertFalse(stub.requests.any{it.toString().contains("secret@")})
+                assertFalse(page.isFinishing);assertFalse(stub.client!!.closed)
+            }finally{controller.pause().stop().destroy()}
+        }
     }
     @Test fun allFourAreasRefreshWithoutSendingChanges() {
         Stub().use {stub ->

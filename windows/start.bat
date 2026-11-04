@@ -47,11 +47,13 @@ echo   请双击 诊断.bat 逐项检查。
 goto :end
 
 :already
+call :adguard_companion
 echo   接收端已经在运行 ^(PID !OLDPID!^)
 echo   手机打开 LanCmd App 就能连上。
 goto :end
 
 :ok
+call :adguard_companion
 echo   [OK] 已在后台运行 ^(PID !NEWPID!^)
 echo.
 echo   没有窗口是正常的，接收端就是静默运行。
@@ -86,6 +88,17 @@ pause
 endlocal
 exit /b 0
 
+:adguard_companion
+setlocal DisableDelayedExpansion
+if not exist "%~dp0adguard_service.py" goto :adguard_companion_done
+if not exist "%~dp0python\python.exe" goto :adguard_companion_done
+if not defined APPDATA goto :adguard_companion_done
+if not exist "%APPDATA%\LanCmd" mkdir "%APPDATA%\LanCmd" >nul 2>&1
+"%~dp0python\python.exe" -I -X utf8 -B "%~dp0adguard_service.py" --start-if-enabled >>"%APPDATA%\LanCmd\adguard-service.log" 2>&1
+:adguard_companion_done
+endlocal
+exit /b 0
+
 :upgrade_bootstrap
 rem LANCMD_UPGRADE_BOOTSTRAP_V1 - no pause, no GUI launcher, cmd /c exits.
 setlocal DisableDelayedExpansion
@@ -93,4 +106,6 @@ cd /d "%~dp0"
 if not defined LANCMD_UPGRADE_STARTED exit /b 2
 if not exist "python\pythonw.exe" exit /b 3
 "python\pythonw.exe" -B "local_upgrade.py" --launch-receiver
-exit /b %errorlevel%
+set "ADGUARD_RECEIVER_EXIT=%errorlevel%"
+call :adguard_companion
+exit /b %ADGUARD_RECEIVER_EXIT%
