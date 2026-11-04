@@ -65,6 +65,7 @@ rm -f "$PKG/python"/_msi.pyd \
 cp "使用说明.txt" "$PKG/使用说明.txt"
 cp announcements.py notice_window.py global_delays.py local_upgrade.py touch_injection.py "$PKG/"
 cp file_properties.py maintenance_diagnostics.py "$PKG/"
+cp hosts_rules.py WebsiteRules.cmd "$PKG/"
 cp network_management.py native_wifi.py hotspot_access.py network_winrt.ps1 "$PKG/"
 cp app_control.py dates_batch.py file_time.py self_manage.py tunnel.py "$PKG/"
 cp announcement_seewo.py announcement_layer.py "$PKG/"
