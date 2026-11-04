@@ -67,6 +67,25 @@ class LockTest(unittest.TestCase):
 
 
 class GeometryTest(unittest.TestCase):
+    def test_scroll_rate_changes_pace_and_round_duration_without_moving_the_band(self):
+        base=config(style="seewo",messages=["第一条公告","第二条公告"])
+        original=seewo.layout(AREA,base)
+        for rate in (25,50,100,150,200,300):
+            altered=seewo.layout(AREA,dict(base,scroll_rate=rate))
+            self.assertAlmostEqual(original["speed"]*rate/100,altered["speed"])
+            self.assertEqual({k:v for k,v in original.items() if k!="speed"},
+                             {k:v for k,v in altered.items() if k!="speed"})
+            before=seewo.durations(base,original["font"],original["speed"],original["viewport"]["width"])
+            after=seewo.durations(base,altered["font"],altered["speed"],altered["viewport"]["width"])
+            for old,new in zip(before,after):self.assertAlmostEqual(old*100/rate,new)
+
+    def test_default_rate_is_compatible_and_invalid_rates_are_rejected(self):
+        before=config(style="seewo")
+        self.assertEqual(100,before["scroll_rate"])
+        self.assertEqual(seewo.speed(AREA),seewo.speed(AREA,before))
+        for rate in (True,0,24,301,1.5,"200",None):
+            with self.subTest(rate=rate),self.assertRaises(ValueError):config(style="seewo",scroll_rate=rate)
+
     def test_band_is_full_bleed_and_near_the_top(self):
         for width, height in ((1920, 1040), (3840, 2120), (1366, 728), (1024, 600), (800, 480)):
             area = dict(x=-1920, y=40, width=width, height=height, dpi=96)
@@ -280,6 +299,7 @@ class ParityTest(unittest.TestCase):
                       ICON=seewo.ICON, ICON_INSET=seewo.ICON_INSET, ICON_GAP=seewo.ICON_GAP,
                       RIGHT_INSET=seewo.RIGHT_INSET, STROKE=seewo.STROKE,
                       SPEED_EM=seewo.SPEED_EM, GAP_EM=seewo.GAP_EM,
+                      RATE_DEFAULT=seewo.RATE_DEFAULT,RATE_MIN=seewo.RATE_MIN,RATE_MAX=seewo.RATE_MAX,
                       MIN_BAR=seewo.MIN_BAR, MIN_FONT=seewo.MIN_FONT,
                       TOP_COLOR=seewo.TOP_COLOR, BOTTOM_COLOR=seewo.BOTTOM_COLOR,
                       ACCENT=seewo.ACCENT, TEXT_COLOR=seewo.TEXT, STYLE="seewo",

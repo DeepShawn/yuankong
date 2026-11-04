@@ -37,6 +37,7 @@ class AnnouncementsActivity:MiuixActivity() {
     private var previewZoom by mutableIntStateOf(1)
     private var resize by mutableStateOf(false)
     private var layoutSupported by mutableStateOf(false)
+    private var speedSupported by mutableStateOf(false)
     private var layoutReady by mutableStateOf(false)
     private var areaLoading by mutableStateOf(false)
     private var areaLabel by mutableStateOf("示意画布 1920 × 1080；连接新版接收端后读取主屏可用区域")
@@ -44,6 +45,7 @@ class AnnouncementsActivity:MiuixActivity() {
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
         config=runCatching{JSONObject(state?.getString("config") ?: prefs.getString("draft",null) ?: announcementDefaults().toString())}.getOrDefault(announcementDefaults())
+        if(!config.has("scroll_rate"))config.put("scroll_rate",SeewoBar.RATE_DEFAULT)
         if(config.optString("placement")=="custom" && !runCatching{AnnouncementGeometry.fromJson(config.getJSONObject("rect")).valid()}.getOrDefault(false)){
             config.put("placement","preset").put("rect",JSONObject.NULL)
         }
@@ -69,6 +71,7 @@ class AnnouncementsActivity:MiuixActivity() {
             supported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="announcements"}
             check(supported){"请完整更新 Windows 接收端以使用滚动公告"}
             layoutSupported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="announcement_layout"}
+            speedSupported=caps!=null && (0 until caps.length()).any{caps.optString(it)=="announcement_speed"}
             if(layoutSupported)try{readArea()}catch(e:CancellationException){throw e}catch(e:Exception){status("未读到电脑尺寸，当前为示意画布；请重试读取尺寸",true)}
             refresh();startPoll()
         }
@@ -114,8 +117,9 @@ class AnnouncementsActivity:MiuixActivity() {
         val prefix=config.optString("prefix").ifBlank{"消息通知"}
         val duration=config.optInt("duration")
         val repeats=config.optInt("repeats")
+        val rate=config.opt("scroll_rate")?:SeewoBar.RATE_DEFAULT
         val next=if(on)SeewoBar.preset(prefix) else announcementDefaults().put("prefix",prefix)
-        next.put("text",text).put("duration",duration).put("repeats",repeats)
+        next.put("text",text).put("duration",duration).put("repeats",repeats).put("scroll_rate",rate)
         // 已有内容按行拆成多条，切换样式时不丢。
         if(on){
             val items=org.json.JSONArray()
@@ -124,7 +128,7 @@ class AnnouncementsActivity:MiuixActivity() {
         }
         config=next
         preview.config=config
-        status(if(on)"已切换到希沃样式：位置、尺寸、配色与滚动速度不可再单独调整"
+        status(if(on)"已切换到希沃样式：外观保持固定，可在播放与延迟调整轮巡速度"
                else "已退出希沃样式，可自由调整外观")
     }
     internal fun preset(index:Int) {
@@ -163,7 +167,7 @@ class AnnouncementsActivity:MiuixActivity() {
                     if(tab==0)SectionCard("内容与预设") {
                         SelectionRow("希沃样式（锁定外观）","与一体机消息通知条一致：通栏深色带、蓝色描边喇叭、“消息提醒：”蓝色前缀接白色正文，跑马灯滚动并轮巡多条",
                             SeewoBar.isSeewo(config),{applySeewo(it)})
-                        if(SeewoBar.isSeewo(config))Note("已锁定的项目：通栏宽度、屏高的 14.4% 高度、距顶 2.8%、#020914→#040E1C 竖向渐变、蓝色描边喇叭、19.5/360 屏高字号、常规字重。文字始终向左滚动（短消息也滚），多条逐条轮巡。可改的只有内容、前缀、播放轮数与秒数。")
+                        if(SeewoBar.isSeewo(config))Note("已锁定的项目：通栏宽度、屏高的 14.4% 高度、距顶 2.8%、#020914→#040E1C 竖向渐变、蓝色描边喇叭、19.5/360 屏高字号、常规字重。文字向左滚动，多条逐条轮巡；可调整内容、前缀、轮巡速度、播放轮数与秒数。")
                         Field("消息前缀（可留空）",config.optString("prefix"),{change("prefix",it.take(30))})
                         if(SeewoBar.isSeewo(config)){
                             Field("公告内容（每行一条，逐条轮巡）",seewoText(),{updateMessages(it)},singleLine=false,maxLines=8)
@@ -213,11 +217,18 @@ class AnnouncementsActivity:MiuixActivity() {
                             ChoiceField(listOf("向左滚动","向右滚动","向上滚动","向下滚动","往返移动","静止显示","淡入淡出"),"流动方式",listOf("left","right","up","down","bounce","static","fade").indexOf(config.optString("motion")).coerceAtLeast(0)){
                                 change("motion",listOf("left","right","up","down","bounce","static","fade")[it])}
                             numeric("速度（20–400 像素／秒，按系统缩放）","speed")
-                        } else Note("希沃样式固定为匀速向左滚动（2.4 个字号宽／秒，1080p 约每秒 130 像素），每条滚完再换下一条。")
+                        } else {
+                            ActionRow {
+                                for((percent,label) in listOf(50 to "0.5×",100 to "原速",150 to "1.5×",200 to "2×"))
+                                    SelectionAction(label,selected=config.optInt("scroll_rate",100)==percent,modifier=Modifier.weight(1f)){change("scroll_rate",percent)}
+                            }
+                            numeric("轮巡速度（25–300%，100% 为原速）","scroll_rate")
+                            Note("只改变播放节奏，不改变外观。每条滚完再换下一条，手机预览与电脑使用相同倍率；设置确认发送后应用到电脑。")
+                        }
                         ChoiceField(listOf("一直循环","循环 N 次","按时长结束"),"循环方式",playbackMode){choosePlaybackMode(it)}
                         when(playbackMode) {
                             0->Note("一直循环：不限次数和时长，可随时暂停或撤回。")
-                            1->numeric("循环次数 N（1–100）","repeats")
+                            1->{numeric("循环次数 N（1–100）","repeats");Note("完成 N 轮后由 Windows 自动撤回公告，草稿保留；手机断线不影响自动撤回。")}
                             2->numeric("显示秒数（1–3600）","duration")
                         }
                         if(playbackMode==1 && config.optInt("duration")>0)Note("此旧草稿另有 ${config.optInt("duration")} 秒上限，先到者结束；重新选择循环方式可清除此上限。")
@@ -305,14 +316,20 @@ class AnnouncementsActivity:MiuixActivity() {
     internal fun confirmSend(){if(config.optString("text").isBlank()){status("请输入公告内容",true);return};confirmation=true}
     internal fun sendNow() {
         if(busy)return
+        if(SeewoBar.isSeewo(config) && !speedSupported && config.optInt("scroll_rate",100)!=100){
+            status("调整轮巡速度需要完整更新并重启 Windows 3.18.6 或更新版接收端",true);return
+        }
         if(config.optString("placement")=="custom" && (!layoutSupported || !layoutReady)){
             status("自定义位置需要完整更新 Windows 3.15.0 或更新版，并成功读取电脑尺寸",true);return
         }
         val params=JSONObject().put("action","show").put("config",JSONObject(config.toString()).apply {
-            for(key in listOf("font_size","width","opacity","speed","repeats","duration"))put(key,optString(key).toIntOrNull() ?: -1)
+            for(key in listOf("font_size","width","opacity","speed","repeats","duration","scroll_rate"))put(key,optString(key).toIntOrNull() ?: -1)
         })
         val ranges=mapOf("font_size" to 16..96,"width" to 30..100,"opacity" to 30..100,"speed" to 20..400,"repeats" to 0..100,"duration" to 0..3600)
         val normalized=params.getJSONObject("config")
+        if(normalized.optInt("scroll_rate",-1) !in SeewoBar.RATE_MIN..SeewoBar.RATE_MAX){
+            status("轮巡速度须为 25–300% 的整数",true);return
+        }
         if((playbackMode==1 && normalized.optInt("repeats",-1) !in 1..100) ||
             (playbackMode==2 && normalized.optInt("duration",-1) !in 1..3600)) {
             status(if(playbackMode==1)"循环次数 N 须为 1–100 的整数" else "显示秒数须为 1–3600 的整数",true);return
@@ -332,7 +349,7 @@ class AnnouncementsActivity:MiuixActivity() {
         val ident=job?.optString("id") ?: return
         task{pinnedCall(origin,"announcements",JSONObject().put("action",action).put("job_id",ident));refresh()}
     }
-    private fun stateLabel(value:JSONObject)=when(value.optString("status")){"playing"->"播放中";"paused"->"已暂停";"starting"->"正在启动";"completed"->"播放完成";"cancelled"->"已关闭";"failed"->"失败：${value.optString("error")}";else->"正在撤回"}
+    internal fun stateLabel(value:JSONObject)=when(value.optString("status")){"playing"->"播放中";"paused"->"已暂停";"starting"->"正在启动";"completed"->if(value.optBoolean("withdrawn"))if(value.optString("reason")=="repeats")"循环完成，已自动撤回" else "播放结束，已自动撤回" else "播放完成";"cancelled"->"已关闭";"failed"->"失败：${value.optString("error")}";else->"正在撤回"}
     private suspend fun refresh(){val result=pinnedCall(origin,"announcements");job=result.optJSONObject("job");if(result.optBoolean("occupied"))status("其他手机正在显示公告，可在电脑端关闭",true)}
     private fun startPoll(){poll?.cancel();if(supported)poll=task{while(true){delay(1000);if(!busy)refresh()}}}
     override fun onStart(){super.onStart();startPoll()}

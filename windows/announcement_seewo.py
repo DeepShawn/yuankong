@@ -45,6 +45,9 @@ STROKE = 2 / 360
 # Scroll speed in ems per second, and the gap between the lead-in and the
 # scrolling body (also ems).
 SPEED_EM = 2.4
+RATE_DEFAULT = 100
+RATE_MIN = 25
+RATE_MAX = 300
 GAP_EM = 0.6
 
 MIN_BAR = 36           # never thinner than this, whatever the screen
@@ -89,9 +92,10 @@ def bar_height(area):
     return max(MIN_BAR, int(round(BAR_HEIGHT * scale(area))))
 
 
-def speed(area):
-    """Logical pixels per second: 2.4 em, so the pace matches the font size."""
-    return font_size(area) * SPEED_EM
+def speed(area, config=None):
+    """Only the playback pace scales; 100% retains the original design."""
+    rate = (config or {}).get('scroll_rate', RATE_DEFAULT)
+    return font_size(area) * SPEED_EM * rate / RATE_DEFAULT
 
 
 def advance(text, size):
@@ -139,7 +143,7 @@ def layout(area, config):
     right = window["width"] - px(RIGHT_INSET, area)
     viewport = dict(x=left, y=0, width=max(1, right - left), height=height)
     return dict(window=window, icon=icon, prefix=prefix, viewport=viewport, font=size,
-                stroke=max(1.0, STROKE * scale(area)), speed=speed(area),
+                stroke=max(1.0, STROKE * scale(area)), speed=speed(area, config),
                 width=window["width"], height=height)
 
 
@@ -235,5 +239,5 @@ def preset(prefix=DEFAULT_PREFIX):
     return dict(style="seewo", mode="ticker", motion="left", position="top",
                 shape="rectangle", bold=False, font="Microsoft YaHei UI",
                 background=TOP_COLOR, foreground=TEXT, accent=ACCENT, width=100,
-                font_size=18, speed=150, opacity=100,
+                font_size=18, speed=150, opacity=100, scroll_rate=RATE_DEFAULT,
                 placement="preset", rect=None, prefix=prefix, messages=[])

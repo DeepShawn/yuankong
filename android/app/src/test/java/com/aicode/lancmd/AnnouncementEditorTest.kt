@@ -134,6 +134,65 @@ class AnnouncementEditorTest {
         view.playback.play(SystemClock.elapsedRealtime()-((round*2+.1f)*1000).toLong())
         drawBalanced(view);assertEquals("completed",view.playback.state)
     }
+    @Test fun scrollRatesScaleTheFullRoundWithoutChangingAppearanceOrContinuingOldPreviewTime(){
+        val config=seewo();val area=AnnouncementGeometry.Area()
+        val original=SeewoBar.layout(area,config)
+        val duration=SeewoBar.durations(config,original.font,original.speed,original.viewport.width()).sum()
+        for(rate in listOf(25,50,100,150,200,300)) {
+            val changed=JSONObject(config.toString()).put("scroll_rate",rate)
+            val band=SeewoBar.layout(area,changed)
+            assertEquals(original.copy(speed=band.speed),band)
+            assertEquals(original.speed*rate/100f,band.speed,.001f)
+            assertEquals(duration*100/rate,SeewoBar.durations(changed,band.font,band.speed,band.viewport.width()).sum(),.001f)
+        }
+        val view=AnnouncementPreview(ctx);view.config=config;view.playPreview()
+        view.config=JSONObject(config.toString()).put("scroll_rate",200)
+        assertEquals("stopped",view.playback.state);assertEquals(0L,view.playback.elapsed(SystemClock.elapsedRealtime()))
+        size(view);drawBalanced(view)
+    }
+    @Test fun speedIsSentAsAnIntegerAndConfirmedWithdrawalKeepsTheDraft(){
+        Stub(complete=true).use {stub->
+            stub.install();val controller=Robolectric.buildActivity(AnnouncementsActivity::class.java).setup();val page=controller.get()
+            try {
+                waitFor{stub.requests.any{it.optString("action")=="layout"}}
+                page.applySeewo(true);page.updateMessages("第一条公告\n第二条公告")
+                page.choosePlaybackMode(1);page.change("repeats",3);page.change("scroll_rate","150")
+                page.confirmSend();compose.onNodeWithText("确认").performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{!page.busy && page.job?.optString("status")=="completed"}
+                val sent=stub.requests.single{it.optString("action")=="show"}.getJSONObject("config")
+                assertTrue(sent.get("scroll_rate") is Int);assertEquals(150,sent.getInt("scroll_rate"))
+                assertEquals(3,sent.getInt("repeats"));assertEquals(0,sent.getInt("duration"))
+                assertEquals("循环完成，已自动撤回",page.stateLabel(page.job!!))
+                assertEquals(2,SeewoBar.messages(page.config).size)
+                assertEquals("播放完成",page.stateLabel(JSONObject().put("status","completed")))
+                for(rate in listOf("","24","301")) {
+                    page.change("scroll_rate",rate);page.sendNow();assertTrue(page.note.contains("25–300"))
+                }
+                assertEquals(1,stub.requests.count{it.optString("action")=="show"})
+                page.change("scroll_rate",150);controller.recreate()
+                assertEquals(150,controller.get().config.getInt("scroll_rate"))
+                assertEquals("第一条公告",controller.get().config.getString("text"))
+                assertEquals("stopped",controller.get().preview.playback.state)
+                assertEquals(1,stub.requests.count{it.optString("action")=="show"})
+            }finally{controller.pause().stop().destroy()}
+        }
+    }
+    @Test fun legacyDraftsUseOriginalSpeedAndOldReceiversCannotIgnoreACustomRate(){
+        val legacy=seewo().apply{remove("scroll_rate")}
+        ctx.getSharedPreferences("announcements",0).edit().putString("draft",legacy.toString()).commit()
+        Stub(speed=false).use {stub->
+            stub.install();val controller=Robolectric.buildActivity(AnnouncementsActivity::class.java).setup();val page=controller.get()
+            try {
+                waitFor{stub.requests.any{it.optString("action")=="layout"}}
+                assertEquals(100,page.config.getInt("scroll_rate"))
+                assertEquals(SeewoBar.speed(page.preview.area),SeewoBar.layout(page.preview.area,page.config).speed,.001f)
+                page.change("scroll_rate",200);page.sendNow()
+                assertTrue(page.note.contains("3.18.6"));assertFalse(stub.requests.any{it.optString("action")=="show"})
+                page.change("scroll_rate",100);page.sendNow()
+                waitFor{!page.busy && stub.requests.any{it.optString("action")=="show"}}
+            }finally{controller.pause().stop().destroy()}
+        }
+    }
     @Test fun loopSelectionClearsOldTimeCapsAndTransmitsIntegersWithoutChangingStyle(){
         Stub().use {stub->
             stub.install();val controller=Robolectric.buildActivity(AnnouncementsActivity::class.java).setup();val page=controller.get()
@@ -222,15 +281,16 @@ class AnnouncementEditorTest {
         Settings.Global.putFloat(ctx.contentResolver,Settings.Global.ANIMATOR_DURATION_SCALE,1f);Settings.Global.putFloat(ctx.contentResolver,Settings.Global.TRANSITION_ANIMATION_SCALE,0f);assertFalse(EntryMotion.enabled(ctx,false))
         assertTrue(AnimationUtils.loadAnimation(ctx,R.anim.workspace_enter).computeDurationHint() in 1L..300L)
     }
-    private class Stub(val layout:Boolean=true):Closeable {
+    private class Stub(val layout:Boolean=true,val speed:Boolean=true,val complete:Boolean=false):Closeable {
         val requests=CopyOnWriteArrayList<JSONObject>();private val server=ServerSocket(0);private val client=AgentClient("127.0.0.1",server.localPort)
         private var visible=false
         private val thread=Thread{runCatching{server.accept().use{socket->val input=socket.getInputStream().bufferedReader();val out=socket.getOutputStream().bufferedWriter()
             while(true){val q=JSONObject(input.readLine()?:break);requests.add(q);val r=JSONObject().put("id",q.getInt("id")).put("ok",true)
                 when(q.optString("cmd")){
-                    "capabilities"->r.put("features",JSONArray().put("announcements").apply{if(layout)put("announcement_layout")})
+                    "capabilities"->r.put("features",JSONArray().put("announcements").apply{if(layout)put("announcement_layout");if(speed)put("announcement_speed")})
                     "announcements"->if(q.optString("action")=="layout")r.put("area",JSONObject().put("x",80).put("y",24).put("width",1920).put("height",1040).put("dpi",144))
-                    else{if(q.optString("action")=="show")visible=true;r.put("job",if(visible)JSONObject().put("id","notice").put("status","playing") else JSONObject.NULL)}
+                    else{if(q.optString("action")=="show")visible=true;r.put("job",if(visible)JSONObject().put("id","notice").put("status",if(complete)"completed" else "playing")
+                        .apply{if(complete)put("reason","repeats").put("withdrawn",true).put("cycles",3)} else JSONObject.NULL)}
                 }
                 out.write(r.toString()+"\n");out.flush()
             }}}}.apply{isDaemon=true;start()}

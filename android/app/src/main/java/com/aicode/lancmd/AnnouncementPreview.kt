@@ -16,11 +16,12 @@ internal fun announcementDefaults()=JSONObject().put("text","").put("prefix","æ¶
     .put("position","top").put("shape","rectangle").put("background","#081424").put("foreground","#FFFFFF").put("accent","#56B5F1")
     .put("font","Microsoft YaHei UI").put("font_size",28).put("bold",true).put("speed",90).put("opacity",92).put("width",100).put("duration",0).put("repeats",5)
     .put("placement","preset").put("rect",JSONObject.NULL)
+    .put("scroll_rate",100)
 
 /** Local work-area canvas. Playing and editing never send RPCs. */
 class AnnouncementPreview(context:Context):View(context) {
     var config=announcementDefaults()
-        set(value){val reset=listOf("text","motion","mode","style","messages","repeats","duration").any{field.optString(it)!=value.optString(it)}
+        set(value){val reset=listOf("text","motion","mode","style","messages","repeats","duration","scroll_rate","speed").any{field.optString(it)!=value.optString(it)}
             field=JSONObject(value.toString());if(reset)stopPreview();invalidate()}
     internal var area=AnnouncementGeometry.Area()
         set(value){field=value;cancelGesture();invalidate()}
