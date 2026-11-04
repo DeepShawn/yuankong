@@ -165,6 +165,18 @@ class StorageTest(unittest.TestCase):
 class NativeStorageTest(unittest.TestCase):
     setUp = StorageTest.setUp
 
+    def test_readonly_target_is_not_unprotected_or_replaced(self):
+        before = self.store.read()
+        os.chmod(self.path, stat.S_IREAD)
+        try:
+            with self.assertRaises(OSError):
+                self.store.replace(before, ['example.com'])
+            self.assertEqual(self.original, self.path.read_bytes())
+            self.assertTrue(self.path.stat().st_file_attributes & 1)
+            self.assertEqual([self.original], [p.read_bytes() for p in self.store.backup_dir.iterdir()])
+        finally:
+            os.chmod(self.path, stat.S_IREAD | stat.S_IWRITE)
+
     def test_replace_keeps_the_original_native_dacl(self):
         api = c.WinDLL('advapi32', use_last_error=True)
         api.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [c.c_wchar_p, c.c_uint32, c.POINTER(c.c_void_p), c.c_void_p]
@@ -173,6 +185,10 @@ class NativeStorageTest(unittest.TestCase):
         api.SetFileSecurityW.restype = c.c_int
         api.GetFileSecurityW.argtypes = [c.c_wchar_p, c.c_uint32, c.c_void_p, c.c_uint32, c.POINTER(c.c_uint32)]
         api.GetFileSecurityW.restype = c.c_int
+        api.GetSecurityDescriptorDacl.argtypes = [c.c_void_p, c.POINTER(c.c_int), c.POINTER(c.c_void_p), c.POINTER(c.c_int)]
+        api.GetSecurityDescriptorDacl.restype = c.c_int
+        api.GetSecurityDescriptorControl.argtypes = [c.c_void_p, c.POINTER(c.c_uint16), c.POINTER(c.c_uint32)]
+        api.GetSecurityDescriptorControl.restype = c.c_int
         kernel = c.WinDLL('kernel32')
         kernel.LocalFree.argtypes = [c.c_void_p]
         kernel.LocalFree.restype = c.c_void_p
@@ -188,7 +204,16 @@ class NativeStorageTest(unittest.TestCase):
             api.GetFileSecurityW(str(self.path), 4, None, 0, c.byref(length))
             buffer = c.create_string_buffer(length.value)
             self.assertTrue(api.GetFileSecurityW(str(self.path), 4, buffer, len(buffer), c.byref(length)), c.get_last_error())
-            return buffer.raw
+            present, defaulted = c.c_int(), c.c_int()
+            acl = c.c_void_p()
+            self.assertTrue(api.GetSecurityDescriptorDacl(buffer, c.byref(present), c.byref(acl), c.byref(defaulted)))
+            self.assertTrue(present.value and acl.value)
+            size = c.c_uint16.from_address(acl.value + 2).value
+            control, revision = c.c_uint16(), c.c_uint32()
+            self.assertTrue(api.GetSecurityDescriptorControl(buffer, c.byref(control), c.byref(revision)))
+            # ReplaceFile can set SE_DACL_AUTO_INHERITED metadata. Compare the
+            # entire ACL and its protection/default semantics, not that flag.
+            return c.string_at(acl.value, size), present.value, defaulted.value, control.value & 0x1000
         original_dacl = dacl()
         self.store.replace(self.store.read(), ['example.com'])
         self.assertEqual(original_dacl, dacl())

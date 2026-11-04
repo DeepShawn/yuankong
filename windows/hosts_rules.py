@@ -257,9 +257,12 @@ def flush_dns():
 
 def local_console():
     if os.name != 'nt' or not sys.stdin or not sys.stdout or not sys.stdin.isatty() or not sys.stdout.isatty():
-        raise OSError('请在 Windows 本机控制台打开设置；不接受重定向输入或远控接口请求')
+        raise OSError('请在 Windows 本机交互控制台打开设置；不接受重定向输入，不提供远控接口')
     import ctypes as c
-    if not c.windll.kernel32.GetConsoleWindow():
+    console = c.WinDLL('kernel32').GetConsoleWindow
+    console.argtypes = []
+    console.restype = c.c_void_p
+    if not console():
         raise OSError('未找到本机控制台')
     if not c.windll.shell32.IsUserAnAdmin():
         raise PermissionError('请在电脑右键以管理员身份打开设置；未自动提权或修改权限')
