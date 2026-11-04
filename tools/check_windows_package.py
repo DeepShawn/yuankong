@@ -185,6 +185,15 @@ class PackagedStartupTest(unittest.TestCase):
         self.assertIn(("LanCmd Agent v" + self.display_version).encode(), result.stdout)
         self.assertNotIn(b"Traceback", result.stderr)
 
+    def test_local_website_settings_load_in_shipped_python_but_reject_redirected_or_automatic_use(self):
+        self.assertTrue((self.package / 'WebsiteRules.cmd').is_file())
+        tool = str(self.package / 'hosts_rules.py')
+        for arguments, code in ((['--settings'], 1), (['--apply', 'example.com'], 2)):
+            result = subprocess.run([str(self.package / 'python/python.exe'), '-I', '-X', 'utf8', '-B', tool, *arguments],
+                                    cwd=self.folder, env=self.env, input=b'APPLY\n', capture_output=True, timeout=10)
+            self.assertEqual(code, result.returncode, (result.stdout + result.stderr).decode('utf-8', 'replace'))
+            self.assertNotIn(b'Traceback', result.stderr)
+
     def test_gui_launcher_starts_real_receiver_and_accepts_phone_connection(self):
         ready = self.state / "healthy.json"
         nonce = uuid.uuid4().hex
