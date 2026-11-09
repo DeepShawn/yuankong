@@ -155,7 +155,7 @@ fun IconButton(
 @Composable
 fun Card(
     modifier: Modifier = Modifier,
-    cornerRadius: Dp = 26.dp,
+    cornerRadius: Dp = 22.dp,
     insideMargin: PaddingValues = PaddingValues(12.dp),
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
@@ -164,8 +164,8 @@ fun Card(
     val shape = RoundedCornerShape(cornerRadius)
     val base = modifier.glassSurface(
         shape = shape,
-        elevation = if (kernelStyle()) 10.dp else 16.dp,
-        glow = palette.accent.copy(alpha = if (palette.light) 0.07f else 0.055f)
+        elevation = 10.dp,
+        glow = palette.accent.copy(alpha = if (palette.light) 0.05f else 0.035f)
     )
     val surface = if (onClick != null) base.glassClickable(onClick = onClick) else base
     Column(modifier = surface) {
@@ -203,9 +203,9 @@ fun Scaffold(
 /** 悬浮顶栏的尺寸约定。 */
 object GlassTopBar {
     /** 顶栏胶囊高度。 */
-    val height: Dp = 58.dp
+    val height: Dp = 54.dp
     /** 顶栏占用的垂直空间（状态栏之外）。 */
-    val space: Dp = 74.dp
+    val space: Dp = 70.dp
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +219,9 @@ data class GlassButtonColors(
     val content: Color,
     val border: Color,
     val disabledContainer: Color,
-    val disabledContent: Color
+    val disabledContent: Color,
+    val solid: Boolean = false,
+    val glow: Color = Color.Transparent
 )
 
 /** 按钮配色的默认值（兼容旧的 ButtonDefaults 调用写法）。 */
@@ -229,10 +231,10 @@ object ButtonDefaults {
         val palette = LocalGlassPalette.current
         return GlassButtonColors(
             container = palette.glassFillTop,
-            content = palette.text,
-            border = palette.strokeTop,
-            disabledContainer = palette.glassFillBottom,
-            disabledContent = palette.dim
+            content = palette.text.copy(alpha = 0.94f),
+            border = palette.strokeTop.copy(alpha = 0.55f),
+            disabledContainer = palette.glassFillTop.copy(alpha = 0.03f),
+            disabledContent = palette.dim.copy(alpha = 0.55f)
         )
     }
 
@@ -240,57 +242,61 @@ object ButtonDefaults {
     fun textButtonColorsPrimary(): GlassButtonColors {
         val palette = LocalGlassPalette.current
         return GlassButtonColors(
-            container = palette.accentGlass,
-            content = palette.accent,
-            border = palette.accentStroke,
-            disabledContainer = palette.accentGlass.copy(alpha = palette.accentGlass.alpha * 0.4f),
-            disabledContent = palette.dim
+            container = palette.accent,
+            content = palette.onAccent,
+            border = Color.Transparent,
+            disabledContainer = palette.glassFillTop.copy(alpha = 0.04f),
+            disabledContent = palette.dim.copy(alpha = 0.55f),
+            solid = true,
+            glow = palette.accent.copy(alpha = 0.30f)
         )
     }
 }
 
-/** 玻璃文字按钮：主操作用强调色玻璃，其余用中性玻璃。 */
+/** 玻璃文字按钮：主操作是实心强调色渐变，其余是中性薄玻璃。 */
 @Composable
 fun TextButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    cornerRadius: Dp = 18.dp,
-    insideMargin: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+    cornerRadius: Dp = 14.dp,
+    insideMargin: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 9.dp),
     colors: GlassButtonColors = ButtonDefaults.textButtonColors()
 ) {
     val palette = LocalGlassPalette.current
+    val shape = RoundedCornerShape(cornerRadius)
     val container = if (enabled) colors.container else colors.disabledContainer
     val contentColor = if (enabled) colors.content else colors.disabledContent
-    val shape = RoundedCornerShape(cornerRadius)
+    val solid = colors.solid && enabled
     Box(
         modifier = modifier
-            .heightIn(min = 46.dp)
+            .heightIn(min = 42.dp)
             .glassSurface(
                 shape = shape,
                 fillTop = container,
-                fillBottom = container.copy(alpha = container.alpha * 0.72f),
-                elevation = 6.dp,
-                stroke = false
+                fillBottom = container,
+                elevation = if (solid) 10.dp else 0.dp,
+                stroke = false,
+                glow = if (enabled) colors.glow else Color.Transparent,
+                brush = if (solid) {
+                    Brush.linearGradient(listOf(palette.accent, palette.accent2))
+                } else {
+                    Brush.verticalGradient(
+                        listOf(container, container.copy(alpha = (container.alpha * 0.62f).coerceAtLeast(0.02f)))
+                    )
+                }
             )
-            .border(
-                width = 1.dp,
-                brush = Brush.verticalGradient(
-                    listOf(colors.border.copy(alpha = if (enabled) 1f else 0.5f), Color.Transparent)
-                ),
-                shape = shape
-            )
+            .border(1.dp, colors.border, shape)
             .glassClickable(enabled = enabled, onClick = onClick)
-            .padding(insideMargin)
-            .heightIn(min = 26.dp),
+            .padding(insideMargin),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
             color = contentColor,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
+            fontSize = 13.5.sp,
+            fontWeight = if (solid) FontWeight.SemiBold else FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -301,7 +307,7 @@ fun TextButton(
 // 输入框
 // ---------------------------------------------------------------------------
 
-/** 带浮动标签的玻璃输入框；标签文字会并入输入节点的语义，测试仍可按标签找到输入框。 */
+/** 带浮动标签的玻璃输入框：空且未聚焦时标签当占位符，聚焦/有内容时浮到上方。 */
 @Composable
 fun TextField(
     value: String,
@@ -315,10 +321,10 @@ fun TextField(
     visualTransformation: VisualTransformation = VisualTransformation.None
 ) {
     val palette = LocalGlassPalette.current
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(16.dp)
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val accent = if (focused) palette.accent else palette.stroke
+    val floating = label.isNotBlank() && (!singleLine || value.isNotEmpty() || focused)
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
@@ -326,15 +332,23 @@ fun TextField(
             .fillMaxWidth()
             .clip(shape)
             .drawBehind {
-                drawRect(Brush.verticalGradient(listOf(palette.glassSunken, palette.glassSunken.copy(alpha = palette.glassSunken.alpha * 0.72f))))
-                drawRect(Brush.linearGradient(0f to palette.highlight.copy(alpha = palette.highlight.alpha * 0.5f), 0.35f to Color.Transparent, start = Offset(0f, 0f), end = Offset(0f, size.height)))
+                drawRect(
+                    Brush.verticalGradient(
+                        listOf(palette.glassSunken, palette.glassSunken.copy(alpha = palette.glassSunken.alpha * 0.55f))
+                    )
+                )
             }
             .border(
                 width = if (focused) 1.5.dp else 1.dp,
-                brush = Brush.verticalGradient(listOf(accent.copy(alpha = if (focused) 0.9f else 0.6f), accent.copy(alpha = if (focused) 0.35f else 0.12f))),
+                brush = Brush.verticalGradient(
+                    listOf(
+                        if (focused) palette.accent.copy(alpha = 0.85f) else palette.stroke.copy(alpha = 0.9f),
+                        if (focused) palette.accent.copy(alpha = 0.28f) else palette.stroke.copy(alpha = 0.30f)
+                    )
+                ),
                 shape = shape
             )
-            .padding(horizontal = 16.dp, vertical = 11.dp),
+            .padding(horizontal = 14.dp, vertical = if (floating) 8.dp else 11.dp),
         enabled = enabled,
         textStyle = TextStyle(color = palette.text, fontSize = 14.5.sp, lineHeight = 20.sp),
         singleLine = singleLine,
@@ -345,17 +359,28 @@ fun TextField(
         cursorBrush = SolidColor(palette.accent),
         decorationBox = { inner ->
             Column(Modifier.fillMaxWidth()) {
-                if (label.isNotBlank()) {
+                if (floating) {
                     Text(
                         text = label,
-                        fontSize = 11.sp,
+                        fontSize = 10.5.sp,
                         color = if (focused) palette.accent else palette.dim,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(Modifier.height(3.dp))
+                    Spacer(Modifier.height(2.dp))
                 }
-                Box(Modifier.fillMaxWidth()) { inner() }
+                Box(Modifier.fillMaxWidth()) {
+                    if (!floating && label.isNotBlank()) {
+                        Text(
+                            text = label,
+                            fontSize = 14.sp,
+                            color = palette.dim,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    inner()
+                }
             }
         }
     )
@@ -381,14 +406,14 @@ fun SuperSwitch(
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = { onCheckedChange?.invoke(it) })
-            .padding(horizontal = 10.dp, vertical = 10.dp)
+            .padding(horizontal = 10.dp, vertical = 8.dp)
             .heightIn(min = 36.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
             Text(
                 text = title,
-                fontSize = 15.sp,
+                fontSize = 14.5.sp,
                 color = if (enabled) palette.text else palette.dim,
                 maxLines = 2
             )
@@ -411,7 +436,7 @@ fun SuperSwitch(
 private fun GlassSwitch(checked: Boolean, enabled: Boolean) {
     val palette = LocalGlassPalette.current
     val offset by animateDpAsState(
-        targetValue = if (checked) 22.dp else 3.dp,
+        targetValue = if (checked) 20.dp else 3.dp,
         animationSpec = GlassMotion.slideDp,
         label = "switch-thumb"
     )
@@ -422,7 +447,7 @@ private fun GlassSwitch(checked: Boolean, enabled: Boolean) {
     )
     Box(
         modifier = Modifier
-            .size(width = 48.dp, height = 28.dp)
+            .size(width = 45.dp, height = 26.dp)
             .clip(CircleShape)
             .background(
                 Brush.horizontalGradient(
@@ -446,7 +471,7 @@ private fun GlassSwitch(checked: Boolean, enabled: Boolean) {
         Box(
             Modifier
                 .offset(x = offset, y = 3.dp)
-                .size(22.dp)
+                .size(20.dp)
                 .shadow(6.dp, CircleShape, clip = false, ambientColor = palette.shadow, spotColor = palette.shadow)
                 .background(if (enabled) Color.White else palette.dim, CircleShape)
         )

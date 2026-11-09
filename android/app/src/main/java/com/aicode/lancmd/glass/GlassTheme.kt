@@ -202,35 +202,38 @@ private fun darkPalette(
     danger: Color,
     warn: Color,
     ok: Color
-) = GlassPalette(
-    light = false,
-    bgTop = lerp(bg, accent, 0.07f),
-    bgBottom = lerp(bg, Color.Black, 0.52f),
-    blobA = accent.copy(alpha = 0.30f),
-    blobB = accent2.copy(alpha = 0.22f),
-    blobC = Color.White.copy(alpha = 0.055f),
-    accent = accent,
-    accent2 = accent2,
-    onAccent = onAccent,
-    text = text,
-    dim = dim,
-    danger = danger,
-    warn = warn,
-    ok = ok,
-    glassFillTop = Color.White.copy(alpha = 0.095f),
-    glassFillBottom = Color.White.copy(alpha = 0.032f),
-    glassSunken = Color.Black.copy(alpha = 0.26f),
-    strokeTop = Color.White.copy(alpha = 0.26f),
-    strokeBottom = Color.White.copy(alpha = 0.015f),
-    stroke = Color.White.copy(alpha = 0.075f),
-    highlight = Color.White.copy(alpha = 0.13f),
-    shadow = Color.Black.copy(alpha = 0.60f),
-    scrim = bg.copy(alpha = 0.62f),
-    console = lerp(bg, Color.Black, 0.42f),
-    accentGlass = accent.copy(alpha = 0.17f),
-    accentStroke = accent.copy(alpha = 0.52f),
-    dockFill = Color.White.copy(alpha = 0.075f)
-)
+): GlassPalette {
+    val deep = lerp(bg, Color.Black, 0.45f)
+    return GlassPalette(
+        light = false,
+        bgTop = lerp(bg, Color.Black, 0.10f),
+        bgBottom = lerp(bg, Color.Black, 0.74f),
+        blobA = lerp(accent, deep, 0.62f).copy(alpha = 0.34f),
+        blobB = lerp(accent2, deep, 0.68f).copy(alpha = 0.24f),
+        blobC = Color.White.copy(alpha = 0.018f),
+        accent = accent,
+        accent2 = accent2,
+        onAccent = onAccent,
+        text = lerp(text, Color.White, 0.25f),
+        dim = lerp(dim, Color.White, 0.18f),
+        danger = danger,
+        warn = warn,
+        ok = ok,
+        glassFillTop = Color.White.copy(alpha = 0.072f),
+        glassFillBottom = Color.White.copy(alpha = 0.026f),
+        glassSunken = Color.Black.copy(alpha = 0.32f),
+        strokeTop = Color.White.copy(alpha = 0.19f),
+        strokeBottom = Color.White.copy(alpha = 0.015f),
+        stroke = Color.White.copy(alpha = 0.07f),
+        highlight = Color.White.copy(alpha = 0.055f),
+        shadow = Color.Black.copy(alpha = 0.55f),
+        scrim = deep.copy(alpha = 0.66f),
+        console = lerp(bg, Color.Black, 0.74f),
+        accentGlass = accent.copy(alpha = 0.15f),
+        accentStroke = accent.copy(alpha = 0.40f),
+        dockFill = Color.White.copy(alpha = 0.05f)
+    )
+}
 
 private fun lightPalette(
     bg: Color,
@@ -242,13 +245,13 @@ private fun lightPalette(
     danger: Color,
     warn: Color,
     ok: Color
-) = GlassPalette(
+): GlassPalette = GlassPalette(
     light = true,
-    bgTop = lerp(bg, Color.White, 0.45f),
-    bgBottom = lerp(bg, Color(0xFFDCE6F1), 0.55f),
-    blobA = accent.copy(alpha = 0.22f),
-    blobB = accent2.copy(alpha = 0.16f),
-    blobC = Color.White.copy(alpha = 0.62f),
+    bgTop = lerp(bg, Color.White, 0.60f),
+    bgBottom = lerp(bg, Color(0xFFE1E9F2), 0.55f),
+    blobA = lerp(accent, bg, 0.55f).copy(alpha = 0.20f),
+    blobB = lerp(accent2, bg, 0.60f).copy(alpha = 0.15f),
+    blobC = Color.White.copy(alpha = 0.50f),
     accent = accent,
     accent2 = accent2,
     onAccent = onAccent,
@@ -257,19 +260,19 @@ private fun lightPalette(
     danger = danger,
     warn = warn,
     ok = ok,
-    glassFillTop = Color.White.copy(alpha = 0.74f),
-    glassFillBottom = Color.White.copy(alpha = 0.46f),
-    glassSunken = Color(0xFF0B1B2A).copy(alpha = 0.05f),
-    strokeTop = Color.White.copy(alpha = 0.98f),
-    strokeBottom = Color.White.copy(alpha = 0.32f),
+    glassFillTop = Color.White.copy(alpha = 0.72f),
+    glassFillBottom = Color.White.copy(alpha = 0.44f),
+    glassSunken = Color(0xFF0B1B2A).copy(alpha = 0.055f),
+    strokeTop = Color.White.copy(alpha = 0.96f),
+    strokeBottom = Color.White.copy(alpha = 0.30f),
     stroke = Color(0xFF0B1B2A).copy(alpha = 0.06f),
-    highlight = Color.White.copy(alpha = 0.76f),
-    shadow = Color(0xFF1B2A3A).copy(alpha = 0.18f),
+    highlight = Color.White.copy(alpha = 0.42f),
+    shadow = Color(0xFF1B2A3A).copy(alpha = 0.15f),
     scrim = bg.copy(alpha = 0.55f),
-    console = lerp(bg, Color.White, 0.35f),
+    console = lerp(bg, Color.White, 0.42f),
     accentGlass = accent.copy(alpha = 0.13f),
-    accentStroke = accent.copy(alpha = 0.44f),
-    dockFill = Color.White.copy(alpha = 0.62f)
+    accentStroke = accent.copy(alpha = 0.42f),
+    dockFill = Color.White.copy(alpha = 0.58f)
 )
 
 val LocalGlassColors = compositionLocalOf { darkColorScheme() }

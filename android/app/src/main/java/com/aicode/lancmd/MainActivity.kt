@@ -214,48 +214,49 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                     if (overlayVisible) OverlayCard()
                     ContentSwitch { if (homeCategory == "命令控制台") Console() else Tools() }
                     if (homeCategory == "命令控制台") CommandCard()
-                    Spacer(Modifier.height(bottom + 104.dp))
+                    Spacer(Modifier.height(bottom + 92.dp))
                 }
                 HomeDock(
                     Modifier.align(Alignment.BottomCenter)
                         .padding(horizontal = 14.dp)
-                        .padding(bottom = bottom + 10.dp)
+                        .padding(bottom = bottom + 8.dp)
                 )
             }
         }
     }
 
-    /** 连接状态主卡：设备、延迟与四个入口。 */
+    /** 连接状态主卡：设备、状态与四个入口。 */
     @Composable
     private fun StatusHero() {
         val palette = LocalGlassPalette.current
+        val detail = listOf(deviceSub, latencyText).filter { it.isNotBlank() }.joinToString(" · ")
         SectionCard {
             Row(
                 Modifier.fillMaxWidth().glassClickable { pingOnce() }
-                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                    .padding(horizontal = 2.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                StatusDot(connected)
-                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                StatusOrb(connected)
+                Column(Modifier.weight(1f).padding(start = 10.dp)) {
                     Text(
                         deviceName.ifBlank { getString(R.string.status_idle) },
-                        fontSize = 20.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    val detail = listOf(deviceSub, latencyText).filter { it.isNotBlank() }.joinToString(" · ")
                     Text(
                         if (detail.isBlank()) (if (connected) "远程工作区已就绪" else "在同一局域网中自动发现电脑") else detail,
-                        fontSize = 12.sp,
+                        fontSize = 11.5.sp,
                         color = palette.dim,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 4.dp)
+                        modifier = Modifier.padding(top = 3.dp)
                     )
                 }
-                if (latencyText.isNotBlank()) StatusPill(latencyText)
+                StatusChip()
             }
+            Spacer(Modifier.height(9.dp))
             ActionRow {
                 Action("电脑", modifier = Modifier.weight(1f)) { startActivity(Intent(this@MainActivity, ComputersActivity::class.java)) }
                 Action("工具库", modifier = Modifier.weight(1f)) { ToolNavigator.show(this@MainActivity) }
@@ -265,51 +266,89 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         }
     }
 
-    /** 连接状态圆点：已连接为绿色呼吸灯，未连接为中性灰。 */
+    /** 状态圆点：已连接绿色、连接/重连中琥珀色、断开为灰色。 */
     @Composable
-    private fun StatusDot(connected: Boolean) {
+    private fun StatusOrb(connected: Boolean) {
         val palette = LocalGlassPalette.current
-        val dot = if (connected) palette.ok else palette.dim
-        Box(Modifier.size(42.dp).glassCircle(elevation = 0.dp), contentAlignment = Alignment.Center) {
-            Box(
-                Modifier.size(20.dp).clip(CircleShape).background(
-                    Brush.radialGradient(
-                        listOf(dot.copy(alpha = .20f), dot.copy(alpha = .95f)),
-                        center = androidx.compose.ui.geometry.Offset(14f, 12f),
-                        radius = 30f
-                    )
+        val tint = when {
+            connected -> palette.ok
+            connection.state == State.CONNECTING || connection.state == State.WAITING -> palette.warn
+            else -> palette.dim
+        }
+        Box(
+            Modifier.size(34.dp).clip(CircleShape)
+                .background(tint.copy(alpha = .10f))
+                .border(1.dp, tint.copy(alpha = .26f), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(tint))
+        }
+    }
+
+    /** 右上角状态胶囊：在线时显示延迟，重连/断开时显示状态。 */
+    @Composable
+    private fun StatusChip() {
+        val palette = LocalGlassPalette.current
+        val label: String
+        val tint: Color
+        when {
+            connected -> { label = latencyText.ifBlank { "在线" }; tint = palette.ok }
+            connection.state == State.CONNECTING -> { label = "连接中"; tint = palette.warn }
+            connection.state == State.WAITING -> { label = "重连中"; tint = palette.warn }
+            else -> { label = "已断开"; tint = palette.dim }
+        }
+        val shape = RoundedCornerShape(12.dp)
+        Row(
+            Modifier
+                .glassSurface(
+                    shape = shape,
+                    fillTop = tint.copy(alpha = .13f),
+                    fillBottom = tint.copy(alpha = .04f),
+                    elevation = 0.dp,
+                    stroke = false
                 )
+                .border(1.dp, tint.copy(alpha = .22f), shape)
+                .padding(horizontal = 9.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(5.dp).clip(CircleShape).background(tint))
+            Text(
+                label,
+                fontSize = 10.5.sp,
+                color = tint,
+                maxLines = 1,
+                modifier = Modifier.padding(start = 5.dp)
             )
         }
     }
 
     @Composable
-    private fun StatusPill(text: String) {
-        val palette = LocalGlassPalette.current
-        Row(
-            Modifier.padding(start = 8.dp)
-                .glassSurface(
-                    shape = RoundedCornerShape(14.dp),
-                    fillTop = palette.accentGlass,
-                    fillBottom = palette.accentGlass.copy(alpha = .06f),
-                    elevation = 0.dp,
-                    glow = palette.accent.copy(alpha = .10f)
-                )
-                .padding(horizontal = 10.dp, vertical = 5.dp)
-        ) { Text(text, fontSize = 11.sp, color = palette.accent, maxLines = 1) }
-    }
-
-    @Composable
     private fun OverlayCard() {
+        val palette = LocalGlassPalette.current
         SectionCard {
-            Note(overlayMessage)
-            ActionRow {
-                if (!overlayBusy) Action("立即重连", primary = true, modifier = Modifier.weight(1f)) {
-                    note("正在重连…")
-                    ConnectionManager.retryNow()
-                }
-                if (firewallHelpVisible) Action("连不上？", modifier = Modifier.weight(1f)) {
-                    showFirewallHelp()
+            Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.Top) {
+                Box(
+                    Modifier.padding(top = 3.dp).size(7.dp).clip(CircleShape)
+                        .background(if (overlayBusy) palette.warn else palette.accent)
+                )
+                Text(
+                    overlayMessage,
+                    fontSize = 12.5.sp,
+                    lineHeight = 18.sp,
+                    color = palette.text.copy(alpha = .88f),
+                    modifier = Modifier.padding(start = 9.dp)
+                )
+            }
+            if (!overlayBusy || firewallHelpVisible) {
+                Spacer(Modifier.height(6.dp))
+                ActionRow {
+                    if (!overlayBusy) Action("立即重连", primary = true, modifier = Modifier.weight(1f)) {
+                        note("正在重连…")
+                        ConnectionManager.retryNow()
+                    }
+                    if (firewallHelpVisible) Action("连不上？", modifier = Modifier.weight(1f)) {
+                        showFirewallHelp()
+                    }
                 }
             }
         }
@@ -324,13 +363,13 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
             if (last != homeCategory) {
                 last = homeCategory
                 shift.snapTo(1f)
-                shift.animateTo(0f, animationSpec = tween(300, easing = FastOutSlowInEasing))
+                shift.animateTo(0f, animationSpec = tween(280, easing = FastOutSlowInEasing))
             }
         }
         Column(
             Modifier.fillMaxWidth().graphicsLayer {
-                translationY = shift.value * 16.dp.toPx()
-                val scale = 1f - shift.value * 0.012f
+                translationY = shift.value * 10.dp.toPx()
+                val scale = 1f - shift.value * 0.008f
                 scaleX = scale
                 scaleY = scale
             }
@@ -343,29 +382,31 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         SectionCard("命令控制台") {
             if (consoleText.isBlank()) EmptyNote("连接后在下方输入命令，输出显示在这里。")
             else {
-                val shape = RoundedCornerShape(18.dp)
+                val shape = RoundedCornerShape(12.dp)
                 Column(
                     Modifier.fillMaxWidth().clip(shape).background(palette.console)
-                        .border(1.dp, palette.stroke, shape)
-                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                        .border(1.dp, palette.stroke.copy(alpha = .8f), shape)
+                        .padding(horizontal = 11.dp, vertical = 9.dp)
                 ) {
                     Column(
-                        Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())
+                        Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())
                     ) {
                         SelectionContainer {
                             Text(
                                 consoleText.takeLast(8000),
-                                fontSize = 12.5.sp,
-                                lineHeight = 18.sp,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp,
                                 fontFamily = FontFamily.Monospace,
-                                color = palette.text.copy(alpha = .92f)
+                                color = palette.text.copy(alpha = .90f)
                             )
                         }
                     }
                 }
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(5.dp))
             }
-            Action("清空控制台") { consoleText = "" }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Action("清空控制台") { consoleText = "" }
+            }
         }
     }
 
@@ -377,6 +418,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 value = commandLine,
                 onValueChange = { commandLine = it.take(8192) }
             )
+            Spacer(Modifier.height(3.dp))
             ActionRow {
                 SelectionAction("CMD", selected = shell == "cmd", modifier = Modifier.weight(1f)) { shell = "cmd" }
                 SelectionAction(
@@ -413,11 +455,14 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 toolGroups[homeCategory].orEmpty().forEach { tool ->
                     val entry = ToolNavigator.tools.firstOrNull { it.title == tool.label }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.padding(start = 8.dp).size(38.dp).glassCircle(elevation = 0.dp), contentAlignment = Alignment.Center) {
+                        Box(
+                            Modifier.padding(start = 6.dp).size(34.dp).glassCircle(elevation = 0.dp, accent = true),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Icon(
                                 painterResource(entry?.icon ?: toolIcon(tool.label)),
                                 null,
-                                modifier = Modifier.size(20.dp),
+                                modifier = Modifier.size(18.dp),
                                 tint = LocalGlassPalette.current.accent
                             )
                         }
@@ -428,8 +473,8 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         } else {
             toolGroups[homeCategory].orEmpty().chunked(2).forEach { group ->
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(9.dp)
                 ) {
                     group.forEach { tool -> ToolTile(tool, Modifier.weight(1f)) }
                     if (group.size == 1) Spacer(Modifier.weight(1f))
@@ -444,34 +489,34 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         val palette = LocalGlassPalette.current
         Card(
             modifier = modifier,
-            cornerRadius = 26.dp,
-            insideMargin = PaddingValues(16.dp),
+            cornerRadius = 22.dp,
+            insideMargin = PaddingValues(14.dp),
             onClick = { openTool(tool.label) }
         ) {
             Box(
-                Modifier.size(46.dp).glassCircle(elevation = 0.dp, accent = true),
+                Modifier.size(40.dp).glassCircle(elevation = 0.dp, accent = true),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     painterResource(toolIcon(tool.label)),
                     null,
-                    modifier = Modifier.size(23.dp),
+                    modifier = Modifier.size(20.dp),
                     tint = palette.accent
                 )
             }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(12.dp))
             Text(
                 tool.label,
-                fontSize = 15.5.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 "打开工具  ›",
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 color = palette.dim,
-                modifier = Modifier.padding(top = 5.dp)
+                modifier = Modifier.padding(top = 4.dp)
             )
         }
     }
@@ -488,72 +533,6 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         else -> R.drawable.ic_process
     }
 
-    /** 底部悬浮玻璃 Dock：选中的胶囊滑块用弹簧动画跟随。 */
-    @Composable
-    private fun HomeDock(modifier: Modifier = Modifier) {
-        val labels = listOf("控制台", "共享", "文件", "系统", "自动化")
-        val icons = listOf(R.drawable.ic_terminal, R.drawable.ic_desktop, R.drawable.ic_folder, R.drawable.ic_process, R.drawable.ic_history)
-        val palette = LocalGlassPalette.current
-        BoxWithConstraints(
-            modifier = modifier
-                .fillMaxWidth()
-                .height(66.dp)
-                .glassSurface(
-                    shape = RoundedCornerShape(30.dp),
-                    elevation = 24.dp,
-                    glow = palette.accent.copy(alpha = if (palette.light) .10f else .08f)
-                )
-        ) {
-            val itemWidth = maxWidth / labels.size
-            val index = CATEGORIES.indexOf(homeCategory).coerceAtLeast(0)
-            val indicatorX by animateDpAsState(
-                targetValue = itemWidth * index.toFloat(),
-                animationSpec = GlassMotion.slideDp,
-                label = "dock-indicator"
-            )
-            Box(
-                Modifier
-                    .offset(x = indicatorX)
-                    .width(itemWidth)
-                    .fillMaxHeight()
-                    .padding(horizontal = 5.dp, vertical = 6.dp)
-                    .glassSurface(
-                        shape = RoundedCornerShape(24.dp),
-                        fillTop = palette.accentGlass,
-                        fillBottom = palette.accentGlass.copy(alpha = .07f),
-                        elevation = 0.dp,
-                        glow = palette.accent.copy(alpha = .22f)
-                    )
-            )
-            Row(Modifier.fillMaxWidth().fillMaxHeight()) {
-                labels.forEachIndexed { i, label ->
-                    val selected = i == index
-                    Column(
-                        Modifier.weight(1f).fillMaxHeight()
-                            .selectable(selected = selected, role = Role.Tab, onClick = { homeCategory = CATEGORIES[i] })
-                            .padding(top = 8.dp, bottom = 6.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            painterResource(icons[i]),
-                            label,
-                            modifier = Modifier.size(19.dp),
-                            tint = if (selected) palette.accent else palette.dim
-                        )
-                        Text(
-                            labels[i],
-                            fontSize = 10.sp,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selected) palette.accent else palette.dim,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-
     /** 工具入口统一先确认已连接，和旧版磁贴的前置判断一致。 */
     internal fun openTool(label: String) {
         val tool = toolGroups.values.flatten().firstOrNull { it.label == label } ?: return
@@ -563,6 +542,74 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
 
     internal fun openFeature(type: Class<*>, kind: String = "") {
         startActivity(Intent(this, type).putExtra("kind", kind))
+    }
+
+    /** 底部悬浮玻璃 Dock：选中的胶囊滑块用弹簧动画跟随。 */
+    @Composable
+    private fun HomeDock(modifier: Modifier = Modifier) {
+        val labels = listOf("控制台", "共享", "文件", "系统", "自动化")
+        val icons = listOf(R.drawable.ic_terminal, R.drawable.ic_desktop, R.drawable.ic_folder, R.drawable.ic_process, R.drawable.ic_history)
+        val palette = LocalGlassPalette.current
+        BoxWithConstraints(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(58.dp)
+                .glassSurface(
+                    shape = RoundedCornerShape(24.dp),
+                    elevation = 16.dp,
+                    glow = palette.accent.copy(alpha = if (palette.light) .05f else .03f)
+                )
+        ) {
+            val itemWidth = maxWidth / labels.size
+            val index = CATEGORIES.indexOf(homeCategory).coerceAtLeast(0)
+            val indicatorX by animateDpAsState(
+                targetValue = itemWidth * index.toFloat(),
+                animationSpec = GlassMotion.slideDp,
+                label = "dock-indicator"
+            )
+            val indicatorShape = RoundedCornerShape(17.dp)
+            Box(
+                Modifier
+                    .offset(x = indicatorX)
+                    .width(itemWidth)
+                    .fillMaxHeight()
+                    .padding(horizontal = 4.dp, vertical = 5.dp)
+                    .glassSurface(
+                        shape = indicatorShape,
+                        fillTop = palette.accentGlass.copy(alpha = .55f),
+                        fillBottom = palette.accentGlass.copy(alpha = .16f),
+                        elevation = 0.dp,
+                        stroke = false
+                    )
+                    .border(1.dp, palette.accentStroke.copy(alpha = .30f), indicatorShape)
+            )
+            Row(Modifier.fillMaxWidth().fillMaxHeight()) {
+                labels.forEachIndexed { i, label ->
+                    val selected = i == index
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight()
+                            .selectable(selected = selected, role = Role.Tab, onClick = { homeCategory = CATEGORIES[i] })
+                            .padding(top = 7.dp, bottom = 5.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            painterResource(icons[i]),
+                            label,
+                            modifier = Modifier.size(18.dp),
+                            tint = if (selected) palette.accent else palette.dim.copy(alpha = .9f)
+                        )
+                        Text(
+                            labels[i],
+                            fontSize = 9.5.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (selected) palette.accent else palette.dim,
+                            modifier = Modifier.padding(top = 3.dp)
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private fun requestNotificationPermission() {

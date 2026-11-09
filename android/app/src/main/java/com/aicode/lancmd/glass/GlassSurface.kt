@@ -76,25 +76,31 @@ fun AuroraBackground(modifier: Modifier = Modifier) {
         ) {
             Canvas(Modifier.fillMaxSize()) { drawAurora(palette) }
         }
-        // 边缘压暗，让玻璃卡片浮起来。
+        // 边缘压暗 + 底部渐隐，让玻璃卡片从暗底里浮起来。
         Canvas(Modifier.fillMaxSize()) {
-            val strength = if (palette.light) 0.14f else 0.42f
+            val strength = if (palette.light) 0.10f else 0.34f
             drawRect(
                 Brush.radialGradient(
                     0f to Color.Transparent,
-                    0.62f to Color.Transparent,
+                    0.55f to Color.Transparent,
                     1f to palette.shadow.copy(alpha = strength),
-                    center = Offset(size.width * 0.5f, size.height * 0.42f),
-                    radius = size.maxDimension * 0.78f
+                    center = Offset(size.width * 0.5f, size.height * 0.38f),
+                    radius = size.maxDimension * 0.80f
+                )
+            )
+            drawRect(
+                Brush.verticalGradient(
+                    0.50f to Color.Transparent,
+                    1f to palette.bgBottom.copy(alpha = if (palette.light) 0.28f else 0.62f)
                 )
             )
         }
-        // 顶部环境光：强调色往上铺一层薄雾。
+        // 顶部环境光：非常淡的强调色雾，不改变整体中性色。
         Canvas(Modifier.fillMaxSize()) {
             drawRect(
                 Brush.verticalGradient(
-                    0f to palette.accent.copy(alpha = if (palette.light) 0.10f else 0.12f),
-                    0.36f to Color.Transparent
+                    0f to palette.accent.copy(alpha = if (palette.light) 0.05f else 0.045f),
+                    0.30f to Color.Transparent
                 )
             )
         }
@@ -119,12 +125,12 @@ private fun DrawScope.drawAurora(palette: GlassPalette) {
             )
         )
     }
-    blob(palette.blobA, 0.16f, 0.10f, w * 0.95f)
-    blob(palette.blobB, 0.94f, 0.30f, w * 0.90f)
-    blob(palette.blobC, 0.42f, 0.98f, w * 1.05f)
-    // 两处更小的暖光，增加折射层次。
-    blob(palette.accent2.copy(alpha = if (palette.light) 0.08f else 0.07f), 0.05f, 0.62f, w * 0.42f)
-    blob(palette.accent.copy(alpha = if (palette.light) 0.09f else 0.08f), 0.86f, 0.78f, w * 0.38f)
+    blob(palette.blobA, 0.06f, 0.02f, w * 0.80f)
+    blob(palette.blobB, 1.00f, 0.40f, w * 0.70f)
+    blob(palette.blobC, 0.50f, 1.02f, w * 0.95f)
+    // 小而淡的强调色光点，给暗底一点层次。
+    blob(palette.accent2.copy(alpha = if (palette.light) 0.05f else 0.045f), 0.92f, 0.92f, w * 0.34f)
+    blob(palette.accent.copy(alpha = if (palette.light) 0.05f else 0.04f), 0.04f, 0.72f, w * 0.30f)
 }
 
 /**
@@ -141,7 +147,8 @@ fun Modifier.glassSurface(
     stroke: Boolean = true,
     elevation: Dp = 14.dp,
     glow: Color = Color.Transparent,
-    sunken: Boolean = false
+    sunken: Boolean = false,
+    brush: Brush? = null
 ): Modifier {
     val palette = LocalGlassPalette.current
     val top = fillTop ?: palette.glassFillTop
@@ -159,7 +166,7 @@ fun Modifier.glassSurface(
     modifier = modifier
         .clip(shape)
         .drawBehind {
-            drawRect(Brush.verticalGradient(listOf(top, bottom)))
+            drawRect(brush ?: Brush.verticalGradient(listOf(top, bottom)))
             // 左上镜面高光
             drawRect(
                 Brush.linearGradient(

@@ -170,37 +170,36 @@ fun StatusNote(text: String, failed: Boolean) {
     val expanded = remember(text) { mutableStateOf(false) }
     val palette = LocalGlassPalette.current
     val tint = if (failed) palette.danger else palette.accent
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(14.dp)
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp)
             .glassSurface(
                 shape = shape,
-                fillTop = tint.copy(alpha = if (palette.light) .18f else .16f),
-                fillBottom = tint.copy(alpha = if (palette.light) .07f else .05f),
-                elevation = 8.dp,
-                glow = tint.copy(alpha = .16f)
+                fillTop = tint.copy(alpha = if (palette.light) .14f else .10f),
+                fillBottom = tint.copy(alpha = if (palette.light) .05f else .03f),
+                elevation = 0.dp,
+                glow = tint.copy(alpha = .10f)
             )
-            .border(1.dp, tint.copy(alpha = .32f), shape)
+            .border(1.dp, tint.copy(alpha = .22f), shape)
             .glassClickable { expanded.value = !expanded.value }
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 11.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            Modifier.size(22.dp).clip(CircleShape).background(tint.copy(alpha = .18f)),
-            contentAlignment = Alignment.Center
-        ) { Text(if (failed) "!" else "✓", color = tint, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
+            Modifier.size(8.dp).clip(CircleShape).background(tint)
+        )
         Column(
-            Modifier.weight(1f).heightIn(max = if (expanded.value) 160.dp else 44.dp)
+            Modifier.weight(1f).heightIn(max = if (expanded.value) 160.dp else 40.dp)
                 .verticalScroll(rememberScrollState())
         ) {
             Text(
                 text,
-                fontSize = 13.sp,
-                lineHeight = 19.sp,
+                fontSize = 12.5.sp,
+                lineHeight = 18.sp,
                 maxLines = if (expanded.value) Int.MAX_VALUE else 2,
                 overflow = TextOverflow.Ellipsis,
-                color = palette.text
+                color = palette.text.copy(alpha = .92f)
             )
         }
     }
@@ -210,13 +209,12 @@ fun StatusNote(text: String, failed: Boolean) {
 @Composable
 fun WorkspaceHeader(title: String, back: (() -> Unit)? = null, subtitle: String = "") {
     val palette = LocalGlassPalette.current
-    val kernel = kernelStyle()
     Column(
         Modifier.fillMaxWidth()
             .background(
                 Brush.verticalGradient(
                     0f to palette.bgTop.copy(alpha = .96f),
-                    0.62f to palette.bgTop.copy(alpha = .78f),
+                    0.66f to palette.bgTop.copy(alpha = .72f),
                     1f to Color.Transparent
                 )
             )
@@ -228,35 +226,37 @@ fun WorkspaceHeader(title: String, back: (() -> Unit)? = null, subtitle: String 
                 .fillMaxWidth()
                 .height(GlassTopBar.height)
                 .glassSurface(
-                    shape = RoundedCornerShape(GlassTopBar.height / 2),
-                    elevation = 18.dp,
-                    glow = palette.accent.copy(alpha = if (palette.light) .08f else .06f)
+                    shape = RoundedCornerShape(18.dp),
+                    elevation = 12.dp,
+                    glow = palette.accent.copy(alpha = if (palette.light) .05f else .04f)
                 )
                 .padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (back != null) IconButton(onClick = back) {
-                Icon(painterResource(R.drawable.ic_back), "返回")
+            if (back != null) {
+                IconButton(onClick = back) {
+                    Icon(painterResource(R.drawable.ic_back), "返回")
+                }
             } else {
                 BrandMark()
             }
             Column(
                 Modifier.weight(1f).padding(
-                    start = if (back == null) 12.dp else 8.dp,
+                    start = if (back == null) 11.dp else 8.dp,
                     end = 14.dp
                 )
             ) {
                 if (subtitle.isNotBlank()) Text(
                     subtitle,
-                    fontSize = 10.5.sp,
-                    letterSpacing = 1.2.sp,
+                    fontSize = 10.sp,
+                    letterSpacing = 0.6.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = palette.accent
+                    color = palette.dim
                 )
                 Text(
                     title,
-                    fontSize = if (kernel && back == null) 22.sp else 20.sp,
+                    fontSize = 19.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -267,23 +267,26 @@ fun WorkspaceHeader(title: String, back: (() -> Unit)? = null, subtitle: String 
     }
 }
 
-/** 首页顶栏左侧的品牌圆点：强调色渐变玻璃珠。 */
+/** 首页顶栏左侧的品牌标记：一枚小尺寸的渐变玻璃图标。 */
 @Composable
 private fun BrandMark() {
     val palette = LocalGlassPalette.current
+    val shape = RoundedCornerShape(10.dp)
     Box(
-        Modifier.size(42.dp).clip(CircleShape).background(
-            Brush.linearGradient(
-                listOf(
-                    palette.accent.copy(alpha = .9f),
-                    palette.accent2.copy(alpha = .55f)
+        Modifier.size(30.dp).clip(shape)
+            .background(
+                Brush.linearGradient(
+                    listOf(palette.accent.copy(alpha = .95f), palette.accent2.copy(alpha = .55f))
                 )
             )
-        ),
+            .border(1.dp, Color.White.copy(alpha = .18f), shape),
         contentAlignment = Alignment.Center
     ) {
-        Box(
-            Modifier.size(14.dp).clip(CircleShape).background(Color.White.copy(alpha = .92f))
+        Icon(
+            painterResource(R.drawable.ic_terminal),
+            null,
+            modifier = Modifier.size(17.dp),
+            tint = palette.onAccent.copy(alpha = .92f)
         )
     }
 }
@@ -472,28 +475,28 @@ fun SectionCard(title: String? = null, modifier: Modifier = Modifier, content: @
     val palette = LocalGlassPalette.current
     if (title != null) {
         Row(
-            modifier = Modifier.padding(start = 18.dp, top = 10.dp, bottom = 6.dp),
+            modifier = Modifier.padding(start = 17.dp, top = 10.dp, bottom = 5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
-                Modifier.size(width = 3.dp, height = 12.dp).clip(CircleShape)
-                    .background(palette.accent.copy(alpha = .85f))
+                Modifier.size(width = 2.5.dp, height = 11.dp).clip(CircleShape)
+                    .background(palette.accent.copy(alpha = .9f))
             )
             Text(
                 title,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
-                letterSpacing = 0.4.sp,
-                color = palette.accent,
+                letterSpacing = 0.3.sp,
+                color = palette.accent.copy(alpha = .95f),
                 modifier = Modifier.padding(start = 7.dp)
             )
         }
     }
-    val radius = if (kernel) 22.dp else 26.dp
+    val radius = if (kernel) 18.dp else 22.dp
     Card(
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         cornerRadius = radius,
-        insideMargin = PaddingValues(10.dp)
+        insideMargin = PaddingValues(12.dp)
     ) { content() }
 }
 
@@ -531,13 +534,7 @@ fun RowItem(title: String, summary: String? = null, enabled: Boolean = true, onL
                 color = palette.dim
             )
         }
-        Box(
-            Modifier.size(30.dp).clip(CircleShape).background(palette.glassFillTop)
-                .border(1.dp, palette.strokeBottom, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("›", fontSize = 18.sp, color = palette.accent)
-        }
+        Text("›", fontSize = 20.sp, color = palette.dim.copy(alpha = .8f), modifier = Modifier.padding(start = 8.dp, end = 2.dp))
     }
 }
 
@@ -586,30 +583,33 @@ fun SelectionRow(title: String, summary: String? = null, checked: Boolean, onChe
     }
 }
 
-/** Compact visual selectors retain a 48 dp touch target. */
+/** 紧凑的玻璃选择按钮，保留 48 dp 触摸目标。 */
 @Composable
 fun SelectionAction(text: String, selected: Boolean = false, enabled: Boolean = true, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val palette = LocalGlassPalette.current
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(12.dp)
     Box(
         modifier = modifier
-            .heightIn(min = 48.dp)
+            .heightIn(min = 44.dp)
             .selectable(selected, enabled, role = Role.Button, onClick = onClick)
             .glassSurface(
                 shape = shape,
-                fillTop = if (selected) palette.accentGlass else palette.glassFillTop.copy(alpha = .05f),
-                fillBottom = if (selected) palette.accentGlass.copy(alpha = .08f) else palette.glassFillBottom.copy(alpha = .02f),
+                fillTop = if (selected) palette.accentGlass else palette.glassFillTop.copy(alpha = .045f),
+                fillBottom = if (selected) palette.accentGlass.copy(alpha = .08f) else palette.glassFillBottom.copy(alpha = .015f),
                 elevation = 0.dp,
-                glow = if (selected) palette.accent.copy(alpha = .10f) else Color.Transparent
-            ),
+                stroke = false,
+                glow = if (selected) palette.accent.copy(alpha = .08f) else Color.Transparent
+            )
+            .border(1.dp, if (selected) palette.accentStroke.copy(alpha = .55f) else palette.stroke.copy(alpha = .55f), shape),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text,
             fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 9.dp),
-            color = if (!enabled) palette.dim.copy(alpha = .5f) else if (selected) palette.accent else palette.text
+            color = if (!enabled) palette.dim.copy(alpha = .45f) else if (selected) palette.accent else palette.text.copy(alpha = .82f)
         )
     }
 }
@@ -665,9 +665,9 @@ fun Action(
         text = text,
         onClick = onClick,
         enabled = enabled,
-        cornerRadius = if (kernelStyle()) 24.dp else 18.dp,
-        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
-        modifier = modifier.padding(vertical = 4.dp).heightIn(min = 48.dp),
+        cornerRadius = if (kernelStyle()) 16.dp else 13.dp,
+        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        modifier = modifier.padding(vertical = 3.dp).heightIn(min = 44.dp),
         colors = if (primary) ButtonDefaults.textButtonColorsPrimary() else ButtonDefaults.textButtonColors()
     )
 }
@@ -676,8 +676,8 @@ fun Action(
 @Composable
 fun ActionRow(content: @Composable RowScope.() -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 3.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp)
     ) { content() }
 }
 

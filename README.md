@@ -3,7 +3,9 @@
 手机在同一个局域网下直接控制电脑：执行命令、查看屏幕和摄像头、发送消息和按键、管理磁盘文件、锁屏与剪贴板。
 电脑端由本机启动、停止接收服务；手机端开机即自动发现、**不用输连接码**、**掉线自动重连**。
 
-**3.19.0：安卓界面按 Liquid Glass 标准重构——半透明玻璃卡片、流动极光背景、悬浮玻璃顶栏与底部 Dock、回弹式页面转场；功能、文案和连接行为不变，只改安卓外观与动效。[说明](docs/releases/v3.19.0.md)。**
+**3.19.1：按真机观感重做 Liquid Glass 视觉——近黑中性底、克制的角落极光、更薄更透的玻璃卡片与按钮、浮动标签输入框和收紧的首页排版；功能、文案和连接行为不变，只改安卓外观与动效。[说明](docs/releases/v3.19.1.md)。**
+
+**3.19.0：安卓界面按 Liquid Glass 标准重构——半透明玻璃卡片、流动极光背景、悬浮玻璃顶栏与底部 Dock、回弹式页面转场。[说明](docs/releases/v3.19.0.md)。**
 
 **3.18.8：本机确认后，start.bat 可联动启动已安装的 AdGuard Home 服务，不新增弹窗或通知；安卓新增独立 HTTPS 管理页入口。需先完成外部软件与 DNS／HTTPS 配置，不捆绑安装或收集访问记录。[说明](docs/releases/v3.18.8.md)。**
 
@@ -73,9 +75,9 @@
 
 1.9.0：触屏输入暂停、桌面程序管理、文件打开/解压/预览、顺序延迟命令列表，以及全屏等比显示和虚拟键盘更新。
 
-- [下载 Android 3.19.0 APK](https://github.com/DeepShawn/yuankong/releases/download/v3.19.0/LanCmd-3.19.0.apk)
-- [下载 Windows 3.19.0 接收端](https://github.com/DeepShawn/yuankong/releases/download/v3.19.0/LanCmd-Windows-3.19.0.zip)
-- 新功能与限制见 [3.19.0 说明](docs/releases/v3.19.0.md)。
+- [下载 Android 3.19.1 APK](https://github.com/DeepShawn/yuankong/releases/download/v3.19.1/LanCmd-3.19.1.apk)
+- [下载 Windows 3.19.1 接收端](https://github.com/DeepShawn/yuankong/releases/download/v3.19.1/LanCmd-Windows-3.19.1.zip)
+- 新功能与限制见 [3.19.1 说明](docs/releases/v3.19.1.md)。
 - 首页「更多」进入录制与手势板，详见 [2.2.0 说明](docs/releases/v2.2.0.md)。录制遵循系统隐私权限和设备指示，不自动更改系统隐私设置。
 - 首页「U盘锁 / 设备」查看 USB 存储和 USB MTP/PTP 手机。可移动磁盘支持锁定、只读和恢复原策略；便携设备支持锁定和恢复。管理员接收端可修改策略或安全弹出设备，标准权限可查看。
 - 新增「远程桌面」卡片，点击画面控制电脑：单击、双击、长按右键、拖动、双指滚动。
