@@ -17,6 +17,7 @@ object Prefs {
     private const val KEY_UPLOAD_DIR = "upload_dir"
     private const val KEY_ACCENT = "theme_accent"
     private const val KEY_TONE = "theme_tone"
+    private const val KEY_UPDATE_CHECK = "update_last_check"
 
     private fun sp(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -82,6 +83,13 @@ object Prefs {
     fun saveUiStyle(ctx: Context, value: String) {
         require(value in listOf("kernel", "miuix"))
         sp(ctx).edit().putString("ui_style", value).apply()
+    }
+
+    /** 上次检查安卓更新的时间（毫秒）；0 表示从未检查。 */
+    fun lastUpdateCheck(ctx: Context): Long = sp(ctx).getLong(KEY_UPDATE_CHECK, 0L)
+
+    fun markUpdateChecked(ctx: Context) {
+        sp(ctx).edit().putLong(KEY_UPDATE_CHECK, System.currentTimeMillis()).apply()
     }
 
     fun saveTheme(ctx: Context, accent: String, tone: String) {

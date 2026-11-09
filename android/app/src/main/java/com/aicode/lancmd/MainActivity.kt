@@ -77,6 +77,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -117,6 +118,16 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     private var firewallChecked = false
     /** 最近一次连接状态；界面不可见时也要保持最新。 */
     private var connection = Status()
+
+    // ---- 应用自更新 ----
+    internal var updateRelease by mutableStateOf<AppRelease?>(null)
+    internal var updateChecking by mutableStateOf(false)
+    internal var updateDownloading by mutableStateOf(false)
+    internal var updateProgress by mutableStateOf(0f)
+    internal var updateStatus by mutableStateOf("")
+    private var updateFile by mutableStateOf<File?>(null)
+    private var updateJob: Job? = null
+    private var awaitingInstallPermission = false
 
     private val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
@@ -190,6 +201,24 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         try { render(ConnectionManager.snapshot()) }
         catch (t: Throwable) { android.util.Log.e("LanCmd", "首帧刷新失败: " + t.message, t) }
         requestNotificationPermission()
+        // 下载好但没装完的更新包：Activity 重建后仍可继续安装。
+        UpdateChecker.pendingUpdate(this)?.let { file ->
+            val version = UpdateChecker.pendingVersion(file)
+            if (version != null && UpdateChecker.isNewer(version, UpdateChecker.currentVersion())) {
+                updateFile = file
+                updateRelease = AppRelease(
+                    tag = "v$version",
+                    version = version,
+                    notes = "",
+                    apkUrl = "",
+                    size = file.length()
+                )
+                updateStatus = "已下载好更新，可直接安装"
+            } else {
+                file.delete()
+            }
+        }
+        maybeAutoCheckUpdates()
     }
 
     @Composable
@@ -210,6 +239,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 ) {
                     Spacer(Modifier.height(top))
                     StatusHero()
+                    if (updateRelease != null) UpdateCard()
                     if (delayProgress.isNotBlank()) StatusNote(delayProgress, false)
                     if (overlayVisible) OverlayCard()
                     ContentSwitch { if (homeCategory == "命令控制台") Console() else Tools() }
@@ -319,6 +349,74 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 maxLines = 1,
                 modifier = Modifier.padding(start = 5.dp)
             )
+        }
+    }
+
+    /** 发现新版本时的玻璃更新卡片：版本、大小、下载进度与安装入口。 */
+    @Composable
+    private fun UpdateCard() {
+        val release = updateRelease ?: return
+        val palette = LocalGlassPalette.current
+        SectionCard("应用更新") {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(34.dp).glassCircle(elevation = 0.dp, accent = true),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painterResource(R.drawable.ic_history),
+                        null,
+                        modifier = Modifier.size(18.dp),
+                        tint = palette.accent
+                    )
+                }
+                Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                    Text(
+                        "发现新版本 ${release.version}",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        when {
+                            updateDownloading -> "正在下载 ${(updateProgress * 100).toInt()}%"
+                            updateStatus.isNotBlank() -> updateStatus
+                            updateFile != null -> "已下载，等待安装"
+                            else -> "当前 ${UpdateChecker.currentVersion()}" +
+                                if (release.size > 0) " · ${UpdateChecker.formatSize(release.size)}" else ""
+                        },
+                        fontSize = 11.5.sp,
+                        color = palette.dim,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 3.dp)
+                    )
+                }
+            }
+            if (updateDownloading) {
+                Spacer(Modifier.height(5.dp))
+                Progress(updateProgress)
+            }
+            Spacer(Modifier.height(7.dp))
+            ActionRow {
+                when {
+                    updateDownloading -> {
+                        Action("取消下载", modifier = Modifier.weight(1f)) { cancelUpdate() }
+                    }
+                    updateFile != null -> {
+                        Action("安装已下载", primary = true, modifier = Modifier.weight(1f)) { installDownloaded() }
+                        Action("稍后", modifier = Modifier.weight(1f)) {
+                            updateRelease = null
+                            updateStatus = ""
+                        }
+                    }
+                    else -> {
+                        Action("下载并安装", primary = true, modifier = Modifier.weight(1f)) { startUpdate(release) }
+                        Action("更新说明", modifier = Modifier.weight(1f)) { showUpdateNotes(release) }
+                    }
+                }
+            }
         }
     }
 
@@ -531,6 +629,114 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         "按键", "手势回放" -> R.drawable.ic_keyboard
         "消息" -> R.drawable.ic_message
         else -> R.drawable.ic_process
+    }
+
+    // ------------------------------------------------------------ 应用更新
+
+    private fun maybeAutoCheckUpdates() {
+        if (UpdateChecker.isTestEnvironment) return
+        if (!UpdateChecker.shouldAutoCheck(this)) return
+        checkForUpdate(manual = false)
+    }
+
+    /** 检查 GitHub Release 上的安卓更新；[manual] 为用户主动点击。 */
+    internal fun checkForUpdate(manual: Boolean) {
+        if (updateChecking || updateDownloading) return
+        updateChecking = true
+        if (manual) toast("正在检查更新…")
+        lifecycleScope.launch {
+            try {
+                val release = UpdateChecker.fetchLatest(this@MainActivity)
+                UpdateChecker.markChecked(this@MainActivity)
+                if (release != null) {
+                    updateRelease = release
+                    updateStatus = ""
+                    log("发现新版本 ${release.version}", LogKind.INFO)
+                } else if (manual) {
+                    toast("已是最新版本 ${UpdateChecker.currentVersion()}")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (manual) {
+                    updateStatus = "检查更新失败：${e.message ?: "网络错误"}"
+                    toast("检查更新失败，请检查网络")
+                }
+            } finally {
+                updateChecking = false
+            }
+        }
+    }
+
+    private fun showUpdateNotes(release: AppRelease) {
+        WorkspaceDialog.Builder(this)
+            .setTitle("LanCmd ${release.version} 更新说明")
+            .setMessage(release.notes.ifBlank { "（该版本没有附更新说明）" })
+            .setNegativeButton("稍后", null)
+            .setPositiveButton("下载并安装") { _, _ -> startUpdate(release) }
+            .show()
+    }
+
+    /** 下载更新包并校验签名，成功后打开系统安装界面。 */
+    internal fun startUpdate(release: AppRelease) {
+        if (updateDownloading) return
+        updateDownloading = true
+        updateProgress = 0f
+        updateStatus = ""
+        updateJob = lifecycleScope.launch {
+            try {
+                val file = UpdateChecker.download(this@MainActivity, release) { progress ->
+                    updateProgress = progress
+                }
+                val problem = UpdateChecker.verifyApk(this@MainActivity, file, release.version)
+                if (problem != null) {
+                    file.delete()
+                    updateStatus = problem
+                } else {
+                    updateFile = file
+                    updateStatus = "下载完成，正在打开系统安装…"
+                    installDownloaded()
+                }
+            } catch (e: CancellationException) {
+                updateStatus = "下载已取消"
+                throw e
+            } catch (e: Exception) {
+                updateStatus = "下载失败：${e.message ?: "网络错误"}"
+            } finally {
+                updateDownloading = false
+                updateJob = null
+            }
+        }
+    }
+
+    private fun cancelUpdate() {
+        updateJob?.cancel()
+        updateJob = null
+        updateDownloading = false
+        updateStatus = "下载已取消"
+    }
+
+    /** 打开系统安装界面；未授权「安装未知应用」时先跳授权页，返回后自动继续。 */
+    internal fun installDownloaded() {
+        val file = updateFile ?: return
+        if (!UpdateChecker.canInstallPackages(this)) {
+            awaitingInstallPermission = true
+            updateStatus = "需要允许安装未知来源应用；授权后返回会自动继续"
+            runCatching { startActivity(UpdateChecker.unknownSourcesIntent(this)) }
+                .onFailure { updateStatus = "无法打开安装权限设置：${it.message ?: ""}" }
+            return
+        }
+        awaitingInstallPermission = false
+        updateStatus = "已交给系统安装：按提示完成覆盖安装"
+        runCatching { startActivity(UpdateChecker.installIntent(this, file)) }
+            .onFailure { updateStatus = "无法打开系统安装界面：${it.message ?: ""}" }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (awaitingInstallPermission && UpdateChecker.canInstallPackages(this)) {
+            installDownloaded()
+        }
     }
 
     /** 工具入口统一先确认已连接，和旧版磁贴的前置判断一致。 */
@@ -998,6 +1204,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
             },
             "电脑信息" to { showInfo() },
             "外观主题" to { ThemeDialog(this).show() },
+            "检查更新" to { checkForUpdate(manual = true) },
             (if (LanCmdService.isRunning) "关闭后台常驻" else "开启后台常驻") to { toggleResident() },
             "查看崩溃日志" to { showCrashLog() },
             "运行中的进程" to { showProcesses() },
@@ -1107,9 +1314,11 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                     "· 电脑端常驻后台，手机断线不影响它\n" +
                     "· 掉线后自动重连，网络恢复立即重试\n" +
                     "· 配对后可自动重连\n" +
-                    "· 屏幕、摄像头和按键需在电脑端授权，可随时停止\n\n" +
+                    "· 屏幕、摄像头和按键需在电脑端授权，可随时停止\n" +
+                    "· 每天自动检查安卓更新，从 GitHub Release 下载并校验官方签名\n\n" +
                     "电脑端：pythonw lan_command_agent.py"
-            ).setPositiveButton("好", null).show()
+            ).setNeutralButton("检查更新") { _, _ -> checkForUpdate(manual = true) }
+            .setPositiveButton("好", null).show()
     }
 
     // ------------------------------------------------------------ 状态渲染
