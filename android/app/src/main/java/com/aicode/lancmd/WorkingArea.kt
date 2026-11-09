@@ -22,7 +22,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import com.aicode.lancmd.glass.MiuixTheme
 
 /** The picture and controls share all remaining space; neither is below a page scroll. */
 @Composable

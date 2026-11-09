@@ -31,9 +31,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.google.android.material.button.MaterialButton
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import com.aicode.lancmd.glass.Card
+import com.aicode.lancmd.glass.Text
+import com.aicode.lancmd.glass.MiuixTheme
 
 /** Compose dialog surface with native editing/list adapters kept for existing controllers.
  * The real buttons remain accessible to validation and asynchronous enable/disable logic.

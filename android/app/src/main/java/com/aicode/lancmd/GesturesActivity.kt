@@ -22,7 +22,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import org.json.JSONArray
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperSwitch
+import com.aicode.lancmd.glass.SuperSwitch
 import java.text.DateFormat
 import java.util.Date
 import kotlin.coroutines.coroutineContext

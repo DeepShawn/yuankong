@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<alpha xmlns:android="http://schemas.android.com/apk/res/android"
-    android:fromAlpha="1" android:toAlpha="0" android:duration="160"
-    android:interpolator="@android:interpolator/fast_out_slow_in" />
+<!-- 退出页面：轻微推远 + 淡出，给上层页面让出空间。 -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shareInterpolator="false">
+    <alpha android:fromAlpha="1" android:toAlpha="0" android:duration="220"
+        android:interpolator="@android:interpolator/accelerate_decelerate" />
+    <scale android:fromXScale="1" android:toXScale="1.03"
+        android:fromYScale="1" android:toYScale="1.03"
+        android:pivotX="50%" android:pivotY="50%" android:duration="220"
+        android:interpolator="@android:interpolator/decelerate_cubic" />
+</set>

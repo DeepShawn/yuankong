@@ -44,7 +44,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperSwitch
+import com.aicode.lancmd.glass.SuperSwitch
 import kotlin.coroutines.coroutineContext
 
 /** 画面、触控/键鼠与终端共用一个工作区。界面使用 miuix。 */

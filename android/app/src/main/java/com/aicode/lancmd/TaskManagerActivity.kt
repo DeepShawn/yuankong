@@ -28,8 +28,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperCheckbox
-import top.yukonga.miuix.kmp.extra.SuperSwitch
+import com.aicode.lancmd.glass.SuperSwitch
 import java.util.Locale
 
 /** 电脑进程列表与批量结束。界面使用 miuix。 */

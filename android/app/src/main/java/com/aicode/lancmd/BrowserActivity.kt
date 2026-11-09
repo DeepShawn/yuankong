@@ -18,17 +18,15 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.extra.SuperArrow
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import com.aicode.lancmd.glass.Card
+import com.aicode.lancmd.glass.Icon
+import com.aicode.lancmd.glass.IconButton
+import com.aicode.lancmd.glass.Scaffold
+import com.aicode.lancmd.glass.SmallTitle
+import com.aicode.lancmd.glass.Text
+import com.aicode.lancmd.glass.TextButton
+import com.aicode.lancmd.glass.TextField
+import com.aicode.lancmd.glass.MiuixTheme
 
 /** 向电脑发送网址，并保存常用网址。界面使用 miuix。 */
 class BrowserActivity : MiuixActivity() {

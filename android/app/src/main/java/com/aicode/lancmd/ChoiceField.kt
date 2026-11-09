@@ -21,9 +21,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import com.aicode.lancmd.glass.Card
+import com.aicode.lancmd.glass.Text
+import com.aicode.lancmd.glass.MiuixTheme
 
 /** A bounded, Activity-local miuix selector; choices may refresh while it is open. */
 @Composable

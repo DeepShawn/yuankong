@@ -23,7 +23,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperSwitch
+import com.aicode.lancmd.glass.SuperSwitch
 import java.io.File
 import java.text.DateFormat
 import java.util.Date

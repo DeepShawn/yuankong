@@ -90,9 +90,12 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
-    // MIUI 风格的 Compose 组件库。界面按页逐步迁移到 Compose，
-    // 期间 View 页面与 Compose 页面共存，由 ComposeView 承载。
-    implementation("top.yukonga.miuix.kmp:miuix-android:0.8.8")
+    // Liquid Glass 设计系统基于原生 Compose 构建，不再依赖 miuix。
+    implementation("androidx.compose.foundation:foundation:1.10.3")
+    implementation("androidx.compose.ui:ui:1.10.3")
+    implementation("androidx.compose.ui:ui-text:1.10.3")
+    implementation("androidx.compose.animation:animation:1.10.3")
+    implementation("androidx.compose.runtime:runtime:1.10.3")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.compose.ui:ui-test-junit4:1.10.3")

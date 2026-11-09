@@ -10,8 +10,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Text
+import com.aicode.lancmd.glass.Card
+import com.aicode.lancmd.glass.Text
 
 @Composable
 fun ConfirmAction(title:String,message:String,confirm:String="确认",onDismiss:()->Unit,onConfirm:()->Unit) {

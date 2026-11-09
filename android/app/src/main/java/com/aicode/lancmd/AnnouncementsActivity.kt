@@ -15,7 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperSwitch
+import com.aicode.lancmd.glass.SuperSwitch
 import java.math.BigDecimal
 
 class AnnouncementsActivity:MiuixActivity() {

@@ -114,6 +114,12 @@
         <item name="alertDialogTheme">@style/ThemeOverlay.LanCmd.AlertDialog</item>
     </style>
 
+    <!-- 对话框进出场：从中心轻微放大并淡入，关闭时缩回。 -->
+    <style name="LanCmd.DialogAnimation" parent="@android:style/Animation.Dialog">
+        <item name="android:windowEnterAnimation">@anim/glass_dialog_enter</item>
+        <item name="android:windowExitAnimation">@anim/glass_dialog_exit</item>
+    </style>
+
     <style name="ShapeAppearance.LanCmd.Small" parent="ShapeAppearance.Material3.SmallComponent">
         <item name="cornerSize">12dp</item>
     </style>
@@ -131,13 +137,15 @@
         <item name="colorSurface">?attr/lcSurface</item>
         <item name="colorSurfaceContainerHigh">?attr/lcSurface</item>
         <item name="shapeAppearanceCornerExtraLarge">@style/ShapeAppearance.LanCmd.Dialog</item>
-        <item name="android:backgroundDimAmount">0.7</item>
+        <item name="android:backgroundDimAmount">0.55</item>
+        <item name="android:windowAnimationStyle">@style/LanCmd.DialogAnimation</item>
     </style>
 
     <style name="ThemeOverlay.LanCmd.AlertDialog" parent="ThemeOverlay.Material3.Dialog.Alert">
         <item name="android:windowBackground">@drawable/dialog_bg</item>
         <item name="colorSurface">?attr/lcSurface</item>
-        <item name="android:backgroundDimAmount">0.7</item>
+        <item name="android:backgroundDimAmount">0.55</item>
+        <item name="android:windowAnimationStyle">@style/LanCmd.DialogAnimation</item>
         <item name="buttonBarPositiveButtonStyle">@style/Widget.LanCmd.DialogButton</item>
         <item name="buttonBarNegativeButtonStyle">@style/Widget.LanCmd.DialogButton.Muted</item>
         <item name="buttonBarNeutralButtonStyle">@style/Widget.LanCmd.DialogButton.Muted</item>

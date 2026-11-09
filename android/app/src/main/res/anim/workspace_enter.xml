@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 进入页面：轻微放大 + 上浮 + 淡入，缩放带回弹，接近液体玻璃的「托起」手感。 -->
 <set xmlns:android="http://schemas.android.com/apk/res/android"
-    android:interpolator="@android:interpolator/fast_out_slow_in">
-    <alpha android:fromAlpha="0" android:toAlpha="1" android:duration="220" />
-    <translate android:fromYDelta="5%" android:toYDelta="0" android:duration="220" />
-    <scale android:fromXScale="0.98" android:toXScale="1" android:fromYScale="0.98" android:toYScale="1"
-        android:pivotX="50%" android:pivotY="50%" android:duration="220" />
+    android:shareInterpolator="false">
+    <alpha android:fromAlpha="0" android:toAlpha="1" android:duration="300"
+        android:interpolator="@android:interpolator/accelerate_decelerate" />
+    <scale android:fromXScale="0.94" android:toXScale="1"
+        android:fromYScale="0.94" android:toYScale="1"
+        android:pivotX="50%" android:pivotY="50%" android:duration="360"
+        android:interpolator="@android:interpolator/overshoot" />
+    <translate android:fromYDelta="5%" android:toYDelta="0" android:duration="340"
+        android:interpolator="@android:interpolator/decelerate_cubic" />
 </set>

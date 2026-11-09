@@ -26,8 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.res.painterResource
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
+import com.aicode.lancmd.glass.Icon
+import com.aicode.lancmd.glass.IconButton
 import androidx.compose.ui.unit.dp
 import com.aicode.lancmd.net.ConnectionManager
 import com.aicode.lancmd.net.FileTransfer
@@ -41,7 +41,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.extra.SuperCheckbox
 import java.io.File
 import java.io.IOException
 import java.text.DateFormat

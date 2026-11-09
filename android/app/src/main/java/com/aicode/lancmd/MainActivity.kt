@@ -49,11 +49,34 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import com.aicode.lancmd.glass.Card
+import com.aicode.lancmd.glass.GlassMotion
+import com.aicode.lancmd.glass.Icon
+import com.aicode.lancmd.glass.LocalGlassPalette
+import com.aicode.lancmd.glass.Scaffold
+import com.aicode.lancmd.glass.Text
+import com.aicode.lancmd.glass.glassCircle
+import com.aicode.lancmd.glass.glassClickable
+import com.aicode.lancmd.glass.glassSurface
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -170,132 +193,363 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     }
 
     @Composable
-    private fun Screen() = Scaffold(topBar={ WorkspaceHeader("LanCmd",subtitle=if(connected)"已连接 · 远程工作区" else "等待连接 · 远程工作区") }) { insets ->
-        Column(modifier = Modifier.fillMaxSize().padding(insets)) {
-            SectionCard {
-                if(latencyText.isNotBlank())RowItem(deviceName.ifBlank{getString(R.string.status_idle)},listOf(deviceSub,latencyText).filter{it.isNotBlank()}.joinToString(" · ")){pingOnce()}
-                else InfoItem(deviceName.ifBlank { getString(R.string.status_idle) }, deviceSub)
-                ActionRow {
-                    Action("电脑", modifier = Modifier.weight(1f)) { startActivity(Intent(this@MainActivity,ComputersActivity::class.java)) }
-                    Action("工具库", modifier = Modifier.weight(1f)) { ToolNavigator.show(this@MainActivity) }
-                    Action("外观主题", modifier = Modifier.weight(1f)) { ThemeDialog(this@MainActivity).show() }
-                    Action("更多", modifier = Modifier.weight(1f)) { showMenu() }
-                }
-            }
-            if(delayProgress.isNotBlank())StatusNote(delayProgress,false)
-            if (overlayVisible) SectionCard {
-                Note(overlayMessage)
-                ActionRow {
-                    if (!overlayBusy) Action("立即重连", primary = true, modifier = Modifier.weight(1f)) {
-                        note("正在重连…")
-                        ConnectionManager.retryNow()
-                    }
-                    if (firewallHelpVisible) Action("连不上？", modifier = Modifier.weight(1f)) {
-                        showFirewallHelp()
-                    }
-                }
-            }
-            Column(modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())) {
-                if (homeCategory == "命令控制台") Console() else Tools()
-            if(homeCategory=="命令控制台")SectionCard {
-                Field(
-                    label = "输入命令，回车发送",
-                    value = commandLine,
-                    onValueChange = { commandLine = it.take(8192) }
+    private fun Screen() {
+        Scaffold(
+            topBar = {
+                WorkspaceHeader(
+                    "LanCmd",
+                    subtitle = if (connected) "已连接 · 远程工作区" else "等待连接 · 远程工作区"
                 )
-                ActionRow {
-                    SelectionAction("CMD", selected = shell == "cmd", modifier = Modifier.weight(1f)) { shell = "cmd" }
-                    SelectionAction(
-                        "PowerShell",
-                        selected = shell == "powershell",
-                        modifier = Modifier.weight(1f)
-                    ) { shell = "powershell" }
-                    Action("发送", enabled = connected, primary = true, modifier = Modifier.weight(1f)) {
-                        sendTyped()
-                    }
-                }
-                ActionRow {
-                    Action("常用", modifier = Modifier.weight(1f)) {
-                        CommandHints.show(this@MainActivity, shell == "powershell") { line ->
-                            commandLine = line
-                        }
-                    }
-                    Action("历史", modifier = Modifier.weight(1f)) { showHistory() }
-                    Action("传文件", modifier = Modifier.weight(1f)) { startPickFiles() }
-                    Action("延迟", modifier = Modifier.weight(1f)) {
-                        startActivity(
-                            Intent(this@MainActivity, CommandsActivity::class.java)
-                                .putExtra("line", commandLine).putExtra("shell", shell)
-                        )
-                    }
-                }
             }
+        ) { insets ->
+            val top = insets.calculateTopPadding()
+            val bottom = insets.calculateBottomPadding()
+            Box(Modifier.fillMaxSize()) {
+                Column(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                ) {
+                    Spacer(Modifier.height(top))
+                    StatusHero()
+                    if (delayProgress.isNotBlank()) StatusNote(delayProgress, false)
+                    if (overlayVisible) OverlayCard()
+                    ContentSwitch { if (homeCategory == "命令控制台") Console() else Tools() }
+                    if (homeCategory == "命令控制台") CommandCard()
+                    Spacer(Modifier.height(bottom + 104.dp))
+                }
+                HomeDock(
+                    Modifier.align(Alignment.BottomCenter)
+                        .padding(horizontal = 14.dp)
+                        .padding(bottom = bottom + 10.dp)
+                )
             }
-            HomeDock()
         }
     }
 
-    @Composable private fun HomeDock() {
-        val labels=listOf("控制台","共享","文件","系统","自动化")
-        val icons=listOf(R.drawable.ic_terminal,R.drawable.ic_desktop,R.drawable.ic_folder,R.drawable.ic_process,R.drawable.ic_history)
-        Row(Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=8.dp),horizontalArrangement=Arrangement.spacedBy(4.dp)) {
-            CATEGORIES.forEachIndexed { index,category ->
-                val selected=category==homeCategory
-                Column(Modifier.weight(1f).background(if(selected)MiuixTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,RoundedCornerShape(if(kernelStyle())28.dp else 18.dp))
-                    .selectable(selected=selected,role=Role.Tab,onClick={homeCategory=category}).padding(vertical=6.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-                    Icon(painterResource(icons[index]),category,modifier=Modifier.size(21.dp),tint=if(selected)MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    Text(labels[index],fontSize=11.sp,fontWeight=if(selected)FontWeight.Bold else FontWeight.Normal,modifier=Modifier.padding(top=5.dp))
+    /** 连接状态主卡：设备、延迟与四个入口。 */
+    @Composable
+    private fun StatusHero() {
+        val palette = LocalGlassPalette.current
+        SectionCard {
+            Row(
+                Modifier.fillMaxWidth().glassClickable { pingOnce() }
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                StatusDot(connected)
+                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                    Text(
+                        deviceName.ifBlank { getString(R.string.status_idle) },
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val detail = listOf(deviceSub, latencyText).filter { it.isNotBlank() }.joinToString(" · ")
+                    Text(
+                        if (detail.isBlank()) (if (connected) "远程工作区已就绪" else "在同一局域网中自动发现电脑") else detail,
+                        fontSize = 12.sp,
+                        color = palette.dim,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
+                if (latencyText.isNotBlank()) StatusPill(latencyText)
             }
+            ActionRow {
+                Action("电脑", modifier = Modifier.weight(1f)) { startActivity(Intent(this@MainActivity, ComputersActivity::class.java)) }
+                Action("工具库", modifier = Modifier.weight(1f)) { ToolNavigator.show(this@MainActivity) }
+                Action("外观主题", modifier = Modifier.weight(1f)) { ThemeDialog(this@MainActivity).show() }
+                Action("更多", modifier = Modifier.weight(1f)) { showMenu() }
+            }
+        }
+    }
+
+    /** 连接状态圆点：已连接为绿色呼吸灯，未连接为中性灰。 */
+    @Composable
+    private fun StatusDot(connected: Boolean) {
+        val palette = LocalGlassPalette.current
+        val dot = if (connected) palette.ok else palette.dim
+        Box(Modifier.size(42.dp).glassCircle(elevation = 0.dp), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.size(20.dp).clip(CircleShape).background(
+                    Brush.radialGradient(
+                        listOf(dot.copy(alpha = .20f), dot.copy(alpha = .95f)),
+                        center = androidx.compose.ui.geometry.Offset(14f, 12f),
+                        radius = 30f
+                    )
+                )
+            )
         }
     }
 
     @Composable
+    private fun StatusPill(text: String) {
+        val palette = LocalGlassPalette.current
+        Row(
+            Modifier.padding(start = 8.dp)
+                .glassSurface(
+                    shape = RoundedCornerShape(14.dp),
+                    fillTop = palette.accentGlass,
+                    fillBottom = palette.accentGlass.copy(alpha = .06f),
+                    elevation = 0.dp,
+                    glow = palette.accent.copy(alpha = .10f)
+                )
+                .padding(horizontal = 10.dp, vertical = 5.dp)
+        ) { Text(text, fontSize = 11.sp, color = palette.accent, maxLines = 1) }
+    }
+
+    @Composable
+    private fun OverlayCard() {
+        SectionCard {
+            Note(overlayMessage)
+            ActionRow {
+                if (!overlayBusy) Action("立即重连", primary = true, modifier = Modifier.weight(1f)) {
+                    note("正在重连…")
+                    ConnectionManager.retryNow()
+                }
+                if (firewallHelpVisible) Action("连不上？", modifier = Modifier.weight(1f)) {
+                    showFirewallHelp()
+                }
+            }
+        }
+    }
+
+    /** 分类切换：内容轻推 + 缩放回弹，不隐藏内容，语义与测试保持稳定。 */
+    @Composable
+    private fun ContentSwitch(content: @Composable () -> Unit) {
+        var last by remember { mutableStateOf(homeCategory) }
+        val shift = remember { Animatable(0f) }
+        LaunchedEffect(homeCategory) {
+            if (last != homeCategory) {
+                last = homeCategory
+                shift.snapTo(1f)
+                shift.animateTo(0f, animationSpec = tween(300, easing = FastOutSlowInEasing))
+            }
+        }
+        Box(
+            Modifier.fillMaxWidth().graphicsLayer {
+                translationY = shift.value * 16.dp.toPx()
+                val scale = 1f - shift.value * 0.012f
+                scaleX = scale
+                scaleY = scale
+            }
+        ) { content() }
+    }
+
+    @Composable
     private fun Console() {
+        val palette = LocalGlassPalette.current
         SectionCard("命令控制台") {
             if (consoleText.isBlank()) EmptyNote("连接后在下方输入命令，输出显示在这里。")
-            else Column(Modifier.fillMaxWidth().heightIn(max=360.dp).verticalScroll(rememberScrollState())) {
-                SelectionContainer { Note(consoleText.takeLast(8000)) }
+            else {
+                val shape = RoundedCornerShape(18.dp)
+                Column(
+                    Modifier.fillMaxWidth().clip(shape).background(palette.console)
+                        .border(1.dp, palette.stroke, shape)
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                consoleText.takeLast(8000),
+                                fontSize = 12.5.sp,
+                                lineHeight = 18.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = palette.text.copy(alpha = .92f)
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
             }
             Action("清空控制台") { consoleText = "" }
         }
     }
 
     @Composable
+    private fun CommandCard() {
+        SectionCard {
+            Field(
+                label = "输入命令，回车发送",
+                value = commandLine,
+                onValueChange = { commandLine = it.take(8192) }
+            )
+            ActionRow {
+                SelectionAction("CMD", selected = shell == "cmd", modifier = Modifier.weight(1f)) { shell = "cmd" }
+                SelectionAction(
+                    "PowerShell",
+                    selected = shell == "powershell",
+                    modifier = Modifier.weight(1f)
+                ) { shell = "powershell" }
+                Action("发送", enabled = connected, primary = true, modifier = Modifier.weight(1f)) {
+                    sendTyped()
+                }
+            }
+            ActionRow {
+                Action("常用", modifier = Modifier.weight(1f)) {
+                    CommandHints.show(this@MainActivity, shell == "powershell") { line ->
+                        commandLine = line
+                    }
+                }
+                Action("历史", modifier = Modifier.weight(1f)) { showHistory() }
+                Action("传文件", modifier = Modifier.weight(1f)) { startPickFiles() }
+                Action("延迟", modifier = Modifier.weight(1f)) {
+                    startActivity(
+                        Intent(this@MainActivity, CommandsActivity::class.java)
+                            .putExtra("line", commandLine).putExtra("shell", shell)
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
     private fun Tools() {
-        WorkspaceHeader(homeCategory,subtitle="工具与管理")
-        if(kernelStyle()) {
+        if (kernelStyle()) {
             SectionCard {
-                toolGroups[homeCategory].orEmpty().forEach {tool ->
-                    val entry=ToolNavigator.tools.firstOrNull{it.title==tool.label || it.target.simpleName==when(tool.label){"按键"->"ControlActivity";"摄像头"->"MediaActivity";else->""}}
-                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                        Icon(painterResource(entry?.icon?:R.drawable.ic_process),null,modifier=Modifier.padding(start=12.dp).size(24.dp),tint=MiuixTheme.colorScheme.primary)
-                        Column(Modifier.weight(1f)){RowItem(tool.label,entry?.detail){openTool(tool.label)}}
+                toolGroups[homeCategory].orEmpty().forEach { tool ->
+                    val entry = ToolNavigator.tools.firstOrNull { it.title == tool.label }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.padding(start = 8.dp).size(38.dp).glassCircle(elevation = 0.dp), contentAlignment = Alignment.Center) {
+                            Icon(
+                                painterResource(entry?.icon ?: toolIcon(tool.label)),
+                                null,
+                                modifier = Modifier.size(20.dp),
+                                tint = LocalGlassPalette.current.accent
+                            )
+                        }
+                        Column(Modifier.weight(1f)) { RowItem(tool.label, entry?.detail) { openTool(tool.label) } }
                     }
                 }
             }
-        } else toolGroups[homeCategory].orEmpty().chunked(2).forEach { group ->
-            Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=6.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                group.forEach { tool ->
-                    val icon=when(tool.label) {
-                        "文件管理","文件搜索"->R.drawable.ic_folder
-                        "远程桌面","桌面背景"->R.drawable.ic_desktop
-                        "摄像头","隐私设备","录音 / 录屏"->R.drawable.ic_camera
-                        "应用锁"->R.drawable.ic_lock
-                        "浏览器"->R.drawable.ic_browser
-                        "U盘与设备"->R.drawable.ic_usb
-                        "按键","手势回放"->R.drawable.ic_keyboard
-                        "消息"->R.drawable.ic_message
-                        else->R.drawable.ic_process
-                    }
-                    Card(modifier=Modifier.weight(1f),cornerRadius=24.dp,insideMargin=PaddingValues(18.dp),onClick={openTool(tool.label)}) {
-                        Icon(painterResource(icon),null,modifier=Modifier.size(28.dp),tint=MiuixTheme.colorScheme.primary)
-                        Spacer(Modifier.height(20.dp))
-                        Text(tool.label,fontSize=16.sp,fontWeight=FontWeight.SemiBold)
-                        Text("打开工具  ›",fontSize=11.sp,color=MiuixTheme.colorScheme.onSurfaceVariantSummary,modifier=Modifier.padding(top=5.dp))
+        } else {
+            toolGroups[homeCategory].orEmpty().chunked(2).forEach { group ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    group.forEach { tool -> ToolTile(tool, Modifier.weight(1f)) }
+                    if (group.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+
+    /** 首页工具磁贴：玻璃卡片 + 强调色玻璃图标底座。 */
+    @Composable
+    private fun ToolTile(tool: Tool, modifier: Modifier) {
+        val palette = LocalGlassPalette.current
+        Card(
+            modifier = modifier,
+            cornerRadius = 26.dp,
+            insideMargin = PaddingValues(16.dp),
+            onClick = { openTool(tool.label) }
+        ) {
+            Box(
+                Modifier.size(46.dp).glassCircle(elevation = 0.dp, accent = true),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painterResource(toolIcon(tool.label)),
+                    null,
+                    modifier = Modifier.size(23.dp),
+                    tint = palette.accent
+                )
+            }
+            Spacer(Modifier.height(14.dp))
+            Text(
+                tool.label,
+                fontSize = 15.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                "打开工具  ›",
+                fontSize = 11.sp,
+                color = palette.dim,
+                modifier = Modifier.padding(top = 5.dp)
+            )
+        }
+    }
+
+    private fun toolIcon(label: String): Int = when (label) {
+        "文件管理", "文件搜索" -> R.drawable.ic_folder
+        "远程桌面", "桌面背景" -> R.drawable.ic_desktop
+        "摄像头", "隐私设备", "录音 / 录屏" -> R.drawable.ic_camera
+        "应用锁" -> R.drawable.ic_lock
+        "浏览器" -> R.drawable.ic_browser
+        "U盘与设备" -> R.drawable.ic_usb
+        "按键", "手势回放" -> R.drawable.ic_keyboard
+        "消息" -> R.drawable.ic_message
+        else -> R.drawable.ic_process
+    }
+
+    /** 底部悬浮玻璃 Dock：选中的胶囊滑块用弹簧动画跟随。 */
+    @Composable
+    private fun HomeDock(modifier: Modifier = Modifier) {
+        val labels = listOf("控制台", "共享", "文件", "系统", "自动化")
+        val icons = listOf(R.drawable.ic_terminal, R.drawable.ic_desktop, R.drawable.ic_folder, R.drawable.ic_process, R.drawable.ic_history)
+        val palette = LocalGlassPalette.current
+        BoxWithConstraints(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(66.dp)
+                .glassSurface(
+                    shape = RoundedCornerShape(30.dp),
+                    elevation = 24.dp,
+                    glow = palette.accent.copy(alpha = if (palette.light) .10f else .08f)
+                )
+        ) {
+            val itemWidth = maxWidth / labels.size
+            val index = CATEGORIES.indexOf(homeCategory).coerceAtLeast(0)
+            val indicatorX by animateDpAsState(
+                targetValue = itemWidth * index.toFloat(),
+                animationSpec = GlassMotion.slideDp,
+                label = "dock-indicator"
+            )
+            Box(
+                Modifier
+                    .offset(x = indicatorX)
+                    .width(itemWidth)
+                    .fillMaxHeight()
+                    .padding(horizontal = 5.dp, vertical = 6.dp)
+                    .glassSurface(
+                        shape = RoundedCornerShape(24.dp),
+                        fillTop = palette.accentGlass,
+                        fillBottom = palette.accentGlass.copy(alpha = .07f),
+                        elevation = 0.dp,
+                        glow = palette.accent.copy(alpha = .22f)
+                    )
+            )
+            Row(Modifier.fillMaxWidth().fillMaxHeight()) {
+                labels.forEachIndexed { i, label ->
+                    val selected = i == index
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight()
+                            .selectable(selected = selected, role = Role.Tab, onClick = { homeCategory = CATEGORIES[i] })
+                            .padding(top = 8.dp, bottom = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            painterResource(icons[i]),
+                            label,
+                            modifier = Modifier.size(19.dp),
+                            tint = if (selected) palette.accent else palette.dim
+                        )
+                        Text(
+                            labels[i],
+                            fontSize = 10.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (selected) palette.accent else palette.dim,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
                 }
-                if(group.size==1)Spacer(Modifier.weight(1f))
             }
         }
     }
