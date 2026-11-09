@@ -327,7 +327,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 shift.animateTo(0f, animationSpec = tween(300, easing = FastOutSlowInEasing))
             }
         }
-        Box(
+        Column(
             Modifier.fillMaxWidth().graphicsLayer {
                 translationY = shift.value * 16.dp.toPx()
                 val scale = 1f - shift.value * 0.012f
