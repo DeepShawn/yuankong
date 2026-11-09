@@ -3,6 +3,8 @@
 手机在同一个局域网下直接控制电脑：执行命令、查看屏幕和摄像头、发送消息和按键、管理磁盘文件、锁屏与剪贴板。
 电脑端由本机启动、停止接收服务；手机端开机即自动发现、**不用输连接码**、**掉线自动重连**。
 
+**3.19.0：安卓界面按 Liquid Glass 标准重构——半透明玻璃卡片、流动极光背景、悬浮玻璃顶栏与底部 Dock、回弹式页面转场；功能、文案和连接行为不变，只改安卓外观与动效。[说明](docs/releases/v3.19.0.md)。**
+
 **3.18.8：本机确认后，start.bat 可联动启动已安装的 AdGuard Home 服务，不新增弹窗或通知；安卓新增独立 HTTPS 管理页入口。需先完成外部软件与 DNS／HTTPS 配置，不捆绑安装或收集访问记录。[说明](docs/releases/v3.18.8.md)。**
 
 **3.17.0：手机可直接快捷控制希沃白板、WPS 与 QQ（翻页、切工具、发消息）并把窗口设为隐形；新增接收端自我维护（安装目录改名重启、自我删除、批量改最后修改日期）；新增 frp 公网联机。[说明](docs/releases/v3.17.0.md)。**
@@ -71,9 +73,9 @@
 
 1.9.0：触屏输入暂停、桌面程序管理、文件打开/解压/预览、顺序延迟命令列表，以及全屏等比显示和虚拟键盘更新。
 
-- [下载 Android 3.18.8 APK](https://github.com/DeepShawn/yuankong/releases/download/v3.18.8/LanCmd-3.18.8.apk)
-- [下载 Windows 3.18.8 接收端](https://github.com/DeepShawn/yuankong/releases/download/v3.18.8/LanCmd-Windows-3.18.8.zip)
-- 新功能与限制见 [3.18.8 说明](docs/releases/v3.18.8.md)。
+- [下载 Android 3.19.0 APK](https://github.com/DeepShawn/yuankong/releases/download/v3.19.0/LanCmd-3.19.0.apk)
+- [下载 Windows 3.19.0 接收端](https://github.com/DeepShawn/yuankong/releases/download/v3.19.0/LanCmd-Windows-3.19.0.zip)
+- 新功能与限制见 [3.19.0 说明](docs/releases/v3.19.0.md)。
 - 首页「更多」进入录制与手势板，详见 [2.2.0 说明](docs/releases/v2.2.0.md)。录制遵循系统隐私权限和设备指示，不自动更改系统隐私设置。
 - 首页「U盘锁 / 设备」查看 USB 存储和 USB MTP/PTP 手机。可移动磁盘支持锁定、只读和恢复原策略；便携设备支持锁定和恢复。管理员接收端可修改策略或安全弹出设备，标准权限可查看。
 - 新增「远程桌面」卡片，点击画面控制电脑：单击、双击、长按右键、拖动、双指滚动。
@@ -431,7 +433,8 @@ export ANDROID_HOME=<你的 SDK>
 ```
 
 本地签名通过 `android/keystore.properties` 指向私有密钥库，口令与密钥都不入库。
-构建和单元测试使用 JDK 21（miuix 依赖需要）；应用字节码目标仍为 Java 17。Android SDK 需 platforms;android-36 + build-tools;35.0.0。
+构建和单元测试使用 JDK 21（与 CI 一致）；应用字节码目标仍为 Java 17。Android SDK 需 platforms;android-36 + build-tools;35.0.0。
+安卓界面基于原生 Compose 自绘的 Liquid Glass 组件（`android/app/src/main/java/com/aicode/lancmd/glass/`），不依赖第三方 UI 组件库；页面骨架、顶栏、卡片与动效都从这里取。
 
 配置仓库 Actions Secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、
 `ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。维护此项目的发布应沿用 1.4.10 的密钥；独立分发可使用自己的密钥。
@@ -439,7 +442,7 @@ export ANDROID_HOME=<你的 SDK>
 在 Actions 中运行 **Android signed APK**，或推送与应用版本一致的 `v*` 标签，会生成已签名 APK 和校验文件。
 工作流先启动真实接收端并运行 Android 单元/集成测试，再核对证书指纹，构建后清理临时密钥。**Windows feature checks** 运行 Windows 原生回归，并交叉编译完整 Windows ZIP。双端产物在 Actions Artifacts 中下载，不会自动修改已有 Release 附件。
 
-**ABI**：App 使用 Kotlin + AndroidX/Material + Compose/miuix，无 JNI/native 库，任何 ABI 都能装，
+**ABI**：App 使用 Kotlin + AndroidX/Material + Compose + Liquid Glass 自绘组件，无 JNI/native 库，任何 ABI 都能装，
 arm64-v8a 设备直接使用。`ndk.abiFilters` 里保留 `arm64-v8a` 只是给将来加 native 库时定调。
 
 电脑端 Python 逻辑只依赖标准库；屏幕与摄像头需要编译 `capture.cpp` 或使用完整 Windows 包。验证协议：
@@ -459,7 +462,7 @@ python3 -m unittest discover -s tools -p test_file_operations.py -v
 
 ```
 lan-cmd/
-├── android/                       安卓工程（Kotlin + View/Compose + miuix）
+├── android/                       安卓工程（Kotlin + View/Compose + Liquid Glass）
 │   ├── app/src/main/java/com/aicode/lancmd/
 │   │   ├── LanCmdApp.kt           Application 级启动（Activity 重建不断连）
 │   │   ├── LanCmdService.kt       前台常驻服务，防后台冻结
