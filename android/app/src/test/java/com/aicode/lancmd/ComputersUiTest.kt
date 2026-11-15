@@ -38,10 +38,10 @@ class ComputersUiTest {
     private fun waitFor(check:()->Boolean){val end=System.currentTimeMillis()+8000;while(System.currentTimeMillis()<end){shadowOf(Looper.getMainLooper()).idle();if(check())return;Thread.sleep(10)};fail("电脑列表未完成")}
     private fun all(v:View):List<View> = listOf(v)+if(v is ViewGroup)(0 until v.childCount).flatMap{all(v.getChildAt(it))}else emptyList()
     private fun latest()=ShadowDialog.getLatestDialog() as AlertDialog
-    private fun render(v:View){
+    private fun render(v:View,name:String="lan-computers.png"){
         v.measure(View.MeasureSpec.makeMeasureSpec(411,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(891,View.MeasureSpec.EXACTLY));v.layout(0,0,411,891)
         val b=Bitmap.createBitmap(411,891,Bitmap.Config.ARGB_8888);v.draw(Canvas(b))
-        File("build/ui-previews/lan-computers.png").apply{parentFile!!.mkdirs()}.outputStream().use{b.compress(Bitmap.CompressFormat.PNG,100,it)};b.recycle()
+        File("build/ui-previews/$name").apply{parentFile!!.mkdirs()}.outputStream().use{b.compress(Bitmap.CompressFormat.PNG,100,it)};b.recycle()
     }
     @Test fun inventoryAndNameEditsSurviveRecreationWithoutSendingRpcOrClosingTheCurrentClient(){
         ServerSocket(0).use{server->
@@ -107,7 +107,11 @@ class ComputersUiTest {
                 compose.onNodeWithText("切换").performSemanticsAction(SemanticsActions.OnClick){it()}
                 waitFor{ConnectionManager.snapshot().connected && ConnectionManager.snapshot().port==b.target.port}
                 assertTrue(old.closed);assertEquals("study-b",Prefs.target(ctx)!!.agentId)
-                render(page.window.decorView)
+                waitFor{page.book.computers.any{it.agentId==b.identity && it.lastConnected>0}}
+                compose.waitForIdle()
+                compose.onNodeWithText("当前电脑：${b.label} · ${b.target.host}:${b.target.port}").assertExists()
+                compose.onNodeWithText("当前电脑：${a.label} · ${a.target.host}:${a.target.port}").assertDoesNotExist()
+                render(page.window.decorView,"computer-switch.png")
                 controller.recreate();page=controller.get()
                 waitFor{page.book.computers.size==2}
                 assertFalse(ConnectionManager.sessionClient().closed)
