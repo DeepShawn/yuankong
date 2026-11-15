@@ -121,4 +121,34 @@ class ComputersUiTest {
             assertFalse(ConnectionManager.sessionClient().closed)
         }}
     }
+    @Test fun powerAndClipboardConfirmationsKeepTheirOriginalComputerAfterASwitch(){
+        Prefs.markUpdateChecked(ctx)
+        SwitchPeer("confirm-a").use{a->SwitchPeer("confirm-b").use{b->
+            ConnectionManager.selectTarget(ctx,a.target)
+            waitFor{ConnectionManager.snapshot().connected && ConnectionManager.snapshot().port==a.target.port}
+            val controller=Robolectric.buildActivity(MainActivity::class.java).setup();val page=controller.get()
+            try{
+                page.confirmPower("restart","重启")
+                latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                val power=latest()
+                ConnectionManager.selectTarget(ctx,b.target)
+                waitFor{ConnectionManager.snapshot().connected && ConnectionManager.snapshot().port==b.target.port}
+                power.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                waitFor{page.consoleText.contains("连接已结束或电脑已切换")}
+                assertTrue(a.requests.none{it.optString("cmd")=="power"})
+                assertTrue(b.requests.none{it.optString("cmd")=="power"})
+                page.showClipboard()
+                waitFor{latest().isShowing && latest().getButton(AlertDialog.BUTTON_POSITIVE).text.toString()=="写回电脑"}
+                val clipboard=latest()
+                ConnectionManager.selectTarget(ctx,a.target)
+                waitFor{ConnectionManager.snapshot().connected && ConnectionManager.snapshot().port==a.target.port}
+                val errors=page.consoleText.split("连接已结束或电脑已切换").size
+                clipboard.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                waitFor{page.consoleText.split("连接已结束或电脑已切换").size>errors}
+                assertTrue(a.requests.none{it.optString("cmd")=="clip"})
+                assertTrue(b.requests.filter{it.optString("cmd")=="clip"}.all{it.optString("action")=="get"})
+                assertEquals(a.target.port,ConnectionManager.sessionClient().port)
+            }finally{controller.pause().stop().destroy()}
+        }}
+    }
 }

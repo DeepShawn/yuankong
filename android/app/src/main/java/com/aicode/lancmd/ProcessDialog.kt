@@ -41,6 +41,7 @@ class ProcessDialog(
     )
 
     private val all = ArrayList<Proc>()
+    private val source=runCatching{ConnectionManager.sessionClient()}.getOrNull()
     private val shown = ArrayList<Proc>()
     private val selected = LinkedHashSet<Int>()
     private var selfPid = -1
@@ -127,7 +128,7 @@ class ProcessDialog(
         updateCount()
         loadJob = scope.launch {
             try {
-                val r = ConnectionManager.send("ps", JSONObject(), timeoutMs = 25_000)
+                val r = pinnedCall(source,"ps", JSONObject(), timeout = 25_000)
                 if (sequence != loadSequence || !dialog.isShowing) return@launch
                 if (!r.optBoolean("ok")) {
                     fail(r.optString("error", "获取进程失败"))
@@ -267,10 +268,10 @@ class ProcessDialog(
                 val failed = ArrayList<String>()
                 for (p in targets) {
                     try {
-                        val r = ConnectionManager.send(
-                            "kill",
+                        val r = pinnedCall(
+                            source,"kill",
                             JSONObject().put("pid", p.pid).put("force", true),
-                            timeoutMs = 15_000
+                            timeout = 15_000
                         )
                         if (r.optBoolean("ok")) {
                             ok++
