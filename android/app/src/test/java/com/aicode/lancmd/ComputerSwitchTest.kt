@@ -71,6 +71,10 @@ class ComputerSwitchTest {
         SwitchPeer("pc-a").use{a->SwitchPeer("pc-b").use{b->
             assertTrue(ConnectionManager.selectTarget(ctx,a.target));waitFor{connected(a)}
             val old=ConnectionManager.sessionClient()
+            assertFalse(ConnectionManager.selectTarget(ctx,a.target.copy(host="127.0.0.2")))
+            assertSame(old,ConnectionManager.sessionClient())
+            assertEquals(a.target.host,Prefs.target(ctx)!!.host)
+            assertEquals(1,a.requests.count{it.optString("cmd")=="hello"})
             Prefs.saveToken(ctx,b.target.host,b.target.port,"saved-b")
             assertTrue(ConnectionManager.selectTarget(ctx,b.target));waitFor{connected(b)}
             assertTrue(old.closed);assertNotSame(old,ConnectionManager.sessionClient())

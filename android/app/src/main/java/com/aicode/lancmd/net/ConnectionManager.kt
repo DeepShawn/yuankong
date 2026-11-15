@@ -150,9 +150,12 @@ object ConnectionManager {
         appCtx=ctx
         val saved=Prefs.target(ctx)
         val active=client
-        if(active?.closed==false && active.host==target.host && active.port==target.port &&
-            (target.agentId.isBlank() || target.agentId==saved?.agentId)) {
-            Prefs.selectTarget(ctx,saved?.takeIf{it.host==target.host && it.port==target.port} ?: target)
+        val sameIdentity=target.agentId.isNotBlank() && status.connected && status.agentId==target.agentId
+        val sameAddress=active?.host==target.host && (target.agentId.isBlank() || target.agentId==saved?.agentId)
+        if(active?.closed==false && active.port==target.port && (sameIdentity || sameAddress)) {
+            val verified=saved?.takeIf{it.host==active.host && it.port==active.port}
+                ?: Target(active.host,active.port,status.name.ifBlank{target.name},status.agentId.ifBlank{target.agentId})
+            Prefs.selectTarget(ctx,verified)
             return@synchronized false
         }
         val version=++selectionVersion

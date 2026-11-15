@@ -61,10 +61,13 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
     }
     override fun onEvent(text:String,kind:ConnectionManager.LogKind){}
     private fun time(value:Long)=if(value>0)DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.MEDIUM).format(Date(value)) else "暂无记录"
-    private fun connected(c:ComputerBook.Computer):Boolean {
-        if(!current.connected || current.host!=c.host || current.port!=c.port)return false
+    private fun sameComputer(c:ComputerBook.Computer):Boolean {
+        if(current.port!=c.port)return false
+        if(current.agentId.isNotBlank() && c.agentId.isNotBlank())return current.agentId==c.agentId
+        if(current.host!=c.host)return false
         return c.agentId.isBlank() || current.agentId==c.agentId || (current.agentId.isBlank() && Prefs.target(this)?.agentId==c.agentId)
     }
+    private fun connected(c:ComputerBook.Computer)=current.connected && sameComputer(c)
     @androidx.compose.runtime.Composable private fun Screen()=FixedPage("切换电脑与历史") {
         SectionCard {
             if(current.connected)Note("当前电脑：${current.name.ifBlank{current.host}} · ${current.host}:${current.port}")
@@ -87,8 +90,7 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
                 if(list.isEmpty())item{EmptyNote(if(query.isBlank())"暂无电脑，点击刷新局域网" else "没有匹配的电脑")}
                 items(list,key={it.key}){c->SectionCard {
                     val active=connected(c)
-                    val pending=current.state==ConnectionManager.State.CONNECTING && current.host==c.host && current.port==c.port &&
-                        (current.agentId.isBlank() || c.agentId.isBlank() || current.agentId==c.agentId)
+                    val pending=current.state==ConnectionManager.State.CONNECTING && sameComputer(c)
                     val state=if(active)"当前电脑" else if(pending)"连接中" else if(c.key in found)"本次发现" else if(lastScan>0)"本次未发现" else "已保存"
                     InfoItem(c.label,"$state · ${c.host}:${c.port}\n原机名：${c.reportedName.ifBlank{"未提供"}}\n最近成功连接：${time(c.lastConnected)}")
                     ActionRow {

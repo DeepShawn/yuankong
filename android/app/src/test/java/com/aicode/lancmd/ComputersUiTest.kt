@@ -98,7 +98,7 @@ class ComputersUiTest {
             val old=ConnectionManager.sessionClient()
             val intent=Intent(ctx,ComputersActivity::class.java).putExtra(ComputersActivity.SWITCH_MODE,true)
             val controller=Robolectric.buildActivity(ComputersActivity::class.java,intent)
-            controller.get().discovery={DiscoverResult(listOf(a.agent(),b.agent()),false,1)}
+            controller.get().discovery={DiscoverResult(listOf(a.agent().copy(ip="127.0.0.2"),b.agent()),false,1)}
             controller.setup();var page=controller.get()
             try{
                 waitFor{!page.scanning && page.book.computers.size==2}
