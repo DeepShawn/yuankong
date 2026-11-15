@@ -19,6 +19,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -51,7 +53,8 @@ object ConnectionManager {
         /** 检测到 VPN 在跑时为 true，UI 据此给出排查提示。 */
         val vpnHint: Boolean = false,
         /** 连接超时（无响应），大概率是电脑防火墙拦了端口，UI 给出修复步骤。 */
-        val needFirewallCheck: Boolean = false
+        val needFirewallCheck: Boolean = false,
+        val agentId: String = ""
     ) {
         val connected: Boolean get() = state == State.CONNECTED
     }
@@ -83,6 +86,10 @@ object ConnectionManager {
     private var disconnectSignal: CompletableDeferred<Unit>? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
     private var reconnects = 0
+    private val controlLock=Any()
+    private var switchJob:Job?=null
+    private var selectionVersion=0L
+    @Volatile private var switching=false
 
     // ---------------------------------------------------------------- 对外
 
@@ -98,15 +105,17 @@ object ConnectionManager {
     fun snapshot(): Status = status
 
     /** 启动常驻自动连接；重复调用无副作用。 */
-    fun start(ctx: Context) {
+    fun start(ctx: Context) = synchronized(controlLock) {
         appCtx = ctx.applicationContext
+        if(switching)return@synchronized
         if (running) {
             forceRetry = true
-            return
+            return@synchronized
         }
         running = true
         registerNetworkCallback()
-        loopJob = scope.launch { connectLoop() }
+        val previous=loopJob
+        loopJob = scope.launch { previous?.join();currentCoroutineContext().ensureActive();connectLoop() }
     }
 
     /** 立即重试（跳过等待倒计时）。 */
@@ -116,7 +125,14 @@ object ConnectionManager {
     }
 
     /** 用户主动断开：停止自动重连。 */
-    fun stop() {
+    fun stop() = synchronized(controlLock) {
+        selectionVersion++
+        switchJob?.cancel();switchJob=null;switching=false
+        stopLoopLocked()
+        publish(status.copy(state = State.STOPPED, nextRetrySec = 0, latencyMs=-1, message = "已断开"))
+    }
+
+    private fun stopLoopLocked() {
         running = false
         forceRetry = false
         pingJob?.cancel()
@@ -125,7 +141,48 @@ object ConnectionManager {
         val c = client
         client = null
         c?.close()
-        publish(status.copy(state = State.STOPPED, nextRetrySec = 0, message = "已断开"))
+    }
+
+    /** Explicit foreground selection. Close/join the previous loop before committing a new target. */
+    fun selectTarget(context:Context,target:Target):Boolean = synchronized(controlLock) {
+        require(target.host.isNotBlank() && target.host.length<=253 && target.host.none{it.isISOControl() || it.isWhitespace()} && target.port in 1..65535){"电脑地址或端口无效"}
+        val ctx=context.applicationContext
+        appCtx=ctx
+        val saved=Prefs.target(ctx)
+        val active=client
+        val sameIdentity=target.agentId.isNotBlank() && status.connected && status.agentId==target.agentId
+        val sameAddress=active?.host==target.host && (target.agentId.isBlank() || target.agentId==saved?.agentId)
+        if(active?.closed==false && active.port==target.port && (sameIdentity || sameAddress)) {
+            val verified=saved?.takeIf{it.host==active.host && it.port==active.port}
+                ?: Target(active.host,active.port,status.name.ifBlank{target.name},status.agentId.ifBlank{target.agentId})
+            Prefs.selectTarget(ctx,verified)
+            return@synchronized false
+        }
+        val version=++selectionVersion
+        switchJob?.cancel()
+        switching=true
+        stopLoopLocked()
+        publish(Status(state=State.CONNECTING,name=target.name,host=target.host,port=target.port,
+            agentId=target.agentId,message="正在切换电脑，等待旧连接释放…"))
+        val previous=loopJob
+        switchJob=scope.launch {
+            try {
+                previous?.join()
+                currentCoroutineContext().ensureActive()
+                synchronized(controlLock) commit@{
+                    if(version!=selectionVersion || !isActive)return@commit
+                    Prefs.selectTarget(ctx,target)
+                    reconnects=0
+                    switching=false
+                    start(ctx)
+                }
+            } catch(e:CancellationException){throw e}
+            catch(e:Exception){synchronized(controlLock){
+                if(version==selectionVersion)publish(Status(state=State.STOPPED,name=target.name,host=target.host,
+                    port=target.port,agentId=target.agentId,message="切换失败：${e.message ?: "无法保存目标"}"))
+            }} finally {synchronized(controlLock){if(version==selectionVersion)switching=false}}
+        }
+        true
     }
 
     suspend fun send(cmd: String, params: JSONObject = JSONObject(), timeoutMs: Long = 30_000): JSONObject {
@@ -165,12 +222,16 @@ object ConnectionManager {
     // ---------------------------------------------------------------- 主循环
 
     private suspend fun connectLoop() {
+        val worker=currentCoroutineContext()[Job]!!
+        fun update(next:Status)=publishConnection(worker,next)
         var fails = 0
         while (running) {
             try {
+            worker.ensureActive()
             val target = resolveTarget(fails)
+            worker.ensureActive()
             if (target == null) {
-                publish(
+                update(
                     status.copy(
                         state = State.WAITING,
                         message = if (vpnActive())
@@ -183,12 +244,13 @@ object ConnectionManager {
                 continue
             }
 
-            publish(
+            update(
                 status.copy(
                     state = State.CONNECTING,
                     name = target.name,
                     host = target.host,
                     port = target.port,
+                    agentId = target.agentId,
                     attempt = fails + 1,
                     nextRetrySec = 0,
                     message = if (fails == 0) "正在连接…" else "第 ${fails + 1} 次重连…"
@@ -204,12 +266,14 @@ object ConnectionManager {
             var hs: JSONObject? = null
 
             for (candidate in attempts) {
+                worker.ensureActive()
                 val candidateClient = AgentClient(candidate, target.port)
                 try {
                     candidateClient.connect(
                         timeoutMs = if (target.isGateway) 2500 else 6000,
                         via = via
                     )
+                    worker.ensureActive()
                     val stored = Prefs.token(ctx(), candidate, target.port)
                         .ifEmpty { Prefs.token(ctx(), target.host, target.port) }
                     val resp = candidateClient.handshake(Prefs.clientId(ctx()), deviceLabel(), stored)
@@ -218,17 +282,23 @@ object ConnectionManager {
                             .ifEmpty { resp.optString("error", "连接被拒绝") }
                         throw IOException(msg)
                     }
+                    worker.ensureActive()
+                    if(Prefs.explicitlySelected(ctx()) && target.agentId.isNotBlank() && resp.optString("agent_id")!=target.agentId){
+                        throw IOException("目标电脑标识不一致，未连接其他电脑；请刷新列表并重新选择")
+                    }
                     c = candidateClient
                     usedIp = candidate
                     hs = resp
                     break
-                } catch (e: Exception) {
+                } catch(e:CancellationException){candidateClient.close();throw e}
+                catch (e: Exception) {
                     candidateClient.close()
                     lastError = e
                 }
             }
 
             if (c == null || hs == null) {
+                worker.ensureActive()
                 // 关键：这里以前是 throw，而它位于所有 try 之外。
                 // 异常会一路逃出 connectLoop → launch → 线程默认处理器，
                 // 在真机上就是「显示正在连接时闪退」。现在改为走正常的退避重连。
@@ -236,7 +306,7 @@ object ConnectionManager {
                 val waitMs = backoffMs(fails)
                 val err = lastError
                 val timedOut = err != null && isTimeout(err)
-                publish(
+                update(
                     status.copy(
                         state = State.WAITING,
                         latencyMs = -1,
@@ -261,6 +331,8 @@ object ConnectionManager {
                 runCatching{ComputerBook.ended(ctx(),id)}
             }
             try {
+                synchronized(controlLock) {
+                worker.ensureActive()
                 val token = Prefs.token(ctx(), usedIp, target.port)
                 Prefs.saveToken(ctx(), usedIp, target.port, hs.optString("token"))
                 Prefs.saveTarget(
@@ -276,16 +348,18 @@ object ConnectionManager {
                 client = c
                 val paired = token.isNotEmpty()
                 fails = 0
-                publish(
+                update(
                     Status(
                         state = State.CONNECTED,
                         name = hs.optString("agent").ifEmpty { target.name },
                         host = usedIp,
                         port = target.port,
+                        agentId = hs.optString("agent_id").ifEmpty { target.agentId },
                         paired = paired,
                         reconnects = reconnects
                     )
                 )
+                }
                 visitId=runCatching{ComputerBook.connected(ctx(),Target(usedIp,target.port,
                     hs.optString("agent").ifEmpty{target.name},hs.optString("agent_id").ifEmpty{target.agentId}))}.getOrNull()
                 if (reconnects > 0) {
@@ -300,10 +374,10 @@ object ConnectionManager {
                 stopPing()
 
                 val wasRunning = running
-                client = null
+                if(client===c)client = null
                 if (!wasRunning) break
                 reconnects++
-                publish(
+                update(
                     status.copy(
                         state = State.WAITING,
                         latencyMs = -1,
@@ -317,16 +391,16 @@ object ConnectionManager {
             } catch (e: CancellationException) {
                 endVisit()
                 c?.close()
-                client = null
+                if(client===c)client = null
                 throw e
             } catch (e: Exception) {
                 endVisit()
                 c?.close()
-                client = null
+                if(client===c)client = null
                 fails++
                 val waitMs = backoffMs(fails)
                 val timedOut = isTimeout(e)
-                publish(
+                update(
                     status.copy(
                         state = State.WAITING,
                         latencyMs = -1,
@@ -347,7 +421,7 @@ object ConnectionManager {
                 // 最后一道防线：任何未预期异常都不能让协程把进程带崩（真机上即闪退）
                 android.util.Log.e("LanCmd", "连接循环异常: " + t.message, t)
                 event("连接异常：" + (t.message ?: t.javaClass.simpleName), LogKind.ERROR)
-                client = null
+                synchronized(controlLock){if(worker.isActive)client = null}
                 fails++
                 countdown(backoffMs(fails), fails)
             }
@@ -401,20 +475,25 @@ object ConnectionManager {
     private suspend fun resolveTarget(fails: Int): Resolved? {
         val ctx = ctx()
         val last = Prefs.target(ctx)
+        val selected=Prefs.explicitlySelected(ctx)
+        val cached=last?.let{Resolved(it.host,it.port,it.name,it.agentId)}
+        if(selected && (fails==0 || last?.agentId.isNullOrBlank()))return cached
         // 连续失败或从未连过时，重新扫描一次，处理电脑 IP 变化
-        val shouldScan = last == null || fails == 0 || fails % 3 == 0
+        val shouldScan = if(selected)fails==1 || fails%3==0 else last == null || fails == 0 || fails % 3 == 0
         if (shouldScan) {
             val result = withContext(Dispatchers.IO) { Discovery.discover(ctx, 1800) }
             val found = result.agents
             if (found.isNotEmpty()) {
-                val known = last?.agentId ?: ""
-                val pick = found.firstOrNull { it.id.isNotEmpty() && it.id == known } ?: found.first()
+                val pick = TargetRouting.pick(last,found,selected)
+                if(pick!=null){
+                currentCoroutineContext().ensureActive()
                 val target = Target(pick.ip, pick.port, pick.name, pick.id)
                 Prefs.saveTarget(ctx, target)
                 return Resolved(target.host, target.port, target.name, target.agentId, pick.allIps())
+                }
             }
         }
-        val cached = last?.let { Resolved(it.host, it.port, it.name, it.agentId) }
+        if(selected)return cached
         // 电脑开热点时手机连的是它的热点，广播常被系统拦掉，
         // 但网关就是那台电脑，直接连网关即可。
         // 连着“无互联网 Wi-Fi”基本就是这种场景，第一次就试网关，不用等失败。
@@ -479,7 +558,7 @@ object ConnectionManager {
                     if (!r.optBoolean("ok")) throw IOException("心跳无响应")
                     miss = 0
                     val latency = System.currentTimeMillis() - t0
-                    publish(status.copy(latencyMs = latency))
+                    synchronized(controlLock){if(client===c && running && !switching)publish(status.copy(latencyMs = latency))}
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -521,6 +600,7 @@ object ConnectionManager {
     }
 
     private suspend fun countdown(ms: Long, fails: Int) {
+        val worker=currentCoroutineContext()[Job]!!
         var left = ms
         var lastPublished = -1
         while (left > 0 && running) {
@@ -532,13 +612,13 @@ object ConnectionManager {
             val sec = ((left + 999) / 1000).toInt()
             if (sec != lastPublished) {
                 lastPublished = sec
-                publish(status.copy(nextRetrySec = sec, attempt = fails))
+                publishConnection(worker,status.copy(nextRetrySec = sec, attempt = fails))
             }
             val step = minOf(250L, left)
             delay(step)
             left -= step
         }
-        publish(status.copy(nextRetrySec = 0))
+        publishConnection(worker,status.copy(nextRetrySec = 0))
     }
 
     // ---------------------------------------------------------------- 网络变化
@@ -627,6 +707,10 @@ object ConnectionManager {
         } catch (_: Exception) {
         }
         return fallback
+    }
+
+    private fun publishConnection(worker:Job,next:Status)=synchronized(controlLock){
+        if(worker.isActive && running && !switching && loopJob===worker)publish(next)
     }
 
     private fun publish(next: Status) {

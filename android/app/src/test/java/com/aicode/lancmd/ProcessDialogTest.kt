@@ -137,6 +137,18 @@ class ProcessDialogTest {
         assertTrue(count().contains("已选 1"))
         assertEquals("取消全选", dialog.getButton(AlertDialog.BUTTON_NEUTRAL).text.toString())
     }
+    @Test fun aPendingProcessConfirmationCannotSendOldPidsToAnotherComputer() {
+        show();selectAll()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        val confirm=ShadowDialog.getLatestDialog() as AlertDialog
+        Stub().use{other->
+            other.install()
+            confirm.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            waitUntil{logs.any{it.contains("切换")}}
+            assertTrue(stub.killed.isEmpty());assertTrue(other.killed.isEmpty())
+            assertTrue(other.requests.isEmpty())
+        }
+    }
 
     @Test fun privilegeBannerReflectsActualStatusAndExplainsLocalUac() {
         show()

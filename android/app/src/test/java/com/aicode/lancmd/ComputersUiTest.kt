@@ -1,6 +1,7 @@
 package com.aicode.lancmd
 
 import android.app.Application
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Looper
@@ -8,6 +9,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.aicode.lancmd.net.*
 import kotlinx.coroutines.*
 import org.junit.*
@@ -26,6 +30,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 @ConscryptMode(ConscryptMode.Mode.OFF)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ComputersUiTest {
+    @get:Rule val compose=createEmptyComposeRule()
     private val ctx get()=RuntimeEnvironment.getApplication()
     @Before fun before(){disconnect();ctx.getSharedPreferences(ComputerBook.FILE,0).edit().clear().commit();Prefs.forget(ctx)}
     @After fun after()=disconnect()
@@ -33,10 +38,10 @@ class ComputersUiTest {
     private fun waitFor(check:()->Boolean){val end=System.currentTimeMillis()+8000;while(System.currentTimeMillis()<end){shadowOf(Looper.getMainLooper()).idle();if(check())return;Thread.sleep(10)};fail("电脑列表未完成")}
     private fun all(v:View):List<View> = listOf(v)+if(v is ViewGroup)(0 until v.childCount).flatMap{all(v.getChildAt(it))}else emptyList()
     private fun latest()=ShadowDialog.getLatestDialog() as AlertDialog
-    private fun render(v:View){
+    private fun render(v:View,name:String="lan-computers.png"){
         v.measure(View.MeasureSpec.makeMeasureSpec(411,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(891,View.MeasureSpec.EXACTLY));v.layout(0,0,411,891)
         val b=Bitmap.createBitmap(411,891,Bitmap.Config.ARGB_8888);v.draw(Canvas(b))
-        File("build/ui-previews/lan-computers.png").apply{parentFile!!.mkdirs()}.outputStream().use{b.compress(Bitmap.CompressFormat.PNG,100,it)};b.recycle()
+        File("build/ui-previews/$name").apply{parentFile!!.mkdirs()}.outputStream().use{b.compress(Bitmap.CompressFormat.PNG,100,it)};b.recycle()
     }
     @Test fun inventoryAndNameEditsSurviveRecreationWithoutSendingRpcOrClosingTheCurrentClient(){
         ServerSocket(0).use{server->
@@ -85,5 +90,65 @@ class ComputersUiTest {
             assertEquals("备注",p.book.computers.single().alias)
             assertEquals("TEST_CREDENTIAL",Prefs.token(ctx,t.host,t.port))
         }finally{c.pause().stop().destroy()}
+    }
+    @Test fun twoOnlineComputersCanBeExplicitlySwitchedAndReturningDoesNotDisconnect(){
+        SwitchPeer("office-a","办公室电脑").use{a->SwitchPeer("study-b","书房电脑").use{b->
+            ConnectionManager.selectTarget(ctx,a.target)
+            waitFor{ConnectionManager.snapshot().connected && ConnectionManager.snapshot().port==a.target.port}
+            val old=ConnectionManager.sessionClient()
+            val intent=Intent(ctx,ComputersActivity::class.java).putExtra(ComputersActivity.SWITCH_MODE,true)
+            val controller=Robolectric.buildActivity(ComputersActivity::class.java,intent)
+            controller.get().discovery={DiscoverResult(listOf(a.agent().copy(ip="127.0.0.2"),b.agent()),false,1)}
+            controller.setup();var page=controller.get()
+            try{
+                waitFor{!page.scanning && page.book.computers.size==2}
+                assertSame(old,ConnectionManager.sessionClient())
+                compose.onNodeWithText("当前电脑").assertIsNotEnabled()
+                compose.onNodeWithText("切换").performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{ConnectionManager.snapshot().connected && ConnectionManager.snapshot().port==b.target.port}
+                assertTrue(old.closed);assertEquals("study-b",Prefs.target(ctx)!!.agentId)
+                waitFor{page.book.computers.any{it.agentId==b.identity && it.lastConnected>0}}
+                compose.waitForIdle()
+                compose.onNodeWithText("当前电脑：${b.label} · ${b.target.host}:${b.target.port}").assertExists()
+                compose.onNodeWithText("当前电脑：${a.label} · ${a.target.host}:${a.target.port}").assertDoesNotExist()
+                render(page.window.decorView,"computer-switch.png")
+                controller.recreate();page=controller.get()
+                waitFor{page.book.computers.size==2}
+                assertFalse(ConnectionManager.sessionClient().closed)
+                assertEquals(b.target.port,ConnectionManager.sessionClient().port)
+                assertTrue(b.requests.all{it.optString("cmd") in listOf("hello","ping")})
+            }finally{controller.pause().stop().destroy()}
+            assertFalse(ConnectionManager.sessionClient().closed)
+        }}
+    }
+    @Test fun powerAndClipboardConfirmationsKeepTheirOriginalComputerAfterASwitch(){
+        Prefs.markUpdateChecked(ctx)
+        SwitchPeer("confirm-a").use{a->SwitchPeer("confirm-b").use{b->
+            ConnectionManager.selectTarget(ctx,a.target)
+            waitFor{ConnectionManager.snapshot().connected && ConnectionManager.snapshot().port==a.target.port}
+            val controller=Robolectric.buildActivity(MainActivity::class.java).setup();val page=controller.get()
+            try{
+                page.confirmPower("restart","重启")
+                latest().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                val power=latest()
+                ConnectionManager.selectTarget(ctx,b.target)
+                waitFor{ConnectionManager.snapshot().connected && ConnectionManager.snapshot().port==b.target.port}
+                power.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                waitFor{page.consoleText.contains("连接已结束或电脑已切换")}
+                assertTrue(a.requests.none{it.optString("cmd")=="power"})
+                assertTrue(b.requests.none{it.optString("cmd")=="power"})
+                page.showClipboard()
+                waitFor{latest().isShowing && latest().getButton(AlertDialog.BUTTON_POSITIVE).text.toString()=="写回电脑"}
+                val clipboard=latest()
+                ConnectionManager.selectTarget(ctx,a.target)
+                waitFor{ConnectionManager.snapshot().connected && ConnectionManager.snapshot().port==a.target.port}
+                val errors=page.consoleText.split("连接已结束或电脑已切换").size
+                clipboard.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                waitFor{page.consoleText.split("连接已结束或电脑已切换").size>errors}
+                assertTrue(a.requests.none{it.optString("cmd")=="clip"})
+                assertTrue(b.requests.filter{it.optString("cmd")=="clip"}.all{it.optString("action")=="get"})
+                assertEquals(a.target.port,ConnectionManager.sessionClient().port)
+            }finally{controller.pause().stop().destroy()}
+        }}
     }
 }

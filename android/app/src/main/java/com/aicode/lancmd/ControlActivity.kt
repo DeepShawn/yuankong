@@ -117,12 +117,13 @@ class ControlActivity : MiuixActivity() {
     internal fun send() {
         if (sending) return
         if (messageText.isBlank()) { status("请输入消息内容", true); return }
+        val source=runCatching{ConnectionManager.sessionClient()}.getOrElse{status("请先连接电脑",true);return}
         sending = true
         task {
             try {
-                // 与旧版一致：消息发往当前连接的电脑，不固定到打开页面时的连接。
-                val result = ConnectionManager.send(
-                    "message",
+                // Fix the click's target before launching; a later switch cannot redirect it.
+                val result = pinnedCall(
+                    source,"message",
                     JSONObject().put("title", messageTitle).put("text", messageText)
                 )
                 if (!result.optBoolean("ok")) {

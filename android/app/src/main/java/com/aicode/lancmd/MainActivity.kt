@@ -78,6 +78,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import java.io.File
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -288,7 +289,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
             }
             Spacer(Modifier.height(9.dp))
             ActionRow {
-                Action("电脑", modifier = Modifier.weight(1f)) { startActivity(Intent(this@MainActivity, ComputersActivity::class.java)) }
+                Action("切换电脑", modifier = Modifier.weight(1f)) { startActivity(Intent(this@MainActivity, ComputersActivity::class.java).putExtra(ComputersActivity.SWITCH_MODE,true)) }
                 Action("工具库", modifier = Modifier.weight(1f)) { ToolNavigator.show(this@MainActivity) }
                 Action("外观主题", modifier = Modifier.weight(1f)) { ThemeDialog(this@MainActivity).show() }
                 Action("更多", modifier = Modifier.weight(1f)) { showMenu() }
@@ -1045,15 +1046,20 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         cmd: String,
         params: JSONObject = JSONObject(),
         timeoutMs: Long = 30_000,
+        expectedClient:AgentClient? = null,
         block: (JSONObject) -> Unit
     ) {
+        val source=expectedClient ?: runCatching{ConnectionManager.sessionClient()}.getOrElse{
+            log("未连接电脑，未发送请求",LogKind.ERROR);return
+        }
         lifecycleScope.launch(com.aicode.lancmd.net.DelayNotice { delayProgress=it }) {
             try {
                 val r = if (cmd in setOf("files", "mkdir", "rm", "rename", "put")) {
                     FileDelay.call(
-                        this@MainActivity, ConnectionManager.sessionClient(), cmd, params, timeoutMs
+                        this@MainActivity, source, cmd, params, timeoutMs
                     ) { log(it, LogKind.INFO) }
-                } else ConnectionManager.send(cmd, params, timeoutMs)
+                } else pinnedCall(source,cmd,params,timeoutMs)
+                if(source.closed || runCatching{ConnectionManager.sessionClient()}.getOrNull()!==source)throw IOException("电脑已切换，旧请求的结果不再应用，请重新打开有关页面")
                 if (!r.optBoolean("ok")) { log(r.optString("error", "执行失败"), LogKind.ERROR); return@launch }
                 block(r)
             } catch (e: CancellationException) { throw e }
@@ -1121,7 +1127,8 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     }
 
     internal fun showClipboard() {
-        run("clip", JSONObject().put("action", "get")) { r ->
+        val source=runCatching{ConnectionManager.sessionClient()}.getOrElse{log("请先连接电脑",LogKind.ERROR);return}
+        run("clip", JSONObject().put("action", "get"),expectedClient=source) { r ->
             val box = dialogInput(text = r.optString("text"), singleLine = false).apply {
                 minLines = 3
                 maxLines = 10
@@ -1129,7 +1136,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
             }
             WorkspaceDialog.Builder(this).setTitle("电脑剪贴板").setView(box)
                 .setPositiveButton("写回电脑") { _, _ ->
-                    run("clip", JSONObject().put("action", "set").put("text", box.text.toString())) {
+                    run("clip", JSONObject().put("action", "set").put("text", box.text.toString()),expectedClient=source) {
                         log("✓ 已写入电脑剪贴板", LogKind.OK)
                     }
                 }.setNegativeButton("关闭", null).show()
@@ -1148,18 +1155,20 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
      *   第二级 —— 列出具体目标电脑和不可逆提示，按钮才是「确认执行」
      */
     internal fun confirmPower(action: String, label: String) {
+        val source=runCatching{ConnectionManager.sessionClient()}.getOrNull()
         val irreversible = action in arrayOf("shutdown", "restart", "logoff")
         val warning = if (irreversible) "电脑上未保存的内容会丢失，该操作无法撤销。"
         else "电脑将进入睡眠，可正常唤醒。"
         // 目标信息在第一级就固定下来。status 会被后台状态回调覆盖，
         // 若等第二级现读，可能已经变成空值。
-        val name = connection.name.ifBlank { "这台电脑" }
-        val addr = if (connection.host.isBlank()) "未知地址" else "${connection.host}:${connection.port}"
+        val shown=listOf(connection,ConnectionManager.snapshot()).firstOrNull{source==null || it.host==source.host && it.port==source.port}
+        val name = shown?.name?.ifBlank { source?.host ?: "这台电脑" } ?: source?.host ?: "这台电脑"
+        val addr = source?.let{"${it.host}:${it.port}"} ?: if(connection.host.isBlank())"未知地址" else "${connection.host}:${connection.port}"
         safeDialog {
             setTitle("${label}电脑？")
             setMessage("将向「" + name + "」发送" + label + "指令。\n\n" + warning)
             setPositiveButton("继续") { _, _ ->
-                confirmPowerFinal(action, label, irreversible, name, addr)
+                confirmPowerFinal(action, label, irreversible, name, addr,source)
             }
             setNegativeButton("取消", null)
         }
@@ -1170,7 +1179,8 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         label: String,
         irreversible: Boolean,
         name: String,
-        addr: String
+        addr: String,
+        source:AgentClient?
     ) {
         val consequence = if (irreversible) {
             "这是最后一步。点「确认${label}」后电脑会立即${label}，手机上的连接也会随之断开。"
@@ -1179,8 +1189,9 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
             setTitle("再次确认：${label}")
             setMessage("目标电脑：" + "\n" + name + "\n" + addr + "\n\n" + consequence)
             setPositiveButton("确认${label}") { _, _ ->
+                if(source==null){log("打开确认时未连接电脑，请重新打开确认",LogKind.ERROR);return@setPositiveButton}
                 log("正在发送" + label + "指令到 " + addr, LogKind.INFO)
-                run("power", JSONObject().put("action", action)) { log("✓ 已发送${label}指令", LogKind.OK) }
+                run("power", JSONObject().put("action", action),expectedClient=source) { log("✓ 已发送${label}指令", LogKind.OK) }
             }
             setNegativeButton("取消", null)
         }
@@ -1239,8 +1250,8 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 if (raw.isEmpty()) return@setPositiveButton
                 val host = raw.substringBefore(":")
                 val port = raw.substringAfter(":", TCP_PORT.toString()).toIntOrNull() ?: TCP_PORT
-                Prefs.saveTarget(this, Target(host, port, host, ""))
-                ConnectionManager.retryNow()
+                try{ConnectionManager.selectTarget(this, Target(host, port, host, ""))}
+                catch(e:IllegalArgumentException){toast(e.message ?: "电脑地址或端口无效")}
             }.setNegativeButton("取消", null).show()
     }
 
