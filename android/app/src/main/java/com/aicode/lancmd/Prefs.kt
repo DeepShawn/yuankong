@@ -14,6 +14,7 @@ object Prefs {
     private const val KEY_PORT = "last_port"
     private const val KEY_NAME = "last_name"
     private const val KEY_AGENT_ID = "last_agent_id"
+    private const val KEY_SELECTED = "explicit_target"
     private const val KEY_UPLOAD_DIR = "upload_dir"
     private const val KEY_ACCENT = "theme_accent"
     private const val KEY_TONE = "theme_tone"
@@ -41,14 +42,14 @@ object Prefs {
         )
     }
 
-    fun saveTarget(ctx: Context, t: Target) {
-        sp(ctx).edit()
+    private fun targetEditor(ctx:Context,t:Target) = sp(ctx).edit()
             .putString(KEY_HOST, t.host)
             .putInt(KEY_PORT, t.port)
             .putString(KEY_NAME, t.name)
             .putString(KEY_AGENT_ID, t.agentId)
-            .apply()
-    }
+    fun saveTarget(ctx: Context, t: Target) { targetEditor(ctx,t).apply() }
+    fun selectTarget(ctx: Context,t:Target) { targetEditor(ctx,t).putBoolean(KEY_SELECTED,true).apply() }
+    fun explicitlySelected(ctx:Context)=sp(ctx).getBoolean(KEY_SELECTED,false)
 
     fun token(ctx: Context, host: String, port: Int): String {
         val raw = sp(ctx).getString(KEY_TOKENS, null) ?: return ""
@@ -103,6 +104,7 @@ object Prefs {
             .remove(KEY_PORT)
             .remove(KEY_NAME)
             .remove(KEY_AGENT_ID)
+            .remove(KEY_SELECTED)
             .apply()
     }
 }

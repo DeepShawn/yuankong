@@ -1,6 +1,7 @@
 package com.aicode.lancmd
 
 import android.app.Application
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Looper
@@ -8,6 +9,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.aicode.lancmd.net.*
 import kotlinx.coroutines.*
 import org.junit.*
@@ -26,6 +30,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 @ConscryptMode(ConscryptMode.Mode.OFF)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ComputersUiTest {
+    @get:Rule val compose=createEmptyComposeRule()
     private val ctx get()=RuntimeEnvironment.getApplication()
     @Before fun before(){disconnect();ctx.getSharedPreferences(ComputerBook.FILE,0).edit().clear().commit();Prefs.forget(ctx)}
     @After fun after()=disconnect()
@@ -85,5 +90,31 @@ class ComputersUiTest {
             assertEquals("备注",p.book.computers.single().alias)
             assertEquals("TEST_CREDENTIAL",Prefs.token(ctx,t.host,t.port))
         }finally{c.pause().stop().destroy()}
+    }
+    @Test fun twoOnlineComputersCanBeExplicitlySwitchedAndReturningDoesNotDisconnect(){
+        SwitchPeer("office-a","办公室电脑").use{a->SwitchPeer("study-b","书房电脑").use{b->
+            ConnectionManager.selectTarget(ctx,a.target)
+            waitFor{ConnectionManager.snapshot().connected && ConnectionManager.snapshot().port==a.target.port}
+            val old=ConnectionManager.sessionClient()
+            val intent=Intent(ctx,ComputersActivity::class.java).putExtra(ComputersActivity.SWITCH_MODE,true)
+            val controller=Robolectric.buildActivity(ComputersActivity::class.java,intent)
+            controller.get().discovery={DiscoverResult(listOf(a.agent(),b.agent()),false,1)}
+            controller.setup();var page=controller.get()
+            try{
+                waitFor{!page.scanning && page.book.computers.size==2}
+                assertSame(old,ConnectionManager.sessionClient())
+                compose.onNodeWithText("当前电脑").assertIsNotEnabled()
+                compose.onNodeWithText("切换").performSemanticsAction(SemanticsActions.OnClick){it()}
+                waitFor{ConnectionManager.snapshot().connected && ConnectionManager.snapshot().port==b.target.port}
+                assertTrue(old.closed);assertEquals("study-b",Prefs.target(ctx)!!.agentId)
+                render(page.window.decorView)
+                controller.recreate();page=controller.get()
+                waitFor{page.book.computers.size==2}
+                assertFalse(ConnectionManager.sessionClient().closed)
+                assertEquals(b.target.port,ConnectionManager.sessionClient().port)
+                assertTrue(b.requests.all{it.optString("cmd") in listOf("hello","ping")})
+            }finally{controller.pause().stop().destroy()}
+            assertFalse(ConnectionManager.sessionClient().closed)
+        }}
     }
 }

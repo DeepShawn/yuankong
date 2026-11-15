@@ -17,8 +17,9 @@ import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
 
-/** Inventory only: browsing, names and history do not connect or switch computers. */
+/** Browsing stays read-only; only the explicit connect action changes the target. */
 class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
+    companion object { const val SWITCH_MODE="switch_computer" }
     internal var book by mutableStateOf(ComputerBook.Snapshot())
     internal var scanning by mutableStateOf(false)
     internal var query by mutableStateOf("")
@@ -40,6 +41,7 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
         super.onStart();ConnectionManager.addListener(this)
         records.registerOnSharedPreferenceChangeListener(recordListener)
         reload(importLegacy=true)
+        if(intent.getBooleanExtra(SWITCH_MODE,false) && lastScan==0L)scan()
     }
     override fun onStop(){scanJob?.cancel();loadJob?.cancel();records.unregisterOnSharedPreferenceChangeListener(recordListener);ConnectionManager.removeListener(this);super.onStop()}
     private fun reload(importLegacy:Boolean=false){
@@ -47,16 +49,25 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
         loadJob=task{book=withContext(Dispatchers.IO){if(importLegacy)ComputerBook.seed(this@ComputersActivity) else ComputerBook.read(this@ComputersActivity)}}
     }
     override fun onSaveInstanceState(out:Bundle){out.putString("query",query);out.putInt("tab",tab);super.onSaveInstanceState(out)}
-    override fun onStatus(status:ConnectionManager.Status){current=status}
+    override fun onStatus(status:ConnectionManager.Status){
+        val changed=current.state!=status.state || current.host!=status.host || current.port!=status.port
+        current=status
+        if(changed)when(status.state){
+            ConnectionManager.State.CONNECTED->this.status("已连接 ${status.name.ifBlank{status.host}} · ${status.host}:${status.port}")
+            ConnectionManager.State.CONNECTING->this.status("正在连接 ${status.name.ifBlank{status.host}} · ${status.host}:${status.port}")
+            ConnectionManager.State.WAITING->this.status(status.message,true)
+            else->Unit
+        }
+    }
     override fun onEvent(text:String,kind:ConnectionManager.LogKind){}
     private fun time(value:Long)=if(value>0)DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.MEDIUM).format(Date(value)) else "暂无记录"
     private fun connected(c:ComputerBook.Computer):Boolean {
         if(!current.connected || current.host!=c.host || current.port!=c.port)return false
-        val target=Prefs.target(this)
-        return c.agentId.isBlank() || target?.agentId==c.agentId
+        return c.agentId.isBlank() || current.agentId==c.agentId || (current.agentId.isBlank() && Prefs.target(this)?.agentId==c.agentId)
     }
-    @androidx.compose.runtime.Composable private fun Screen()=FixedPage("局域网电脑与历史") {
+    @androidx.compose.runtime.Composable private fun Screen()=FixedPage("切换电脑与历史") {
         SectionCard {
+            if(current.connected)Note("当前电脑：${current.name.ifBlank{current.host}} · ${current.host}:${current.port}")
             ActionRow {listOf("电脑列表","连接历史").forEachIndexed{i,label->
                 SelectionAction(label,selected=tab==i,modifier=Modifier.weight(1f)){tab=i}
             }}
@@ -67,6 +78,7 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
             }
             Note(if(lastScan>0)"上次发现：${time(lastScan)}。仅显示响应 LanCmd 发现协议的接收端；未发现不代表电脑关机。"
                 else "点刷新查看同一局域网内运行接收端的电脑。备注和连接历史仅保存在本手机。")
+            Note("点连接或切换后才会更换目标，旧连接会断开。选中的电脑离线时只重试该电脑，电脑上已确认的后台任务仍继续。")
         }
         LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
             if(tab==0){
@@ -74,10 +86,15 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
                     .sortedWith(compareByDescending<ComputerBook.Computer>{connected(it)}.thenByDescending{it.key in found}.thenByDescending{it.lastConnected}.thenBy{it.label})
                 if(list.isEmpty())item{EmptyNote(if(query.isBlank())"暂无电脑，点击刷新局域网" else "没有匹配的电脑")}
                 items(list,key={it.key}){c->SectionCard {
-                    val state=if(connected(c))"已连接" else if(c.key in found)"本次发现" else if(lastScan>0)"本次未发现" else "已保存"
+                    val active=connected(c)
+                    val pending=current.state==ConnectionManager.State.CONNECTING && current.host==c.host && current.port==c.port &&
+                        (current.agentId.isBlank() || c.agentId.isBlank() || current.agentId==c.agentId)
+                    val state=if(active)"当前电脑" else if(pending)"连接中" else if(c.key in found)"本次发现" else if(lastScan>0)"本次未发现" else "已保存"
                     InfoItem(c.label,"$state · ${c.host}:${c.port}\n原机名：${c.reportedName.ifBlank{"未提供"}}\n最近成功连接：${time(c.lastConnected)}")
                     ActionRow {
-                        Action("修改备注名",modifier=Modifier.weight(1f)){rename(c)}
+                        Action(if(active)"当前电脑" else if(pending)"连接中" else if(current.connected)"切换" else "连接",
+                            enabled=!active && !pending,primary=!active && !pending,modifier=Modifier.weight(1f)){connect(c)}
+                        Action("备注",modifier=Modifier.weight(1f)){rename(c)}
                         Action("详情",modifier=Modifier.weight(1f)){details(c)}
                     }
                 }}
@@ -93,6 +110,12 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
             }
             item{SectionCard{Action("清空电脑记录与备注"){clearBook()}}}
         }
+    }
+    internal fun connect(computer:ComputerBook.Computer){
+        try{
+            val changing=ConnectionManager.selectTarget(applicationContext,computer.target())
+            status(if(changing)"正在切换到 ${computer.label} · ${computer.host}:${computer.port}" else "已连接当前电脑，无需重复连接")
+        }catch(e:IllegalArgumentException){status(e.message ?: "电脑地址无效，请刷新列表",true)}
     }
     internal fun scan(){
         if(scanning)return

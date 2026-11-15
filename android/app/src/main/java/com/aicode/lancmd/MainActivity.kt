@@ -288,7 +288,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
             }
             Spacer(Modifier.height(9.dp))
             ActionRow {
-                Action("电脑", modifier = Modifier.weight(1f)) { startActivity(Intent(this@MainActivity, ComputersActivity::class.java)) }
+                Action("切换电脑", modifier = Modifier.weight(1f)) { startActivity(Intent(this@MainActivity, ComputersActivity::class.java).putExtra(ComputersActivity.SWITCH_MODE,true)) }
                 Action("工具库", modifier = Modifier.weight(1f)) { ToolNavigator.show(this@MainActivity) }
                 Action("外观主题", modifier = Modifier.weight(1f)) { ThemeDialog(this@MainActivity).show() }
                 Action("更多", modifier = Modifier.weight(1f)) { showMenu() }
@@ -1239,8 +1239,8 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 if (raw.isEmpty()) return@setPositiveButton
                 val host = raw.substringBefore(":")
                 val port = raw.substringAfter(":", TCP_PORT.toString()).toIntOrNull() ?: TCP_PORT
-                Prefs.saveTarget(this, Target(host, port, host, ""))
-                ConnectionManager.retryNow()
+                try{ConnectionManager.selectTarget(this, Target(host, port, host, ""))}
+                catch(e:IllegalArgumentException){toast(e.message ?: "电脑地址或端口无效")}
             }.setNegativeButton("取消", null).show()
     }
 
