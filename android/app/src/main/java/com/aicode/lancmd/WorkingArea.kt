@@ -22,7 +22,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import com.aicode.lancmd.glass.MiuixTheme
+import com.aicode.lancmd.glass.LocalGlassPalette
+import com.aicode.lancmd.glass.glassSurface
 
 /** The picture and controls share all remaining space; neither is below a page scroll. */
 @Composable
@@ -34,7 +35,7 @@ fun WorkingArea(view:View,modifier:Modifier=Modifier,controlFraction:Float=.50f,
         val availableWidth=maxWidth
         val availableHeight=maxHeight
         if(landscape)Row(Modifier.fillMaxSize()) {
-            HostedView(view,Modifier.weight(1f).fillMaxHeight().testTag("working-picture"))
+            PicturePane(view, Modifier.weight(1f).fillMaxHeight().padding(start = 5.dp, bottom = 4.dp))
             val widthPixels=with(density){availableWidth.toPx()}.coerceAtLeast(1f)
             Box(Modifier.width(24.dp).fillMaxHeight().semantics {
                 contentDescription="调整画面与操作栏比例"
@@ -44,11 +45,11 @@ fun WorkingArea(view:View,modifier:Modifier=Modifier,controlFraction:Float=.50f,
             }.pointerInput(widthPixels,controlFraction){detectHorizontalDragGestures(onDragStart={onResize()}){change,amount ->
                 change.consume();fraction=(fraction-amount/widthPixels).coerceIn(.25f,.70f)
             }},contentAlignment=Alignment.Center) {
-                Spacer(Modifier.width(4.dp).height(44.dp).background(MiuixTheme.colorScheme.outline,RoundedCornerShape(2.dp)))
+                Spacer(Modifier.width(4.dp).height(46.dp).background(LocalGlassPalette.current.accentStroke, RoundedCornerShape(2.dp)))
             }
             Column(Modifier.width(availableWidth*fraction.coerceIn(.25f,.70f)).fillMaxHeight().verticalScroll(rememberScrollState()).testTag("working-controls"),content=controls)
         } else Column(Modifier.fillMaxSize()) {
-            HostedView(view,Modifier.fillMaxWidth().weight(1f).testTag("working-picture"))
+            PicturePane(view, Modifier.fillMaxWidth().weight(1f).padding(horizontal = 5.dp))
             val heightPixels=with(density){availableHeight.toPx()}.coerceAtLeast(1f)
             fun resize(value:Float) {onResize();fraction=value.coerceIn(.25f,.78f)}
             Box(Modifier.fillMaxWidth().height(24.dp).semantics {
@@ -59,9 +60,16 @@ fun WorkingArea(view:View,modifier:Modifier=Modifier,controlFraction:Float=.50f,
             }.pointerInput(heightPixels,controlFraction){detectVerticalDragGestures(onDragStart={onResize()}) { change,amount ->
                 change.consume();fraction=(fraction-amount/heightPixels).coerceIn(.25f,.78f)
             }},contentAlignment=Alignment.Center) {
-                Spacer(Modifier.width(44.dp).height(4.dp).background(MiuixTheme.colorScheme.outline,RoundedCornerShape(2.dp)))
+                Spacer(Modifier.width(46.dp).height(4.dp).background(LocalGlassPalette.current.accentStroke, RoundedCornerShape(2.dp)))
             }
             Column(Modifier.fillMaxWidth().height(availableHeight*fraction).verticalScroll(rememberScrollState()).testTag("working-controls"),content=controls)
         }
+    }
+}
+
+@Composable
+private fun PicturePane(view: View, modifier: Modifier) {
+    Box(modifier.glassSurface(shape = RoundedCornerShape(10.dp), elevation = 0.dp, sunken = true).padding(3.dp)) {
+        HostedView(view, Modifier.fillMaxSize().testTag("working-picture"))
     }
 }

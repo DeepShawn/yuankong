@@ -12,6 +12,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,15 +20,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.rememberScrollState
@@ -43,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -50,43 +55,49 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.stylusHoverIcon
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
-import com.aicode.lancmd.glass.AuroraBackground
 import com.aicode.lancmd.glass.ButtonDefaults
 import com.aicode.lancmd.glass.Card
-import com.aicode.lancmd.glass.Colors
-import com.aicode.lancmd.glass.GlassTopBar
 import com.aicode.lancmd.glass.Icon
 import com.aicode.lancmd.glass.IconButton
 import com.aicode.lancmd.glass.LinearProgressIndicator
 import com.aicode.lancmd.glass.LocalGlassPalette
-import com.aicode.lancmd.glass.MiuixTheme
+import com.aicode.lancmd.glass.LocalInterfaceStyle
 import com.aicode.lancmd.glass.Scaffold
 import com.aicode.lancmd.glass.Text
 import com.aicode.lancmd.glass.TextButton
 import com.aicode.lancmd.glass.TextField
-import com.aicode.lancmd.glass.darkColorScheme
+import com.aicode.lancmd.glass.WorkspaceColorProvider
+import com.aicode.lancmd.glass.glassCircle
 import com.aicode.lancmd.glass.glassClickable
 import com.aicode.lancmd.glass.glassSurface
-import com.aicode.lancmd.glass.lightColorScheme
+import com.aicode.lancmd.glass.pressFeedback
 import com.aicode.lancmd.glass.rememberGlassPress
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.theme.Colors
+import top.yukonga.miuix.kmp.theme.darkColorScheme
+import top.yukonga.miuix.kmp.theme.lightColorScheme
 
 /**
- * 界面迁移到 Liquid Glass 的公共部分。
+ * Compose pages share the user's accent and background across interface styles.
  *
  * 全部页面都继承 [MiuixActivity]，界面由 Compose 描述；
  * 自绘 View（远程画面、画板、虚拟键盘）通过 [HostedView] 嵌入。
@@ -96,8 +107,8 @@ fun LanCmdMiuixTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val accent = Themes.accent(context).key
     val tone = Themes.tone(context).key
-    val colors = remember(accent, tone) { lanCmdColors(context) }
-    MiuixTheme(colors = colors, content = content)
+    val colors = remember(context, accent, tone) { lanCmdColors(context) }
+    WorkspaceColorProvider(colors, content)
 }
 
 /**
@@ -135,7 +146,6 @@ internal fun lanCmdColors(context: Context): Colors {
         tertiaryContainer = pick(R.color.accent_dim),
         onTertiaryContainer = pick(R.color.accent),
         tertiaryContainerVariant = pick(R.color.surface_high),
-        onTertiaryContainerVariant = pick(R.color.text),
         background = pick(R.color.bg),
         onBackground = pick(R.color.text),
         onBackgroundVariant = pick(R.color.dim),
@@ -159,18 +169,19 @@ internal fun lanCmdColors(context: Context): Colors {
     )
 }
 
-/** 当前外观是否为紧凑的「KernelSU 参考风格」；两种风格都使用 Liquid Glass 材质。 */
-@Composable
-internal fun kernelStyle() = Prefs.uiStyle(LocalContext.current) == "kernel"
-
 /** 页面顶部的状态与结果提示，等同于旧 View 页面的状态条。 */
 @Composable
 fun StatusNote(text: String, failed: Boolean) {
     if (text.isBlank()) return
     val expanded = remember(text) { mutableStateOf(false) }
+    val truncated = remember(text) { mutableStateOf(false) }
     val palette = LocalGlassPalette.current
     val tint = if (failed) palette.danger else palette.accent
     val shape = RoundedCornerShape(14.dp)
+    val toggle = if (truncated.value || expanded.value) {
+        Modifier.glassClickable(role = Role.Button) { expanded.value = !expanded.value }
+            .semantics { stateDescription = if (expanded.value) "已展开" else "已收起" }
+    } else Modifier
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp)
             .glassSurface(
@@ -181,56 +192,62 @@ fun StatusNote(text: String, failed: Boolean) {
                 glow = tint.copy(alpha = .10f)
             )
             .border(1.dp, tint.copy(alpha = .22f), shape)
-            .glassClickable { expanded.value = !expanded.value }
+            .then(toggle)
             .padding(horizontal = 11.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            Modifier.size(8.dp).clip(CircleShape).background(tint)
-        )
+        Text(if (failed) "!" else "•", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = tint)
         Column(
-            Modifier.weight(1f).heightIn(max = if (expanded.value) 160.dp else 40.dp)
-                .verticalScroll(rememberScrollState())
+            Modifier.weight(1f).then(
+                if (expanded.value) Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()) else Modifier
+            )
         ) {
             Text(
                 text,
-                fontSize = 12.5.sp,
+                fontSize = 13.sp,
                 lineHeight = 18.sp,
                 maxLines = if (expanded.value) Int.MAX_VALUE else 2,
                 overflow = TextOverflow.Ellipsis,
-                color = palette.text.copy(alpha = .92f)
+                color = palette.text,
+                onTextLayout = { if (!expanded.value) truncated.value = it.hasVisualOverflow }
+            )
+        }
+        Box(Modifier.size(14.dp)) {
+            if (truncated.value || expanded.value) Icon(
+                painterResource(R.drawable.ic_back),
+                null,
+                modifier = Modifier.size(14.dp).rotate(if (expanded.value) 90f else -90f),
+                tint = tint
             )
         }
     }
 }
 
-/** 悬浮玻璃顶栏：返回键是圆形玻璃，标题区可容纳副标题。 */
+/** Top bars reserve room for scaled titles and system cutouts. */
 @Composable
 fun WorkspaceHeader(title: String, back: (() -> Unit)? = null, subtitle: String = "") {
     val palette = LocalGlassPalette.current
+    val solid = LocalInterfaceStyle.current == InterfaceStyle.MIUIX
+    val fill = if (solid) Modifier.background(palette.bgTop) else Modifier
+    val bar = if (solid) Modifier else Modifier.glassSurface(
+        shape = RoundedCornerShape(21.dp),
+        elevation = 5.dp,
+        glow = palette.accent.copy(alpha = .05f)
+    )
     Column(
         Modifier.fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    0f to palette.bgTop.copy(alpha = .96f),
-                    0.66f to palette.bgTop.copy(alpha = .72f),
-                    1f to Color.Transparent
-                )
-            )
-            .statusBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .then(fill)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(GlassTopBar.height)
-                .glassSurface(
-                    shape = RoundedCornerShape(18.dp),
-                    elevation = 12.dp,
-                    glow = palette.accent.copy(alpha = if (palette.light) .05f else .04f)
-                )
-                .padding(horizontal = 6.dp),
+                .widthIn(max = 1000.dp).fillMaxWidth()
+                .heightIn(min = 54.dp)
+                .then(bar)
+                .padding(horizontal = 6.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (back != null) {
@@ -238,29 +255,28 @@ fun WorkspaceHeader(title: String, back: (() -> Unit)? = null, subtitle: String 
                     Icon(painterResource(R.drawable.ic_back), "返回")
                 }
             } else {
-                BrandMark()
+                Box(Modifier.padding(start = 5.dp)) { BrandMark() }
             }
             Column(
                 Modifier.weight(1f).padding(
-                    start = if (back == null) 11.dp else 8.dp,
+                    start = if (back == null) 11.dp else 4.dp,
                     end = 14.dp
                 )
             ) {
+                Text(
+                    title,
+                    fontSize = if (solid) 22.sp else 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.semantics { heading() }
+                )
                 if (subtitle.isNotBlank()) Text(
                     subtitle,
-                    fontSize = 10.sp,
-                    letterSpacing = 0.6.sp,
+                    fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = palette.dim
-                )
-                Text(
-                    title,
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(vertical = 1.dp)
                 )
             }
         }
@@ -290,9 +306,6 @@ private fun BrandMark() {
         )
     }
 }
-
-fun Modifier.workspaceBackground(top: Color, bottom: Color) =
-    background(Brush.verticalGradient(listOf(top, bottom)))
 
 /**
  * 所有页面的基类：提供连接绑定、后台任务和状态提示，界面由 Compose 描述。
@@ -330,20 +343,16 @@ abstract class MiuixActivity : AppCompatActivity() {
         })
     }
 
-    /**
-     * 标准页面骨架：悬浮顶栏、可滚动内容，以及顶部的状态提示。
-     * 内容滚到玻璃顶栏下方时会透过去，页面只需描述分区。
-     */
+    /** Standard scrollable workspace. */
     @Composable
     protected fun Page(title: String, content: @Composable ColumnScope.() -> Unit) {
-        Scaffold(topBar = { WorkspaceHeader(title, { onBack() }) }) { insets ->
+        Scaffold(topBar = { WorkspaceHeader(title, { onBack() }) }) {
             Column(
-                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                modifier = Modifier.widthIn(max = 900.dp).fillMaxSize().verticalScroll(rememberScrollState())
             ) {
-                Spacer(Modifier.height(insets.calculateTopPadding()))
                 StatusNote(noteText.value, noteFailed.value)
                 content()
-                Spacer(Modifier.height(insets.calculateBottomPadding() + 16.dp))
+                Spacer(Modifier.height(12.dp))
             }
         }
     }
@@ -354,28 +363,24 @@ abstract class MiuixActivity : AppCompatActivity() {
      */
     @Composable
     protected fun FixedPage(title: String, content: @Composable ColumnScope.() -> Unit) {
-        Scaffold(topBar = { WorkspaceHeader(title, { onBack() }) }) { insets ->
-            Column(
-                modifier = Modifier.fillMaxSize()
-                    .padding(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding())
-            ) {
+        Scaffold(topBar = { WorkspaceHeader(title, { onBack() }) }) {
+            Column(Modifier.fillMaxSize().padding(bottom = 6.dp)) {
                 StatusNote(noteText.value, noteFailed.value)
                 content()
             }
         }
     }
 
-    /** Large management lists render only visible rows and scroll under the glass bar. */
+    /** Large management lists render only visible rows. */
     @Composable
     protected fun ListPage(title: String, content: LazyListScope.() -> Unit) {
-        Scaffold(topBar = { WorkspaceHeader(title, { onBack() }) }) { insets ->
+        Scaffold(topBar = { WorkspaceHeader(title, { onBack() }) }) {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = insets
+                modifier = Modifier.widthIn(max = 1000.dp).fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 12.dp)
             ) {
                 item { StatusNote(noteText.value, noteFailed.value) }
                 content()
-                item { Spacer(Modifier.height(20.dp)) }
             }
         }
     }
@@ -468,31 +473,26 @@ fun MiuixColumn(content: @Composable () -> Unit) {
 //
 // 各页面只描述内容，留白、分区和圆角由这里统一给出。
 
-/** 卡片分区：可选分区标题 + 玻璃卡片。 */
+@Composable
+internal fun SectionLabel(title: String, modifier: Modifier = Modifier) {
+    Text(
+        title,
+        modifier = modifier.semantics { heading() },
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = LocalGlassPalette.current.dim
+    )
+}
+
+/** Grouped cards use the active theme's material. */
 @Composable
 fun SectionCard(title: String? = null, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    val kernel = kernelStyle()
-    val palette = LocalGlassPalette.current
-    if (title != null) {
-        Row(
-            modifier = Modifier.padding(start = 17.dp, top = 10.dp, bottom = 5.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier.size(width = 2.5.dp, height = 11.dp).clip(CircleShape)
-                    .background(palette.accent.copy(alpha = .9f))
-            )
-            Text(
-                title,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 0.3.sp,
-                color = palette.accent.copy(alpha = .95f),
-                modifier = Modifier.padding(start = 7.dp)
-            )
-        }
+    if (title != null) SectionLabel(title, Modifier.padding(start = 22.dp, end = 22.dp, top = 10.dp, bottom = 3.dp))
+    val radius = when (LocalInterfaceStyle.current) {
+        InterfaceStyle.MIUIX -> 16.dp
+        InterfaceStyle.COMPACT -> 18.dp
+        InterfaceStyle.GLASS -> 22.dp
     }
-    val radius = if (kernel) 18.dp else 22.dp
     Card(
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         cornerRadius = radius,
@@ -503,15 +503,25 @@ fun SectionCard(title: String? = null, modifier: Modifier = Modifier, content: @
 /** 列表条目：标题 + 说明，可点击。 */
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-fun RowItem(title: String, summary: String? = null, enabled: Boolean = true, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
+fun RowItem(
+    title: String,
+    summary: String? = null,
+    enabled: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
+    leadingIcon: Int? = null,
+    onClick: () -> Unit
+) {
     val palette = LocalGlassPalette.current
     val press = rememberGlassPress()
     Row(
         Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .pressFeedback(press, enabled)
             .combinedClickable(
                 interactionSource = press.interaction,
                 indication = null,
                 enabled = enabled,
+                role = Role.Button,
                 onClick = onClick,
                 onLongClick = onLongClick
             )
@@ -519,6 +529,14 @@ fun RowItem(title: String, summary: String? = null, enabled: Boolean = true, onL
             .padding(horizontal = 10.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (leadingIcon != null) {
+            Box(
+                Modifier.padding(end = 10.dp).size(34.dp).glassCircle(elevation = 0.dp, accent = true),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(painterResource(leadingIcon), null, Modifier.size(17.dp), tint = palette.accent)
+            }
+        }
         Column(Modifier.weight(1f)) {
             Text(
                 title,
@@ -528,7 +546,7 @@ fun RowItem(title: String, summary: String? = null, enabled: Boolean = true, onL
             )
             if (!summary.isNullOrBlank()) Text(
                 summary,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 lineHeight = 18.sp,
                 modifier = Modifier.padding(top = 5.dp),
                 color = palette.dim
@@ -542,16 +560,17 @@ fun RowItem(title: String, summary: String? = null, enabled: Boolean = true, onL
 @Composable
 fun SelectionRow(title: String, summary: String? = null, checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean = true) {
     val palette = LocalGlassPalette.current
-    val shape = RoundedCornerShape(18.dp)
+    val shape = RoundedCornerShape(13.dp)
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)
             .glassSurface(
                 shape = shape,
-                fillTop = if (checked) palette.accentGlass else palette.glassFillTop.copy(alpha = .04f),
-                fillBottom = if (checked) palette.accentGlass.copy(alpha = .1f) else palette.glassFillBottom.copy(alpha = .02f),
+                fillTop = if (checked) palette.accentGlass else Color.Transparent,
+                fillBottom = if (checked) palette.accentGlass.copy(alpha = .06f) else Color.Transparent,
                 elevation = 0.dp,
-                glow = if (checked) palette.accent.copy(alpha = .12f) else Color.Transparent
+                stroke = false
             )
+            .border(1.dp, if (checked) palette.accentStroke else Color.Transparent, shape)
             .toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = onCheckedChange)
             .padding(horizontal = 12.dp, vertical = 10.dp)
             .heightIn(min = 48.dp),
@@ -561,7 +580,7 @@ fun SelectionRow(title: String, summary: String? = null, checked: Boolean, onChe
             Modifier.size(24.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(if (checked) palette.accent else Color.Transparent)
-                .border(1.5.dp, if (checked) palette.accent else palette.stroke, RoundedCornerShape(8.dp)),
+                .border(1.5.dp, if (checked) palette.accent else palette.dim.copy(alpha = .75f), RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center
         ) {
             if (checked) Text("✓", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = palette.onAccent)
@@ -571,7 +590,7 @@ fun SelectionRow(title: String, summary: String? = null, checked: Boolean, onChe
                 title,
                 fontSize = 15.sp,
                 fontWeight = if (checked) FontWeight.SemiBold else FontWeight.Normal,
-                color = palette.text
+                color = if (enabled) palette.text else palette.dim
             )
             if (!summary.isNullOrBlank()) Text(
                 summary,
@@ -590,24 +609,26 @@ fun SelectionAction(text: String, selected: Boolean = false, enabled: Boolean = 
     val shape = RoundedCornerShape(12.dp)
     Box(
         modifier = modifier
-            .heightIn(min = 44.dp)
-            .selectable(selected, enabled, role = Role.Button, onClick = onClick)
+            .heightIn(min = 48.dp)
             .glassSurface(
                 shape = shape,
-                fillTop = if (selected) palette.accentGlass else palette.glassFillTop.copy(alpha = .045f),
-                fillBottom = if (selected) palette.accentGlass.copy(alpha = .08f) else palette.glassFillBottom.copy(alpha = .015f),
+                fillTop = if (selected) palette.accentGlass else palette.glassFillTop,
+                fillBottom = if (selected) palette.accentGlass.copy(alpha = .08f) else palette.glassFillBottom,
                 elevation = 0.dp,
                 stroke = false,
                 glow = if (selected) palette.accent.copy(alpha = .08f) else Color.Transparent
             )
-            .border(1.dp, if (selected) palette.accentStroke.copy(alpha = .55f) else palette.stroke.copy(alpha = .55f), shape),
+            .border(1.dp, if (selected) palette.accentStroke else palette.stroke, shape)
+            .selectable(selected, enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text,
             fontSize = 13.sp,
-            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 9.dp),
             color = if (!enabled) palette.dim.copy(alpha = .45f) else if (selected) palette.accent else palette.text.copy(alpha = .82f)
         )
@@ -648,7 +669,9 @@ fun EmptyNote(text: String) {
     Text(
         text = text,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 20.dp),
-        color = LocalGlassPalette.current.dim
+        color = LocalGlassPalette.current.dim,
+        fontSize = 14.sp,
+        lineHeight = 20.sp
     )
 }
 
@@ -665,20 +688,26 @@ fun Action(
         text = text,
         onClick = onClick,
         enabled = enabled,
-        cornerRadius = if (kernelStyle()) 16.dp else 13.dp,
+        cornerRadius = if (LocalInterfaceStyle.current == InterfaceStyle.MIUIX) 12.dp else 14.dp,
         insideMargin = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-        modifier = modifier.padding(vertical = 3.dp).heightIn(min = 44.dp),
+        modifier = modifier.padding(vertical = 2.dp),
         colors = if (primary) ButtonDefaults.textButtonColorsPrimary() else ButtonDefaults.textButtonColors()
     )
 }
 
-/** 并排的操作按钮，等分宽度。 */
+/** Wrap dense action groups when the available width or text size demands it. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ActionRow(content: @Composable RowScope.() -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 3.dp),
-        horizontalArrangement = Arrangement.spacedBy(7.dp)
-    ) { content() }
+    val scale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 3.dp)) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            maxItemsInEachRow = (maxWidth.value / (69f * scale)).toInt().coerceIn(1, 6),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) { content() }
+    }
 }
 
 /**

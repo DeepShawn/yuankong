@@ -14,23 +14,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.border
+import androidx.compose.ui.semantics.Role
+import com.aicode.lancmd.InterfaceStyle
 import kotlinx.coroutines.isActive
 import kotlin.math.cos
 import kotlin.math.sin
@@ -151,6 +153,12 @@ fun Modifier.glassSurface(
     brush: Brush? = null
 ): Modifier {
     val palette = LocalGlassPalette.current
+    if (LocalInterfaceStyle.current == InterfaceStyle.MIUIX) {
+        val colors = MiuixTheme.colorScheme
+        val base = if (sunken) colors.surfaceVariant else colors.surface
+        val surface = clip(shape).background(fillTop?.compositeOver(base) ?: base)
+        return if (stroke) surface.border(1.dp, colors.outline, shape) else surface
+    }
     val top = fillTop ?: palette.glassFillTop
     val bottom = fillBottom ?: palette.glassFillBottom
     var modifier = this
@@ -165,37 +173,29 @@ fun Modifier.glassSurface(
     }
     modifier = modifier
         .clip(shape)
-        .drawBehind {
-            drawRect(brush ?: Brush.verticalGradient(listOf(top, bottom)))
-            // 左上镜面高光
-            drawRect(
-                Brush.linearGradient(
-                    0f to palette.highlight,
-                    0.45f to palette.highlight.copy(alpha = palette.highlight.alpha * 0.25f),
-                    1f to Color.Transparent,
-                    start = Offset(0f, 0f),
-                    end = Offset(size.width * 1.05f, size.height * 1.18f)
-                )
+        .drawWithCache {
+            val fill = brush ?: Brush.verticalGradient(listOf(top, bottom))
+            val reflection = Brush.linearGradient(
+                0f to palette.highlight,
+                0.45f to palette.highlight.copy(alpha = palette.highlight.alpha * 0.25f),
+                1f to Color.Transparent,
+                end = Offset(size.width * 1.05f, size.height * 1.18f)
             )
-            // 内凹材质：顶部压一层暗色，像磨砂玻璃的凹槽。
-            if (sunken) {
-                drawRect(
-                    Brush.verticalGradient(
-                        0f to Color.Black.copy(alpha = if (palette.light) 0.05f else 0.20f),
-                        0.45f to Color.Transparent
-                    )
-                )
-            }
-            // 强调色柔光从右下角透出来。
-            if (glow != Color.Transparent) {
-                drawRect(
-                    Brush.radialGradient(
-                        0f to glow,
-                        1f to Color.Transparent,
-                        center = Offset(size.width * 0.92f, size.height * 1.02f),
-                        radius = size.maxDimension * 0.75f
-                    )
-                )
+            val inset = if (sunken) Brush.verticalGradient(
+                0f to Color.Black.copy(alpha = if (palette.light) 0.05f else 0.20f),
+                0.45f to Color.Transparent
+            ) else null
+            val illumination = if (glow.alpha > 0f) Brush.radialGradient(
+                0f to glow,
+                1f to Color.Transparent,
+                center = Offset(size.width * 0.92f, size.height * 1.02f),
+                radius = (size.maxDimension * 0.75f).coerceAtLeast(1f)
+            ) else null
+            onDrawBehind {
+                drawRect(fill)
+                drawRect(reflection)
+                if (inset != null) drawRect(inset)
+                if (illumination != null) drawRect(illumination)
             }
         }
     if (stroke) {
@@ -211,69 +211,30 @@ fun Modifier.glassSurface(
 /** 圆形玻璃底座（返回键、图标按钮）。 */
 @Composable
 fun Modifier.glassCircle(
-    diameter: Dp = 44.dp,
     elevation: Dp = 8.dp,
     accent: Boolean = false
 ): Modifier {
     val palette = LocalGlassPalette.current
-    val shape = CircleShape
-    var modifier = this
-    if (elevation > 0.dp) {
-        modifier = modifier.shadow(
-            elevation = elevation,
-            shape = shape,
-            clip = false,
-            ambientColor = palette.shadow.copy(alpha = palette.shadow.alpha * 0.5f),
-            spotColor = palette.shadow
+    val shape = if (LocalInterfaceStyle.current == InterfaceStyle.MIUIX) RoundedCornerShape(13.dp) else CircleShape
+    val surface = glassSurface(
+        shape = shape,
+        fillTop = if (accent) palette.accentGlass else null,
+        fillBottom = if (accent) palette.accentGlass.copy(alpha = .06f) else null,
+        elevation = elevation,
+        stroke = !accent
         )
-    }
-    return modifier
-        .clip(shape)
-        .drawBehind {
-            drawRect(
-                Brush.verticalGradient(
-                    listOf(
-                        if (accent) palette.accentGlass else palette.glassFillTop,
-                        if (accent) palette.accentGlass.copy(alpha = palette.accentGlass.alpha * 0.5f) else palette.glassFillBottom
-                    )
-                )
-            )
-            drawRect(
-                Brush.linearGradient(
-                    0f to palette.highlight,
-                    1f to Color.Transparent,
-                    start = Offset(0f, 0f),
-                    end = Offset(size.width, size.height)
-                )
-            )
-        }
-        .border(
-            width = 1.dp,
-            brush = Brush.verticalGradient(
-                listOf(
-                    if (accent) palette.accentStroke else palette.strokeTop,
-                    if (accent) palette.accentStroke.copy(alpha = 0.25f) else palette.strokeBottom
-                )
-            ),
-            shape = shape
-        )
-}
-
-/** 按下缩小、松开回弹的点击反馈。不引入 ripple，保持玻璃表面干净。 */
-@Composable
-fun Modifier.pressScale(enabled: Boolean = true, scale: Float = 0.965f): Modifier {
-    // 由调用方把 clickable 加在同一个 Modifier 链上，这里只负责视觉。
-    // 为了让按下状态可用，调用方通过 [GlassPressState] 组合。
-    return this
+    return if (accent) surface.border(1.dp, palette.accentStroke, shape) else surface
 }
 
 /** 跟手的按压状态，配合 [Modifier.pressFeedback] 使用。 */
 @Composable
 fun rememberGlassPress(): GlassPressState {
+    val context = LocalContext.current
+    val animated = remember(context) { GlassMotion.animationsEnabled(context) }
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.962f else 1f,
+        targetValue = if (animated && pressed) 0.962f else 1f,
         animationSpec = GlassMotion.press,
         label = "glass-press"
     )
@@ -301,6 +262,7 @@ fun Modifier.pressFeedback(state: GlassPressState, enabled: Boolean = true): Mod
 @Composable
 fun Modifier.glassClickable(
     enabled: Boolean = true,
+    role: Role? = null,
     onClick: () -> Unit
 ): Modifier {
     val state = rememberGlassPress()
@@ -310,6 +272,7 @@ fun Modifier.glassClickable(
             interactionSource = state.interaction,
             indication = null,
             enabled = enabled,
+            role = role,
             onClick = onClick
         )
 }

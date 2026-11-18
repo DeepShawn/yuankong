@@ -5,6 +5,16 @@ import android.content.Context
 import android.util.TypedValue
 import androidx.core.content.ContextCompat
 
+internal enum class InterfaceStyle(val key: String, val label: String, val summary: String) {
+    GLASS("glass", "Liquid Glass", "半透明卡片与流动背景"),
+    MIUIX("miuix", "miuix 经典风格", "实色卡片与分组列表"),
+    COMPACT("kernel", "KernelSU 参考风格", "玻璃材质与紧凑列表");
+
+    companion object {
+        fun fromKey(key: String?) = entries.firstOrNull { it.key == key } ?: COMPACT
+    }
+}
+
 /** 外观主题：主题色 × 背景色调。颜色以主题属性提供，界面代码通过 [color] 取当前主题的值。 */
 object Themes {
     class Option(val key: String, val label: String, val style: Int, val swatch: Int, val swatch2: Int, val light: Boolean = false, val lightStyle: Int = style, val lightSwatch: Int = swatch)

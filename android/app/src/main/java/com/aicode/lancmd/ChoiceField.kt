@@ -48,7 +48,7 @@ fun ChoiceField(
         if(!summary.isNullOrBlank())Text(summary,fontSize=11.sp,color=MiuixTheme.colorScheme.onSurfaceVariantSummary,modifier=Modifier.padding(start=8.dp,end=8.dp,bottom=6.dp))
     }
     if (expanded) Dialog(onDismissRequest = { expanded = false }) {
-        Card(modifier = modifier.fillMaxWidth()) {
+        Card(modifier = modifier.fillMaxWidth(), elevated = true) {
             Text(title, modifier = Modifier.padding(20.dp))
             Column(Modifier.weight(1f,fill=false).heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                 items.forEachIndexed { index, value ->

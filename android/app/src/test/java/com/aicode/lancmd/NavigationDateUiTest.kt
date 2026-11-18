@@ -8,6 +8,12 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.aicode.lancmd.net.AgentClient
 import com.aicode.lancmd.net.ConnectionManager
 import com.google.android.material.button.MaterialButton
@@ -17,6 +23,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.*
 import org.junit.runner.RunWith
@@ -38,6 +45,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 @ConscryptMode(ConscryptMode.Mode.OFF)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class NavigationDateUiTest {
+    @get:Rule val compose = createEmptyComposeRule()
     private lateinit var zone:TimeZone
     @Before fun before(){zone=TimeZone.getDefault();TimeZone.setDefault(TimeZone.getTimeZone("UTC"));disconnect()}
     @After fun after(){TimeZone.setDefault(zone);disconnect()}
@@ -72,15 +80,27 @@ class NavigationDateUiTest {
         c.pause().stop().destroy()
     }
     @Test fun sharedToolSearchFindsDateWorkflowAndOpensFileManager() {
-        val c=Robolectric.buildActivity(MainActivity::class.java).setup();val a=c.get()
-        ToolNavigator.show(a);shadowOf(Looper.getMainLooper()).idle()
-        val dialog=ShadowDialog.getLatestDialog();val root=dialog.window!!.decorView
-        all(root).filterIsInstance<EditText>().single { it.contentDescription=="搜索全部工具" }.setText("日期")
-        val results=buttons(root).filter { it.contentDescription=="文件管理" }
-        assertEquals(1,results.size);preview(root,"tool-search-date")
-        results.single().performClick();assertFalse(dialog.isShowing)
-        assertEquals(StorageActivity::class.java.name,shadowOf(a).nextStartedActivity.component!!.className)
-        c.pause().stop().destroy()
+        val home = Robolectric.buildActivity(MainActivity::class.java).setup()
+        ToolNavigator.show(home.get())
+        assertEquals(ToolLibraryActivity::class.java.name, shadowOf(home.get()).nextStartedActivity.component!!.className)
+        home.pause().stop().destroy()
+
+        val library = Robolectric.buildActivity(ToolLibraryActivity::class.java).setup()
+        val page = library.get()
+        try {
+            val search = compose.onNode(hasSetTextAction())
+            search.performTextReplacement("没有这样的工具")
+            compose.onNodeWithText("没有匹配的工具，请换个关键词。").assertIsDisplayed()
+            search.performTextReplacement("日期")
+            val result = compose.onNodeWithText("文件管理")
+            result.assertIsDisplayed()
+            preview(page.window.decorView, "tool-search-date")
+            result.performClick()
+            assertEquals(StorageActivity::class.java.name, shadowOf(page).nextStartedActivity.component!!.className)
+            assertTrue(page.isFinishing)
+        } finally {
+            library.pause().stop().destroy()
+        }
     }
     @Test fun groupedFileMenuEditsModifiedDateAndRejectsInvalidCalendarDate() {
         Stub().use { stub->

@@ -13,19 +13,19 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -38,15 +38,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -61,6 +58,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.aicode.lancmd.InterfaceStyle
+import top.yukonga.miuix.kmp.basic.Button as MiuixButton
+import top.yukonga.miuix.kmp.basic.ButtonColors as MiuixButtonColors
+import top.yukonga.miuix.kmp.basic.Card as MiuixCard
+import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 
 // ---------------------------------------------------------------------------
 // 排版
@@ -93,7 +95,7 @@ fun Text(
     val merged = style.merge(
         TextStyle(
             color = if (color == Color.Unspecified) palette.text else color,
-            fontSize = fontSize,
+            fontSize = if (fontSize == TextUnit.Unspecified && style.fontSize == TextUnit.Unspecified) 14.sp else fontSize,
             fontStyle = fontStyle,
             fontWeight = fontWeight,
             fontFamily = fontFamily,
@@ -130,7 +132,7 @@ fun Icon(
     )
 }
 
-/** 圆形玻璃图标按钮：返回、更多操作。 */
+/** Shared 48 dp targets for back and overflow actions. */
 @Composable
 fun IconButton(
     onClick: () -> Unit,
@@ -140,11 +142,14 @@ fun IconButton(
 ) {
     Box(
         modifier = modifier
-            .size(42.dp)
-            .glassCircle()
-            .glassClickable(enabled = enabled, onClick = onClick),
+            .size(48.dp)
+            .glassClickable(enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center
-    ) { content() }
+    ) {
+        Box(Modifier.size(36.dp).glassCircle(elevation = 0.dp), contentAlignment = Alignment.Center) {
+            content()
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -158,13 +163,25 @@ fun Card(
     cornerRadius: Dp = 22.dp,
     insideMargin: PaddingValues = PaddingValues(12.dp),
     onClick: (() -> Unit)? = null,
+    elevated: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    if (LocalInterfaceStyle.current == InterfaceStyle.MIUIX) {
+        if (onClick == null) {
+            MiuixCard(modifier, cornerRadius, insideMargin, content = content)
+        } else {
+            MiuixCard(modifier, cornerRadius, insideMargin, showIndication = true, onClick = onClick, content = content)
+        }
+        return
+    }
     val palette = LocalGlassPalette.current
     val shape = RoundedCornerShape(cornerRadius)
+    val panel = MiuixTheme.colorScheme
     val base = modifier.glassSurface(
         shape = shape,
-        elevation = 10.dp,
+        fillTop = if (elevated) panel.surfaceContainerHigh.copy(alpha = .97f) else null,
+        fillBottom = if (elevated) panel.surfaceContainer.copy(alpha = .95f) else null,
+        elevation = if (elevated) 12.dp else 5.dp,
         glow = palette.accent.copy(alpha = if (palette.light) 0.05f else 0.035f)
     )
     val surface = if (onClick != null) base.glassClickable(onClick = onClick) else base
@@ -173,39 +190,25 @@ fun Card(
     }
 }
 
-/**
- * 页面骨架：Aurora 背景 + 悬浮玻璃顶栏 + 内容。
- *
- * 内容滚到顶栏下方时会透过半透明玻璃，形成真正的「液体玻璃」层叠感。
- * [content] 收到的是底部导航栏与顶栏占位的内边距，页面按需应用到滚动容器上。
- */
+/** The header takes its measured height, including the top inset and scaled text. */
 @Composable
 fun Scaffold(
     modifier: Modifier = Modifier,
     topBar: @Composable () -> Unit = {},
-    content: @Composable (PaddingValues) -> Unit
+    content: @Composable () -> Unit
 ) {
-    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val insets = remember(statusTop, navBottom) {
-        PaddingValues(
-            top = statusTop + GlassTopBar.space,
-            bottom = navBottom + 12.dp
-        )
+    val solid = LocalInterfaceStyle.current == InterfaceStyle.MIUIX
+    Box(modifier = modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)) {
+        if (!solid) AuroraBackground(Modifier.matchParentSize())
+        Column(
+            Modifier.fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            topBar()
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) { content() }
+        }
     }
-    Box(modifier = modifier.fillMaxSize()) {
-        AuroraBackground(Modifier.fillMaxSize())
-        content(insets)
-        Box(Modifier.fillMaxWidth().align(Alignment.TopCenter)) { topBar() }
-    }
-}
-
-/** 悬浮顶栏的尺寸约定。 */
-object GlassTopBar {
-    /** 顶栏胶囊高度。 */
-    val height: Dp = 54.dp
-    /** 顶栏占用的垂直空间（状态栏之外）。 */
-    val space: Dp = 70.dp
 }
 
 // ---------------------------------------------------------------------------
@@ -232,7 +235,7 @@ object ButtonDefaults {
         return GlassButtonColors(
             container = palette.glassFillTop,
             content = palette.text.copy(alpha = 0.94f),
-            border = palette.strokeTop.copy(alpha = 0.55f),
+            border = if (palette.light) palette.stroke else palette.strokeTop,
             disabledContainer = palette.glassFillTop.copy(alpha = 0.03f),
             disabledContent = palette.dim.copy(alpha = 0.55f)
         )
@@ -269,38 +272,61 @@ fun TextButton(
     val container = if (enabled) colors.container else colors.disabledContainer
     val contentColor = if (enabled) colors.content else colors.disabledContent
     val solid = colors.solid && enabled
+    val label: @Composable () -> Unit = {
+        Text(
+            text = text,
+            color = contentColor,
+            fontSize = 14.sp,
+            lineHeight = 18.sp,
+            fontWeight = if (solid) FontWeight.SemiBold else FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+    if (LocalInterfaceStyle.current == InterfaceStyle.MIUIX) {
+        val scheme = MiuixTheme.colorScheme
+        MiuixButton(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            cornerRadius = cornerRadius,
+            minWidth = 0.dp,
+            minHeight = 48.dp,
+            insideMargin = insideMargin,
+            colors = MiuixButtonColors(
+                color = if (colors.solid) scheme.primary else scheme.surfaceVariant,
+                disabledColor = scheme.surfaceVariant,
+                contentColor = colors.content,
+                disabledContentColor = colors.disabledContent
+            )
+        ) { label() }
+        return
+    }
     Box(
         modifier = modifier
-            .heightIn(min = 42.dp)
+            .heightIn(min = 48.dp)
             .glassSurface(
                 shape = shape,
                 fillTop = container,
                 fillBottom = container,
-                elevation = if (solid) 10.dp else 0.dp,
+                elevation = if (solid) 4.dp else 0.dp,
                 stroke = false,
                 glow = if (enabled) colors.glow else Color.Transparent,
                 brush = if (solid) {
-                    Brush.linearGradient(listOf(palette.accent, palette.accent2))
+                    val end = if (palette.light) lerpColor(palette.accent, palette.accent2, .28f) else palette.accent2
+                    Brush.linearGradient(listOf(palette.accent, end))
                 } else {
                     Brush.verticalGradient(
                         listOf(container, container.copy(alpha = (container.alpha * 0.62f).coerceAtLeast(0.02f)))
                     )
                 }
             )
-            .border(1.dp, colors.border, shape)
-            .glassClickable(enabled = enabled, onClick = onClick)
+            .border(1.dp, if (enabled) colors.border else palette.stroke.copy(alpha = palette.stroke.alpha * .58f), shape)
+            .glassClickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(insideMargin),
         contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            color = contentColor,
-            fontSize = 13.5.sp,
-            fontWeight = if (solid) FontWeight.SemiBold else FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
+    ) { label() }
 }
 
 // ---------------------------------------------------------------------------
@@ -321,7 +347,8 @@ fun TextField(
     visualTransformation: VisualTransformation = VisualTransformation.None
 ) {
     val palette = LocalGlassPalette.current
-    val shape = RoundedCornerShape(16.dp)
+    val solid = LocalInterfaceStyle.current == InterfaceStyle.MIUIX
+    val shape = RoundedCornerShape(if (solid) 12.dp else 16.dp)
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val floating = label.isNotBlank() && (!singleLine || value.isNotEmpty() || focused)
@@ -330,22 +357,12 @@ fun TextField(
         onValueChange = onValueChange,
         modifier = modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clip(shape)
-            .drawBehind {
-                drawRect(
-                    Brush.verticalGradient(
-                        listOf(palette.glassSunken, palette.glassSunken.copy(alpha = palette.glassSunken.alpha * 0.55f))
-                    )
-                )
-            }
+            .background(palette.glassSunken)
             .border(
                 width = if (focused) 1.5.dp else 1.dp,
-                brush = Brush.verticalGradient(
-                    listOf(
-                        if (focused) palette.accent.copy(alpha = 0.85f) else palette.stroke.copy(alpha = 0.9f),
-                        if (focused) palette.accent.copy(alpha = 0.28f) else palette.stroke.copy(alpha = 0.30f)
-                    )
-                ),
+                color = if (focused) palette.accent else palette.stroke,
                 shape = shape
             )
             .padding(horizontal = 14.dp, vertical = if (floating) 8.dp else 11.dp),
@@ -362,7 +379,7 @@ fun TextField(
                 if (floating) {
                     Text(
                         text = label,
-                        fontSize = 10.5.sp,
+                        fontSize = 11.5.sp,
                         color = if (focused) palette.accent else palette.dim,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -405,7 +422,7 @@ fun SuperSwitch(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = { onCheckedChange?.invoke(it) })
+            .toggleable(value = checked, enabled = enabled && onCheckedChange != null, role = Role.Switch, onValueChange = { onCheckedChange?.invoke(it) })
             .padding(horizontal = 10.dp, vertical = 8.dp)
             .heightIn(min = 36.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -428,7 +445,11 @@ fun SuperSwitch(
             }
         }
         Spacer(Modifier.size(12.dp))
-        GlassSwitch(checked = checked, enabled = enabled)
+        if (LocalInterfaceStyle.current == InterfaceStyle.MIUIX) {
+            MiuixSwitch(checked = checked, onCheckedChange = null, enabled = enabled)
+        } else {
+            GlassSwitch(checked = checked, enabled = enabled)
+        }
     }
 }
 
