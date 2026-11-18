@@ -9,8 +9,12 @@ import android.view.ViewGroup
 import androidx.appcompat.app.AlertDialog
 import androidx.core.graphics.ColorUtils
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.aicode.lancmd.net.ConnectionManager
 import org.junit.After
+import org.junit.Rule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -29,6 +33,7 @@ import java.io.File
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @ConscryptMode(ConscryptMode.Mode.OFF)
 class ThemeTest {
+    @get:Rule val compose = createEmptyComposeRule()
     @After fun tearDown() {
         ConnectionManager.stop()
         Prefs.saveTheme(RuntimeEnvironment.getApplication(), "", "")
@@ -81,6 +86,7 @@ class ThemeTest {
     @Test fun pickerSavesChoiceAndHomeKeepsConsoleAcrossRecreate() {
         val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
         val activity = controller.get()
+        activity.commandLine = "dir"
         activity.onEvent("主题切换前的日志", ConnectionManager.LogKind.INFO)
         shadowOf(Looper.getMainLooper()).idle()
 
@@ -103,7 +109,34 @@ class ThemeTest {
         val recreated = controller.get()
         assertEquals(0xFFA98BFF.toInt(), Themes.color(recreated, R.color.accent))
         assertTrue(recreated.consoleText.contains("主题切换前的日志"))
+        assertEquals("dir", recreated.commandLine)
         controller.pause().stop().destroy()
+    }
+
+    @Test fun bothStylesRenderTheSameWorkspaceInLightAndDark() {
+        val app = RuntimeEnvironment.getApplication()
+        for (style in listOf("glass", "miuix")) for (tone in listOf("deep", "porcelain")) {
+            Prefs.saveUiStyle(app, style)
+            Prefs.saveTheme(app, "mint", tone)
+            val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+            val page = controller.get()
+            try {
+                assertEquals(style, Prefs.uiStyle(page))
+                page.connected = true
+                page.overlayVisible = false
+                page.deviceName = "工作室电脑"
+                page.deviceSub = "192.168.1.24:47823"
+                page.latencyText = "8 ms"
+                page.consoleText = "09:41:02 已连接工作室电脑\n09:41:18 连接测试成功"
+                compose.onNodeWithText("工作室电脑").assertIsDisplayed()
+                render(page.window.decorView, "workspace-$style-$tone")
+                page.homeCategory = "文件与设备"
+                compose.onNodeWithText("文件管理").assertIsDisplayed()
+                render(page.window.decorView, "workspace-tools-$style-$tone")
+            } finally {
+                controller.pause().stop().destroy()
+            }
+        }
     }
 
     private fun find(view: View, match: (View) -> Boolean): View? {

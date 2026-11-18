@@ -3,12 +3,15 @@ package com.aicode.lancmd
 import android.app.Application
 import android.view.View
 import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -57,6 +60,27 @@ class WorkingAreaUiTest {
     @Test fun visuallyCompactSelectionKeepsItsTouchTarget() {
         compose.setContent {LanCmdMiuixTheme {SelectionAction("触控",selected=true){}}}
         compose.onNodeWithText("触控").assertIsSelected().assertHeightIsAtLeast(48.dp)
+    }
+    @Test fun actionGroupsWrapAndKeepTouchTargetsOnNarrowLargeTextLayouts() {
+        var clicked = ""
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f, fontScale = 1.5f)) {
+                LanCmdMiuixTheme {
+                    Column(Modifier.width(300.dp)) {
+                        ActionRow {
+                            listOf("切换电脑", "工具库", "外观主题", "更多").forEach { label ->
+                                Action(label, modifier = Modifier.weight(1f)) { clicked = label }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val first = compose.onNodeWithText("切换电脑").assertHeightIsAtLeast(48.dp)
+        val last = compose.onNodeWithText("更多").assertHeightIsAtLeast(48.dp)
+        assertTrue(last.getUnclippedBoundsInRoot().top > first.getUnclippedBoundsInRoot().top)
+        last.performClick()
+        assertEquals("更多", clicked)
     }
     @Test fun dividerStillDragsAfterKeyboardChangesTheDefaultPaneSize() {
         val fraction=androidx.compose.runtime.mutableFloatStateOf(.36f)

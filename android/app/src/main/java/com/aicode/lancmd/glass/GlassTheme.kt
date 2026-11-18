@@ -14,120 +14,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import com.aicode.lancmd.InterfaceStyle
 import com.aicode.lancmd.Prefs
 import com.aicode.lancmd.R
 import com.aicode.lancmd.Themes
-
-/**
- * 页面配色（与 miuix 的 Colors 字段保持一致）。
- *
- * 页面与对话框仍通过 [MiuixTheme.colorScheme] 取色，这样旧的按主题取色代码
- * 不用改；真正的玻璃材质颜色由 [GlassPalette] 提供。
- */
-@Immutable
-data class Colors(
-    val primary: Color = Color(0xFF3EE0B5),
-    val onPrimary: Color = Color(0xFF022B21),
-    val primaryContainer: Color = Color(0xFF123F37),
-    val onPrimaryContainer: Color = Color(0xFF3EE0B5),
-    val primaryVariant: Color = Color(0xFF3EE0B5),
-    val onPrimaryVariant: Color = Color(0xFF022B21),
-    val disabledPrimary: Color = Color(0xFF123F37),
-    val disabledOnPrimary: Color = Color(0xFF8B9AB0),
-    val disabledPrimaryButton: Color = Color(0xFF172131),
-    val disabledOnPrimaryButton: Color = Color(0xFF8B9AB0),
-    val disabledPrimarySlider: Color = Color(0xFF123F37),
-    val secondary: Color = Color(0xFF172131),
-    val onSecondary: Color = Color(0xFFEAF1F8),
-    val secondaryVariant: Color = Color(0xFF1E2A3D),
-    val onSecondaryVariant: Color = Color(0xFFEAF1F8),
-    val disabledSecondary: Color = Color(0xFF101722),
-    val disabledOnSecondary: Color = Color(0xFF8B9AB0),
-    val disabledSecondaryVariant: Color = Color(0xFF101722),
-    val disabledOnSecondaryVariant: Color = Color(0xFF8B9AB0),
-    val secondaryContainer: Color = Color(0xFF172131),
-    val onSecondaryContainer: Color = Color(0xFF8B9AB0),
-    val secondaryContainerVariant: Color = Color(0xFF1E2A3D),
-    val onSecondaryContainerVariant: Color = Color(0xFFEAF1F8),
-    val tertiaryContainer: Color = Color(0xFF123F37),
-    val onTertiaryContainer: Color = Color(0xFF3EE0B5),
-    val tertiaryContainerVariant: Color = Color(0xFF1E2A3D),
-    val onTertiaryContainerVariant: Color = Color(0xFFEAF1F8),
-    val background: Color = Color(0xFF080C12),
-    val onBackground: Color = Color(0xFFEAF1F8),
-    val onBackgroundVariant: Color = Color(0xFF8B9AB0),
-    val surface: Color = Color(0xFF101722),
-    val onSurface: Color = Color(0xFFEAF1F8),
-    val surfaceVariant: Color = Color(0xFF172131),
-    val onSurfaceSecondary: Color = Color(0xFFEAF1F8),
-    val onSurfaceVariantSummary: Color = Color(0xFF8B9AB0),
-    val onSurfaceVariantActions: Color = Color(0xFF3EE0B5),
-    val disabledOnSurface: Color = Color(0x808B9AB0),
-    val surfaceContainer: Color = Color(0xFF101722),
-    val onSurfaceContainer: Color = Color(0xFFEAF1F8),
-    val onSurfaceContainerVariant: Color = Color(0xFF8B9AB0),
-    val surfaceContainerHigh: Color = Color(0xFF1E2A3D),
-    val onSurfaceContainerHigh: Color = Color(0xFFEAF1F8),
-    val surfaceContainerHighest: Color = Color(0xFF1E2A3D),
-    val onSurfaceContainerHighest: Color = Color(0xFFEAF1F8),
-    val outline: Color = Color(0xFF24324A),
-    val dividerLine: Color = Color(0xFF1A2537),
-    val error: Color = Color(0xFFFF6B6B)
-)
-
-/** 深色背景的默认配色（仅作为没包主题时的兜底，实际由 lanCmdColors 覆盖）。 */
-fun darkColorScheme(): Colors = Colors()
-
-/** 亮色背景的默认配色（字段会被 lanCmdColors 逐个覆盖）。 */
-fun lightColorScheme(): Colors = Colors(
-    primary = Color(0xFF007D65),
-    onPrimary = Color(0xFFF4FFFB),
-    primaryContainer = Color(0xFFD3F4EA),
-    onPrimaryContainer = Color(0xFF007D65),
-    primaryVariant = Color(0xFF007D65),
-    onPrimaryVariant = Color(0xFFF4FFFB),
-    disabledPrimary = Color(0xFFD3F4EA),
-    disabledOnPrimary = Color(0xFF6B7A8B),
-    disabledPrimaryButton = Color(0xFFE4EAF2),
-    disabledOnPrimaryButton = Color(0xFF6B7A8B),
-    disabledPrimarySlider = Color(0xFFD3F4EA),
-    secondary = Color(0xFFE4EAF2),
-    onSecondary = Color(0xFF172131),
-    secondaryVariant = Color(0xFFF2F5F9),
-    onSecondaryVariant = Color(0xFF172131),
-    disabledSecondary = Color(0xFFF6F8FC),
-    disabledOnSecondary = Color(0xFF6B7A8B),
-    disabledSecondaryVariant = Color(0xFFF6F8FC),
-    disabledOnSecondaryVariant = Color(0xFF6B7A8B),
-    secondaryContainer = Color(0xFFE4EAF2),
-    onSecondaryContainer = Color(0xFF5A6675),
-    secondaryContainerVariant = Color(0xFFF2F5F9),
-    onSecondaryContainerVariant = Color(0xFF172131),
-    tertiaryContainer = Color(0xFFD3F4EA),
-    onTertiaryContainer = Color(0xFF007D65),
-    tertiaryContainerVariant = Color(0xFFF2F5F9),
-    onTertiaryContainerVariant = Color(0xFF172131),
-    background = Color(0xFFF6F8FC),
-    onBackground = Color(0xFF111A24),
-    onBackgroundVariant = Color(0xFF5A6675),
-    surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF111A24),
-    surfaceVariant = Color(0xFFE4EAF2),
-    onSurfaceSecondary = Color(0xFF111A24),
-    onSurfaceVariantSummary = Color(0xFF5A6675),
-    onSurfaceVariantActions = Color(0xFF007D65),
-    disabledOnSurface = Color(0x805A6675),
-    surfaceContainer = Color(0xFFFFFFFF),
-    onSurfaceContainer = Color(0xFF111A24),
-    onSurfaceContainerVariant = Color(0xFF5A6675),
-    surfaceContainerHigh = Color(0xFFF2F5F9),
-    onSurfaceContainerHigh = Color(0xFF111A24),
-    surfaceContainerHighest = Color(0xFFF2F5F9),
-    onSurfaceContainerHighest = Color(0xFF111A24),
-    outline = Color(0xFFC9D3DF),
-    dividerLine = Color(0xFFE2E8F0),
-    error = Color(0xFFC2333F)
-)
+import top.yukonga.miuix.kmp.theme.Colors
+import top.yukonga.miuix.kmp.theme.MiuixTheme as NativeMiuixTheme
+import top.yukonga.miuix.kmp.theme.darkColorScheme
 
 /** Liquid Glass 的材质配色：半透明填充、高光描边、柔光、阴影和背景光斑。 */
 @Immutable
@@ -219,12 +112,12 @@ private fun darkPalette(
         danger = danger,
         warn = warn,
         ok = ok,
-        glassFillTop = Color.White.copy(alpha = 0.072f),
+        glassFillTop = Color(0xFFBECFE4).copy(alpha = 0.095f),
         glassFillBottom = Color.White.copy(alpha = 0.026f),
         glassSunken = Color.Black.copy(alpha = 0.32f),
         strokeTop = Color.White.copy(alpha = 0.19f),
-        strokeBottom = Color.White.copy(alpha = 0.015f),
-        stroke = Color.White.copy(alpha = 0.07f),
+        strokeBottom = Color.White.copy(alpha = 0.056f),
+        stroke = Color.White.copy(alpha = 0.16f),
         highlight = Color.White.copy(alpha = 0.055f),
         shadow = Color.Black.copy(alpha = 0.55f),
         scrim = deep.copy(alpha = 0.66f),
@@ -265,7 +158,7 @@ private fun lightPalette(
     glassSunken = Color(0xFF0B1B2A).copy(alpha = 0.055f),
     strokeTop = Color.White.copy(alpha = 0.96f),
     strokeBottom = Color.White.copy(alpha = 0.30f),
-    stroke = Color(0xFF0B1B2A).copy(alpha = 0.06f),
+    stroke = Color(0xFF0B1B2A).copy(alpha = 0.16f),
     highlight = Color.White.copy(alpha = 0.42f),
     shadow = Color(0xFF1B2A3A).copy(alpha = 0.15f),
     scrim = bg.copy(alpha = 0.55f),
@@ -275,28 +168,47 @@ private fun lightPalette(
     dockFill = Color.White.copy(alpha = 0.58f)
 )
 
-val LocalGlassColors = compositionLocalOf { darkColorScheme() }
+private val LocalWorkspaceColors = compositionLocalOf { darkColorScheme() }
 val LocalGlassPalette = compositionLocalOf { GlassPalette.Fallback }
+internal val LocalInterfaceStyle = compositionLocalOf { InterfaceStyle.COMPACT }
 
-/** 设置页面配色与玻璃材质；换主题时 Activity 会重建，所以按 Context 缓存即可。 */
 @Composable
-fun MiuixTheme(colors: Colors = darkColorScheme(), content: @Composable () -> Unit) {
+internal fun WorkspaceColorProvider(colors: Colors, content: @Composable () -> Unit) {
     val context = LocalContext.current
-    val palette = remember(context, colors) { glassPalette(context) }
+    val style = InterfaceStyle.fromKey(Prefs.uiStyle(context))
+    val palette = remember(context, colors, style) {
+        val glass = glassPalette(context)
+        if (style == InterfaceStyle.MIUIX) {
+            glass.copy(
+                bgTop = colors.background,
+                bgBottom = colors.background,
+                accent2 = colors.primary,
+                text = colors.onSurface,
+                dim = colors.onSurfaceVariantSummary,
+                glassFillTop = colors.surfaceVariant,
+                glassFillBottom = colors.surfaceVariant,
+                glassSunken = colors.surfaceVariant,
+                strokeTop = colors.outline,
+                strokeBottom = colors.outline,
+                stroke = colors.outline,
+                console = colors.background,
+                dockFill = colors.surface
+            )
+        } else glass
+    }
     CompositionLocalProvider(
-        LocalGlassColors provides colors,
-        LocalGlassPalette provides palette,
-        content = content
-    )
+        LocalWorkspaceColors provides colors,
+        LocalInterfaceStyle provides style,
+        LocalGlassPalette provides palette
+    ) {
+        if (style == InterfaceStyle.MIUIX) NativeMiuixTheme(colors = colors, content = content)
+        else content()
+    }
 }
 
 object MiuixTheme {
-    val colorScheme: Colors @Composable get() = LocalGlassColors.current
+    val colorScheme: Colors @Composable get() = LocalWorkspaceColors.current
 }
-
-/** 当前页面是否为紧凑的「KernelSU 参考风格」。 */
-@Composable
-fun kernelStyle(): Boolean = Prefs.uiStyle(LocalContext.current) == "kernel"
 
 /** 动效开关：Robolectric 截图测试和系统「关闭动画」时不跑装饰动画。 */
 object GlassMotion {

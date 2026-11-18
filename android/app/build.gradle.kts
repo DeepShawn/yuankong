@@ -90,7 +90,9 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
-    // Liquid Glass 设计系统基于原生 Compose 构建，不再依赖 miuix。
+    implementation("top.yukonga.miuix.kmp:miuix-android:0.8.8")
+
+    // Liquid Glass uses Compose primitives alongside the miuix style.
     implementation("androidx.compose.foundation:foundation:1.10.3")
     implementation("androidx.compose.ui:ui:1.10.3")
     implementation("androidx.compose.ui:ui-text:1.10.3")

@@ -25,6 +25,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -49,17 +52,18 @@ class WorkspaceDialog private constructor(private val spec:Builder):AlertDialog(
         super.onCreate(state)
         val density=context.resources.displayMetrics.density
         fun px(value:Int)=(value*density).toInt()
+        val corner = if (InterfaceStyle.fromKey(Prefs.uiStyle(context)) == InterfaceStyle.MIUIX) 12 else 16
         fun style(view:View) {
             if(view is android.widget.EditText) {
                 view.setBackgroundResource(R.drawable.input_bg);view.setTextColor(Themes.color(context,R.color.text))
                 view.setHintTextColor(Themes.color(context,R.color.dim));view.setPadding(px(14),px(12),px(14),px(12));view.minHeight=px(48)
             }
-            if(view is MaterialButton) {view.cornerRadius=px(16);view.isAllCaps=false;view.minHeight=px(48)}
+            if(view is MaterialButton) {view.cornerRadius=px(corner);view.isAllCaps=false;view.minHeight=px(48)}
             if(view is ViewGroup)for(index in 0 until view.childCount)style(view.getChildAt(index))
         }
         spec.body?.let{style(it)}
         spec.buttons.forEach { (which,item) -> buttons[which]=MaterialButton(context).apply {
-            text=item.first;isAllCaps=false;minHeight=px(48);cornerRadius=px(16)
+            text=item.first;isAllCaps=false;minHeight=px(48);cornerRadius=px(corner)
             setTextColor(Themes.color(context,if(which==BUTTON_POSITIVE)R.color.on_accent else R.color.text))
             backgroundTintList=android.content.res.ColorStateList.valueOf(Themes.color(context,if(which==BUTTON_POSITIVE)R.color.accent else R.color.surface_variant))
             setOnClickListener { item.second?.onClick(this@WorkspaceDialog,which);dismiss() }
@@ -81,8 +85,16 @@ class WorkspaceDialog private constructor(private val spec:Builder):AlertDialog(
         composition=ComposeView(context).apply {
             setViewTreeLifecycleOwner(activity);setViewTreeSavedStateRegistryOwner(activity)
             setContent { LanCmdMiuixTheme {
-                Card(cornerRadius=28.dp,insideMargin=PaddingValues(20.dp)) {
-                    Text(spec.title?.toString().orEmpty(),fontSize=21.sp,color=MiuixTheme.colorScheme.onSurface)
+                Card(cornerRadius = (corner + 8).dp, insideMargin = PaddingValues(20.dp), elevated = true) {
+                    spec.title?.takeIf { it.isNotBlank() }?.let {
+                        Text(
+                            it.toString(),
+                            modifier = Modifier.padding(bottom = 4.dp).semantics { heading() },
+                            fontSize = 21.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MiuixTheme.colorScheme.onSurface
+                        )
+                    }
                     Column(Modifier.fillMaxWidth().weight(1f,fill=false).heightIn(max=420.dp).verticalScroll(rememberScrollState())) {
                         if(!spec.message.isNullOrBlank())AndroidView(factory={ TextView(it).apply {
                             id=android.R.id.message;text=spec.message;textSize=14f

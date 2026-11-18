@@ -9,12 +9,20 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.aicode.lancmd.net.ConnectionManager
@@ -89,30 +97,51 @@ class FileSearchActivity : MiuixActivity() {
     @Composable
     private fun Screen() = FixedPage("文件搜索") {
         SectionCard {
-            Field(label="文件名、关键词或 *.docx",value=query,onValueChange={typed(it)})
+            Field(label = "文件名、关键词或 *.docx", value = query, onValueChange = ::typed)
             ActionRow {
-                SelectionAction(if(settingsExpanded)"收起设置" else "筛选 / 索引",selected=settingsExpanded,modifier=Modifier.weight(1f)){settingsExpanded=!settingsExpanded}
-                Action(buildLabel,enabled=canBuild,primary=true,modifier=Modifier.weight(1f)){build()}
-                if(canCancel)Action("取消建立",modifier=Modifier.weight(1f)){cancelBuild()}
+                SelectionAction(
+                    if (settingsExpanded) "收起筛选" else "筛选 / 索引",
+                    selected = settingsExpanded,
+                    modifier = Modifier.weight(1f)
+                ) { settingsExpanded = !settingsExpanded }
+                Action(buildLabel, enabled = canBuild, primary = true, modifier = Modifier.weight(1f)) { build() }
+                if (canCancel) Action("取消建立", modifier = Modifier.weight(1f)) { cancelBuild() }
             }
         }
-        if(settingsExpanded) SectionCard {
-            ChoiceField(scopes,"搜索范围",scopeIndex){scopeIndex=it;search(true)}
-            ChoiceField(kinds,"结果类型",kindIndex){kindIndex=it;search(true)}
-            ChoiceField(sorts,"排序方式",sortIndex){sortIndex=it;search(true)}
-            Note(indexInfo)
-            Action("索引范围"){chooseRoots()}
-        }
-        Note("结果 · $pageLabel")
-        LazyColumn(Modifier.fillMaxWidth().weight(1f), state = resultListState) {
-            if(items.isEmpty())item{EmptyNote("没有匹配结果；先建立索引，或修改关键词。")}
-            items(items,key={it.path}) { entry ->
-                RowItem((if(entry.dir)"📁 " else "")+entry.name,"${entry.parent}\n${entry.detail}"){actions(entry)}
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+            val filterHeight = (maxHeight * .43f).coerceAtMost(254.dp)
+            Column {
+                if (settingsExpanded) SectionCard {
+                    Column(Modifier.heightIn(max = filterHeight).verticalScroll(rememberScrollState())) {
+                        ChoiceField(scopes, "搜索范围", scopeIndex) { scopeIndex = it; search(true) }
+                        ChoiceField(kinds, "结果类型", kindIndex) { kindIndex = it; search(true) }
+                        ChoiceField(sorts, "排序方式", sortIndex) { sortIndex = it; search(true) }
+                        Note(indexInfo)
+                        Action("索引范围") { chooseRoots() }
+                    }
+                }
+                LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp), state = resultListState) {
+                    if (items.isEmpty()) item { EmptyNote("没有匹配结果。请建立索引或修改关键词。") }
+                    items(items, key = { it.path }) { entry ->
+                        RowItem(
+                            entry.name,
+                            "${entry.parent}\n${entry.detail}",
+                            leadingIcon = if (entry.dir) R.drawable.ic_folder else R.drawable.ic_file
+                        ) { actions(entry) }
+                    }
+                }
             }
         }
-        ActionRow {
-            Action("上一页",enabled=hasPrevious,modifier=Modifier.weight(1f)){offsetBy(-100)}
-            Action("下一页",enabled=hasNext,modifier=Modifier.weight(1f)){offsetBy(100)}
+        SectionCard {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Action("上一页", enabled = hasPrevious, modifier = Modifier.weight(1f)) { offsetBy(-100) }
+                SectionLabel(pageLabel, Modifier.weight(1.2f).padding(horizontal = 4.dp))
+                Action("下一页", enabled = hasNext, modifier = Modifier.weight(1f)) { offsetBy(100) }
+            }
         }
     }
 

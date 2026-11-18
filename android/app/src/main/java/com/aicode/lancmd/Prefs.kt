@@ -80,9 +80,9 @@ object Prefs {
     fun accent(ctx: Context): String = sp(ctx).getString(KEY_ACCENT, "") ?: ""
     fun tone(ctx: Context): String = sp(ctx).getString(KEY_TONE, "") ?: ""
 
-    fun uiStyle(ctx: Context): String = sp(ctx).getString("ui_style", "kernel")?.takeIf { it in listOf("kernel", "miuix") } ?: "kernel"
+    fun uiStyle(ctx: Context): String = InterfaceStyle.fromKey(sp(ctx).getString("ui_style", null)).key
     fun saveUiStyle(ctx: Context, value: String) {
-        require(value in listOf("kernel", "miuix"))
+        require(InterfaceStyle.entries.any { it.key == value })
         sp(ctx).edit().putString("ui_style", value).apply()
     }
 

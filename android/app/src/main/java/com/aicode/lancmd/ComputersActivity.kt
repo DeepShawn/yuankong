@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.aicode.lancmd.net.ConnectionManager
 import com.aicode.lancmd.net.DiscoverResult
 import com.aicode.lancmd.net.Discovery
@@ -70,18 +72,29 @@ class ComputersActivity:MiuixActivity(),ConnectionManager.Listener {
     private fun connected(c:ComputerBook.Computer)=current.connected && sameComputer(c)
     @androidx.compose.runtime.Composable private fun Screen()=FixedPage("切换电脑与历史") {
         SectionCard {
-            if(current.connected)Note("当前电脑：${current.name.ifBlank{current.host}} · ${current.host}:${current.port}")
-            ActionRow {listOf("电脑列表","连接历史").forEachIndexed{i,label->
-                SelectionAction(label,selected=tab==i,modifier=Modifier.weight(1f)){tab=i}
-            }}
-            Field("搜索备注、原机名或地址",query,{query=it.take(100)})
+            if (current.connected) Note("当前电脑：${current.name.ifBlank { current.host }} · ${current.host}:${current.port}")
             ActionRow {
-                Action(if(scanning)"正在发现…" else "刷新局域网",enabled=!scanning,primary=true,modifier=Modifier.weight(1f)){scan()}
-                Action("清空历史",enabled=book.history.isNotEmpty(),modifier=Modifier.weight(1f)){clearHistory()}
+                listOf("电脑列表", "连接历史").forEachIndexed { index, label ->
+                    SelectionAction(label, selected = tab == index, modifier = Modifier.weight(1f)) { tab = index }
+                }
             }
-            Note(if(lastScan>0)"上次发现：${time(lastScan)}。仅显示响应 LanCmd 发现协议的接收端；未发现不代表电脑关机。"
-                else "点刷新查看同一局域网内运行接收端的电脑。备注和连接历史仅保存在本手机。")
-            Note("点连接或切换后才会更换目标，旧连接会断开。选中的电脑离线时只重试该电脑，电脑上已确认的后台任务仍继续。")
+            Row(
+                Modifier.fillMaxWidth().padding(top = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Field("搜索备注、原机名或地址", query, { query = it.take(100) }, modifier = Modifier.weight(1f))
+                if (tab == 0) {
+                    Action(if (scanning) "发现中…" else "刷新局域网", enabled = !scanning, primary = true) { scan() }
+                } else {
+                    Action("清空历史", enabled = book.history.isNotEmpty()) { clearHistory() }
+                }
+            }
+            if (tab == 0) {
+                val summary = if (lastScan > 0) "上次发现 ${time(lastScan)} · ${found.size} 台响应"
+                    else "刷新可查看同一局域网内的 LanCmd 接收端。"
+                Note(summary)
+            }
         }
         LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
             if(tab==0){

@@ -7,6 +7,7 @@ import android.provider.DocumentsContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -259,9 +260,14 @@ class StorageActivity : MiuixActivity() {
         }
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                .padding(horizontal = 8.dp)
+                .padding(horizontal = 12.dp, vertical = 3.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            crumbs.forEach { crumb -> SelectionAction(crumb.label) { load(crumb.target) } }
+            crumbs.forEachIndexed { index, crumb ->
+                SelectionAction(crumb.label, selected = index == crumbs.lastIndex) {
+                    load(crumb.target)
+                }
+            }
         }
         SectionCard {
             ActionRow {
@@ -276,18 +282,25 @@ class StorageActivity : MiuixActivity() {
                 Action("延迟计划", modifier = Modifier.weight(1f)) { showFilePlans() }
                 Action("U盘管理", modifier = Modifier.weight(1f)) { usbActions() }
             }
-            Field(label = "搜索当前目录", value = query, onValueChange = { query = it; search() })
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Field(label = "搜索当前目录", value = query, modifier = Modifier.weight(1f), onValueChange = { query = it; search() })
+                SelectionAction(
+                    if (multi) "退出多选" else "多选",
+                    selected = multi,
+                    enabled = !operationsBusy,
+                    modifier = Modifier.weight(.4f)
+                ) { toggleMulti() }
+            }
             ActionRow {
                 SelectionAction("磁盘",selected=disksExpanded,modifier=Modifier.weight(1f)){disksExpanded=!disksExpanded}
                 SelectionAction("更多工具",selected=toolsExpanded,modifier=Modifier.weight(1f)){toolsExpanded=!toolsExpanded}
                 SelectionAction("延迟 · $delaySummary", modifier = Modifier.weight(1f)) {
                     FileDelay.choose(this@StorageActivity) { delaySummary = FileDelay.label(this@StorageActivity) }
                 }
-                Action(
-                    if (multi) "退出多选" else "多选",
-                    enabled = !operationsBusy,
-                    modifier = Modifier.weight(1f)
-                ) { toggleMulti() }
             }
         }
         if (multi) SectionCard("批量操作") {
@@ -311,7 +324,7 @@ class StorageActivity : MiuixActivity() {
         }
         if(listingBusy) {Note("目录加载中，返回和其他操作仍可使用…")}
         else if(visible.isEmpty())EmptyNote(listingMessage)
-        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f), state = fileListState) {
+        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 8.dp), state = fileListState) {
             items(visible, key = { joinPath(path, it.optString("name")) }) { item ->
                 val name = item.optString("name")
                 val date = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
@@ -331,7 +344,13 @@ class StorageActivity : MiuixActivity() {
                     enabled = !operationsBusy
                 ) else Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        RowItem(name,summary,enabled=!operationsBusy,onLongClick={fileActions(item)}) {
+                        RowItem(
+                            name,
+                            summary,
+                            enabled = !operationsBusy,
+                            onLongClick = { fileActions(item) },
+                            leadingIcon = if (item.optBoolean("dir")) R.drawable.ic_folder else R.drawable.ic_file
+                        ) {
                             if(item.optBoolean("dir"))load(joinPath(path,name)) else fileActions(item)
                         }
                     }

@@ -7,7 +7,6 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,13 +17,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -35,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.aicode.lancmd.net.AgentClient
@@ -53,15 +56,14 @@ import com.aicode.lancmd.glass.Card
 import com.aicode.lancmd.glass.GlassMotion
 import com.aicode.lancmd.glass.Icon
 import com.aicode.lancmd.glass.LocalGlassPalette
+import com.aicode.lancmd.glass.LocalInterfaceStyle
+import com.aicode.lancmd.glass.MiuixTheme
 import com.aicode.lancmd.glass.Scaffold
 import com.aicode.lancmd.glass.Text
 import com.aicode.lancmd.glass.glassCircle
 import com.aicode.lancmd.glass.glassClickable
 import com.aicode.lancmd.glass.glassSurface
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -69,12 +71,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import java.io.File
@@ -90,6 +91,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
 
     private companion object {
         const val STATE_LOG = "console_log"
+        const val STATE_DRAFT = "command_draft"
         const val STATE_HISTORY = "command_history"
         const val STATE_SHELL = "command_shell"
         const val REQ_NOTIFICATIONS = 100
@@ -193,6 +195,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         // 切换外观主题会重建页面：保留控制台、历史命令与终端类型
         savedInstanceState?.let { state ->
             consoleText = state.getString(STATE_LOG).orEmpty()
+            commandLine = state.getString(STATE_DRAFT).orEmpty()
             state.getStringArrayList(STATE_HISTORY)?.let { history.clear(); history.addAll(it) }
             shell = state.getString(STATE_SHELL) ?: "cmd"
         }
@@ -224,61 +227,68 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
 
     @Composable
     private fun Screen() {
-        Scaffold(
-            topBar = {
-                WorkspaceHeader(
-                    "LanCmd",
-                    subtitle = if (connected) "已连接 · 远程工作区" else "等待连接 · 远程工作区"
-                )
-            }
-        ) { insets ->
-            val top = insets.calculateTopPadding()
-            val bottom = insets.calculateBottomPadding()
-            Box(Modifier.fillMaxSize()) {
-                Column(
-                    Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-                ) {
-                    Spacer(Modifier.height(top))
-                    StatusHero()
-                    if (updateRelease != null) UpdateCard()
-                    if (delayProgress.isNotBlank()) StatusNote(delayProgress, false)
-                    if (overlayVisible) OverlayCard()
-                    ContentSwitch { if (homeCategory == "命令控制台") Console() else Tools() }
-                    if (homeCategory == "命令控制台") CommandCard()
-                    Spacer(Modifier.height(bottom + 92.dp))
+        Scaffold(topBar = { WorkspaceHeader("LanCmd") }) {
+            Column(Modifier.widthIn(max = 1000.dp).fillMaxSize()) {
+                BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                    val console = homeCategory == CATEGORIES.first()
+                    val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+                    val pinComposer = console && maxHeight.value >= 500f * fontScale &&
+                        updateRelease == null && delayProgress.isBlank() &&
+                        (!overlayVisible || (overlayBusy && '\n' !in overlayMessage))
+                    key(homeCategory) {
+                        Column(
+                            Modifier.fillMaxSize().then(
+                                if (pinComposer) Modifier else Modifier.verticalScroll(rememberScrollState())
+                            )
+                        ) {
+                            Column(
+                                Modifier.fillMaxWidth().then(
+                                    if (pinComposer) Modifier.weight(1f) else Modifier
+                                )
+                            ) {
+                                StatusHero()
+                                if (updateRelease != null) UpdateCard()
+                                if (delayProgress.isNotBlank()) StatusNote(delayProgress, false)
+                                if (console) {
+                                    Console(fill = pinComposer, modifier = if (pinComposer) Modifier.weight(1f) else Modifier)
+                                } else Tools()
+                            }
+                            if (console) CommandCard()
+                            Spacer(Modifier.height(4.dp))
+                        }
+                    }
                 }
-                HomeDock(
-                    Modifier.align(Alignment.BottomCenter)
-                        .padding(horizontal = 14.dp)
-                        .padding(bottom = bottom + 8.dp)
-                )
+                HomeDock()
             }
         }
     }
 
-    /** 连接状态主卡：设备、状态与四个入口。 */
     @Composable
     private fun StatusHero() {
         val palette = LocalGlassPalette.current
-        val detail = listOf(deviceSub, latencyText).filter { it.isNotBlank() }.joinToString(" · ")
+        val hasDetails = overlayVisible && '\n' in overlayMessage
+        val detail = if (overlayVisible && overlayMessage.isNotBlank() && !hasDetails) overlayMessage else deviceSub
         SectionCard {
             Row(
-                Modifier.fillMaxWidth().glassClickable { pingOnce() }
-                    .padding(horizontal = 2.dp, vertical = 4.dp),
+                Modifier.fillMaxWidth().glassClickable(role = Role.Button) { pingOnce() }
+                    .padding(horizontal = 2.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                StatusOrb(connected)
-                Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                Box(Modifier.size(38.dp).glassCircle(elevation = 0.dp, accent = true), contentAlignment = Alignment.Center) {
+                    Icon(painterResource(R.drawable.ic_desktop), null, Modifier.size(20.dp), tint = palette.accent)
+                }
+                Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                     Text(
                         deviceName.ifBlank { getString(R.string.status_idle) },
-                        fontSize = 18.sp,
+                        fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        if (detail.isBlank()) (if (connected) "远程工作区已就绪" else "在同一局域网中自动发现电脑") else detail,
-                        fontSize = 11.5.sp,
+                    if (detail.isNotBlank()) Text(
+                        detail,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
                         color = palette.dim,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -287,33 +297,25 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
                 }
                 StatusChip()
             }
-            Spacer(Modifier.height(9.dp))
+            Spacer(Modifier.height(6.dp))
             ActionRow {
-                Action("切换电脑", modifier = Modifier.weight(1f)) { startActivity(Intent(this@MainActivity, ComputersActivity::class.java).putExtra(ComputersActivity.SWITCH_MODE,true)) }
+                Action("切换电脑", primary = true, modifier = Modifier.weight(1f)) {
+                    startActivity(Intent(this@MainActivity, ComputersActivity::class.java)
+                        .putExtra(ComputersActivity.SWITCH_MODE, true))
+                }
                 Action("工具库", modifier = Modifier.weight(1f)) { ToolNavigator.show(this@MainActivity) }
                 Action("外观主题", modifier = Modifier.weight(1f)) { ThemeDialog(this@MainActivity).show() }
                 Action("更多", modifier = Modifier.weight(1f)) { showMenu() }
             }
+            if (overlayVisible && (!overlayBusy || firewallHelpVisible)) ActionRow {
+                if (!overlayBusy) Action("立即重连", modifier = Modifier.weight(1f)) {
+                    note("正在重连…")
+                    ConnectionManager.retryNow()
+                }
+                if (firewallHelpVisible) Action("连不上？", modifier = Modifier.weight(1f)) { showFirewallHelp() }
+            }
         }
-    }
-
-    /** 状态圆点：已连接绿色、连接/重连中琥珀色、断开为灰色。 */
-    @Composable
-    private fun StatusOrb(connected: Boolean) {
-        val palette = LocalGlassPalette.current
-        val tint = when {
-            connected -> palette.ok
-            connection.state == State.CONNECTING || connection.state == State.WAITING -> palette.warn
-            else -> palette.dim
-        }
-        Box(
-            Modifier.size(34.dp).clip(CircleShape)
-                .background(tint.copy(alpha = .10f))
-                .border(1.dp, tint.copy(alpha = .26f), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(Modifier.size(10.dp).clip(CircleShape).background(tint))
-        }
+        if (hasDetails) StatusNote(overlayMessage, false)
     }
 
     /** 右上角状态胶囊：在线时显示延迟，重连/断开时显示状态。 */
@@ -345,7 +347,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
             Box(Modifier.size(5.dp).clip(CircleShape).background(tint))
             Text(
                 label,
-                fontSize = 10.5.sp,
+                fontSize = 11.sp,
                 color = tint,
                 maxLines = 1,
                 modifier = Modifier.padding(start = 5.dp)
@@ -422,89 +424,38 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     }
 
     @Composable
-    private fun OverlayCard() {
+    private fun Console(fill: Boolean, modifier: Modifier = Modifier) {
         val palette = LocalGlassPalette.current
-        SectionCard {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.Top) {
-                Box(
-                    Modifier.padding(top = 3.dp).size(7.dp).clip(CircleShape)
-                        .background(if (overlayBusy) palette.warn else palette.accent)
-                )
-                Text(
-                    overlayMessage,
-                    fontSize = 12.5.sp,
-                    lineHeight = 18.sp,
-                    color = palette.text.copy(alpha = .88f),
-                    modifier = Modifier.padding(start = 9.dp)
-                )
+        SectionCard(modifier = modifier) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SectionLabel("命令控制台", Modifier.weight(1f).padding(start = 2.dp))
+                Action("清空控制台", enabled = consoleText.isNotBlank()) { consoleText = "" }
             }
-            if (!overlayBusy || firewallHelpVisible) {
-                Spacer(Modifier.height(6.dp))
-                ActionRow {
-                    if (!overlayBusy) Action("立即重连", primary = true, modifier = Modifier.weight(1f)) {
-                        note("正在重连…")
-                        ConnectionManager.retryNow()
-                    }
-                    if (firewallHelpVisible) Action("连不上？", modifier = Modifier.weight(1f)) {
-                        showFirewallHelp()
-                    }
-                }
-            }
-        }
-    }
-
-    /** 分类切换：内容轻推 + 缩放回弹，不隐藏内容，语义与测试保持稳定。 */
-    @Composable
-    private fun ContentSwitch(content: @Composable () -> Unit) {
-        var last by remember { mutableStateOf(homeCategory) }
-        val shift = remember { Animatable(0f) }
-        LaunchedEffect(homeCategory) {
-            if (last != homeCategory) {
-                last = homeCategory
-                shift.snapTo(1f)
-                shift.animateTo(0f, animationSpec = tween(280, easing = FastOutSlowInEasing))
-            }
-        }
-        Column(
-            Modifier.fillMaxWidth().graphicsLayer {
-                translationY = shift.value * 10.dp.toPx()
-                val scale = 1f - shift.value * 0.008f
-                scaleX = scale
-                scaleY = scale
-            }
-        ) { content() }
-    }
-
-    @Composable
-    private fun Console() {
-        val palette = LocalGlassPalette.current
-        SectionCard("命令控制台") {
-            if (consoleText.isBlank()) EmptyNote("连接后在下方输入命令，输出显示在这里。")
-            else {
-                val shape = RoundedCornerShape(12.dp)
-                Column(
-                    Modifier.fillMaxWidth().clip(shape).background(palette.console)
-                        .border(1.dp, palette.stroke.copy(alpha = .8f), shape)
-                        .padding(horizontal = 11.dp, vertical = 9.dp)
-                ) {
-                    Column(
-                        Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())
-                    ) {
+            val shape = RoundedCornerShape(13.dp)
+            val outputSize = if (fill) Modifier.weight(1f) else Modifier.height(172.dp)
+            Box(
+                Modifier.fillMaxWidth().then(outputSize).padding(top = 4.dp)
+                    .clip(shape).background(palette.console)
+                    .border(1.dp, palette.stroke, shape)
+            ) {
+                if (consoleText.isBlank()) {
+                    EmptyNote("连接后在下方输入命令，输出显示在这里。")
+                } else {
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
                         SelectionContainer {
                             Text(
                                 consoleText.takeLast(8000),
-                                fontSize = 12.sp,
-                                lineHeight = 17.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = palette.text.copy(alpha = .90f)
+                                fontSize = 13.sp,
+                                lineHeight = 19.sp,
+                                fontFamily = FontFamily.Monospace
                             )
                         }
                     }
                 }
-                Spacer(Modifier.height(5.dp))
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Action("清空控制台") { consoleText = "" }
             }
         }
     }
@@ -513,7 +464,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     private fun CommandCard() {
         SectionCard {
             Field(
-                label = "输入命令，回车发送",
+                label = "输入命令",
                 value = commandLine,
                 onValueChange = { commandLine = it.take(8192) }
             )
@@ -549,86 +500,81 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
 
     @Composable
     private fun Tools() {
-        if (kernelStyle()) {
-            SectionCard {
-                toolGroups[homeCategory].orEmpty().forEach { tool ->
-                    val entry = ToolNavigator.tools.firstOrNull { it.title == tool.label }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier.padding(start = 6.dp).size(34.dp).glassCircle(elevation = 0.dp, accent = true),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                painterResource(entry?.icon ?: toolIcon(tool.label)),
-                                null,
-                                modifier = Modifier.size(18.dp),
-                                tint = LocalGlassPalette.current.accent
-                            )
-                        }
-                        Column(Modifier.weight(1f)) { RowItem(tool.label, entry?.detail) { openTool(tool.label) } }
+        val tools = toolGroups[homeCategory].orEmpty()
+        val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+        if (LocalInterfaceStyle.current != InterfaceStyle.GLASS) {
+            SectionCard(homeCategory) {
+                tools.forEachIndexed { index, tool ->
+                    if (index > 0) {
+                        Spacer(Modifier.fillMaxWidth().padding(horizontal = 10.dp)
+                            .height(1.dp).background(MiuixTheme.colorScheme.dividerLine))
                     }
+                    RowItem(tool.label, toolDetail(tool.label), leadingIcon = toolIcon(tool.label)) { openTool(tool.label) }
                 }
             }
         } else {
-            toolGroups[homeCategory].orEmpty().chunked(2).forEach { group ->
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(9.dp)
-                ) {
-                    group.forEach { tool -> ToolTile(tool, Modifier.weight(1f)) }
-                    if (group.size == 1) Spacer(Modifier.weight(1f))
+            SectionLabel(homeCategory, Modifier.padding(start = 22.dp, top = 10.dp, bottom = 3.dp))
+            BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                val columns = (maxWidth.value / (152f * fontScale)).toInt().coerceIn(1, 3)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    tools.chunked(columns).forEach { group ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            group.forEach { tool -> ToolTile(tool, Modifier.weight(1f)) }
+                            repeat(columns - group.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
                 }
             }
         }
     }
 
-    /** 首页工具磁贴：玻璃卡片 + 强调色玻璃图标底座。 */
     @Composable
     private fun ToolTile(tool: Tool, modifier: Modifier) {
         val palette = LocalGlassPalette.current
         Card(
-            modifier = modifier,
-            cornerRadius = 22.dp,
+            modifier = modifier.heightIn(min = 130.dp),
+            cornerRadius = 20.dp,
             insideMargin = PaddingValues(14.dp),
             onClick = { openTool(tool.label) }
         ) {
-            Box(
-                Modifier.size(40.dp).glassCircle(elevation = 0.dp, accent = true),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    painterResource(toolIcon(tool.label)),
-                    null,
-                    modifier = Modifier.size(20.dp),
-                    tint = palette.accent
+            Box(Modifier.size(36.dp).glassCircle(elevation = 0.dp, accent = true), contentAlignment = Alignment.Center) {
+                Icon(painterResource(toolIcon(tool.label)), null, Modifier.size(18.dp), tint = palette.accent)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(tool.label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            toolDetail(tool.label)?.let {
+                Text(
+                    it,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    color = palette.dim,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 3.dp)
                 )
             }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                tool.label,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                "打开工具  ›",
-                fontSize = 10.5.sp,
-                color = palette.dim,
-                modifier = Modifier.padding(top = 4.dp)
-            )
         }
     }
 
-    private fun toolIcon(label: String): Int = when (label) {
-        "文件管理", "文件搜索" -> R.drawable.ic_folder
-        "远程桌面", "桌面背景" -> R.drawable.ic_desktop
-        "摄像头", "隐私设备", "录音 / 录屏" -> R.drawable.ic_camera
-        "应用锁" -> R.drawable.ic_lock
-        "浏览器" -> R.drawable.ic_browser
-        "U盘与设备" -> R.drawable.ic_usb
-        "按键", "手势回放" -> R.drawable.ic_keyboard
-        "消息" -> R.drawable.ic_message
+    private fun toolDetail(label: String): String? = toolEntry(label)?.detail
+
+    private fun toolEntry(label: String): ToolNavigator.Tool? {
+        val title = when (label) {
+            "摄像头" -> "摄像头共享"
+            "按键" -> "虚拟键盘"
+            "消息" -> "发送消息"
+            "U盘与设备" -> "U盘与移动设备"
+            "隐私设备" -> "摄像头与麦克风"
+            "自我维护" -> "接收端自我维护"
+            "录音 / 录屏" -> "录音与录屏"
+            else -> label
+        }
+        return ToolNavigator.tools.firstOrNull { it.title == title }
+    }
+
+    private fun toolIcon(label: String): Int = toolEntry(label)?.icon ?: when (label) {
+        "剪贴板" -> R.drawable.ic_clipboard
+        "电脑音量" -> R.drawable.ic_volume
         else -> R.drawable.ic_process
     }
 
@@ -751,66 +697,63 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
         startActivity(Intent(this, type).putExtra("kind", kind))
     }
 
-    /** 底部悬浮玻璃 Dock：选中的胶囊滑块用弹簧动画跟随。 */
     @Composable
-    private fun HomeDock(modifier: Modifier = Modifier) {
+    private fun HomeDock() {
         val labels = listOf("控制台", "共享", "文件", "系统", "自动化")
         val icons = listOf(R.drawable.ic_terminal, R.drawable.ic_desktop, R.drawable.ic_folder, R.drawable.ic_process, R.drawable.ic_history)
         val palette = LocalGlassPalette.current
-        BoxWithConstraints(
-            modifier = modifier
-                .fillMaxWidth()
-                .height(58.dp)
-                .glassSurface(
-                    shape = RoundedCornerShape(24.dp),
-                    elevation = 16.dp,
-                    glow = palette.accent.copy(alpha = if (palette.light) .05f else .03f)
-                )
-        ) {
+        val solid = LocalInterfaceStyle.current == InterfaceStyle.MIUIX
+        val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+        val dockHeight = 58.dp + ((fontScale - 1f) * 26f).dp
+        val modifier = if (solid) Modifier.background(MiuixTheme.colorScheme.surfaceContainer) else
+            Modifier.padding(horizontal = 12.dp, vertical = 6.dp).glassSurface(
+                shape = RoundedCornerShape(22.dp),
+                elevation = 8.dp,
+                fillTop = palette.dockFill,
+                fillBottom = palette.glassFillBottom,
+                glow = palette.accent.copy(alpha = .06f)
+            )
+        BoxWithConstraints(Modifier.fillMaxWidth().then(modifier).height(dockHeight)) {
             val itemWidth = maxWidth / labels.size
             val index = CATEGORIES.indexOf(homeCategory).coerceAtLeast(0)
-            val indicatorX by animateDpAsState(
+            val animate = remember { GlassMotion.animationsEnabled(this@MainActivity) }
+            val animatedX by animateDpAsState(
                 targetValue = itemWidth * index.toFloat(),
-                animationSpec = GlassMotion.slideDp,
+                animationSpec = if (animate) GlassMotion.slideDp else androidx.compose.animation.core.snap(),
                 label = "dock-indicator"
             )
-            val indicatorShape = RoundedCornerShape(17.dp)
+            val shape = RoundedCornerShape(if (solid) 14.dp else 17.dp)
             Box(
-                Modifier
-                    .offset(x = indicatorX)
-                    .width(itemWidth)
-                    .fillMaxHeight()
+                Modifier.offset(x = animatedX).width(itemWidth).fillMaxHeight()
                     .padding(horizontal = 4.dp, vertical = 5.dp)
                     .glassSurface(
-                        shape = indicatorShape,
-                        fillTop = palette.accentGlass.copy(alpha = .55f),
-                        fillBottom = palette.accentGlass.copy(alpha = .16f),
+                        shape = shape,
+                        fillTop = palette.accentGlass,
+                        fillBottom = palette.accentGlass.copy(alpha = .07f),
                         elevation = 0.dp,
                         stroke = false
                     )
-                    .border(1.dp, palette.accentStroke.copy(alpha = .30f), indicatorShape)
             )
-            Row(Modifier.fillMaxWidth().fillMaxHeight()) {
+            Row(Modifier.fillMaxSize().selectableGroup()) {
                 labels.forEachIndexed { i, label ->
                     val selected = i == index
+                    val tint = if (selected) palette.accent else palette.dim
                     Column(
                         Modifier.weight(1f).fillMaxHeight()
-                            .selectable(selected = selected, role = Role.Tab, onClick = { homeCategory = CATEGORIES[i] })
-                            .padding(top = 7.dp, bottom = 5.dp),
+                            .selectable(selected, role = Role.Tab, onClick = { homeCategory = CATEGORIES[i] })
+                            .padding(horizontal = 2.dp, vertical = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        Icon(
-                            painterResource(icons[i]),
-                            label,
-                            modifier = Modifier.size(18.dp),
-                            tint = if (selected) palette.accent else palette.dim.copy(alpha = .9f)
-                        )
+                        Icon(painterResource(icons[i]), null, Modifier.size(20.dp), tint = tint)
                         Text(
-                            labels[i],
-                            fontSize = 9.5.sp,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (selected) palette.accent else palette.dim,
+                            label,
+                            fontSize = 11.sp,
+                            lineHeight = 13.sp,
+                            maxLines = 2,
+                            textAlign = TextAlign.Center,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                            color = tint,
                             modifier = Modifier.padding(top = 3.dp)
                         )
                     }
@@ -841,6 +784,7 @@ class MainActivity : MiuixActivity(), ConnectionManager.Listener {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("homeCategory", homeCategory)
         outState.putString(STATE_LOG, consoleText.takeLast(60_000))
+        outState.putString(STATE_DRAFT, commandLine.take(8192))
         outState.putStringArrayList(STATE_HISTORY, ArrayList(history))
         outState.putString(STATE_SHELL, shell)
         super.onSaveInstanceState(outState)
